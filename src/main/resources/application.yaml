@@ -6,15 +6,21 @@ spring:
       resourceserver:
         jwt:
           issuer-uri: ${OIDC_ISSUER_URI}
-datasource:
+  datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
-jpa:
+  jpa:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+  mvc:
+    problemdetails:
+      enabled: true
+  web:
+    error:
+      include-stacktrace: never
 
 cdrm:
   security:

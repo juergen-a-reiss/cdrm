@@ -6,6 +6,7 @@ import org.mockito.BDDMockito.given
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest
 import org.springframework.context.annotation.Import
+import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.security.core.authority.SimpleGrantedAuthority
 import org.springframework.security.oauth2.jwt.JwtDecoder
@@ -16,7 +17,10 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.content
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
+import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 import java.util.UUID
 
@@ -91,5 +95,18 @@ class StageControllerSecurityTest {
     @Test
     fun `DELETE stages without admin role is forbidden`() {
         mockMvc.perform(delete("/stages/${UUID.randomUUID()}").with(jwt())).andExpect(status().isForbidden)
+    }
+
+    @Test
+    fun `service errors render as RFC 9457 problem details without a stack trace`() {
+        val id = UUID.randomUUID()
+        given(service.findById(id)).willThrow(ResponseStatusException(HttpStatus.NOT_FOUND, "Stage not found"))
+
+        mockMvc.perform(get("/stages/$id").with(jwt()))
+            .andExpect(status().isNotFound)
+            .andExpect(content().contentType(MediaType.APPLICATION_PROBLEM_JSON))
+            .andExpect(jsonPath("$.status").value(404))
+            .andExpect(jsonPath("$.detail").value("Stage not found"))
+            .andExpect(jsonPath("$.trace").doesNotExist())
     }
 }
