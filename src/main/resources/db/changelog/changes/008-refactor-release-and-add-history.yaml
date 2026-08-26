@@ -1,0 +1,57 @@
+databaseChangeLog:
+  - changeSet:
+      id: 008-refactor-release-and-add-history
+      author: juergen
+      changes:
+        - dropColumn:
+            tableName: release
+            columnName: name
+        - addColumn:
+            tableName: release
+            columns:
+              - column:
+                  name: binary_url
+                  type: text
+                  constraints:
+                    nullable: false
+        - createTable:
+            tableName: release_history
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              # No FK to release.id on purpose: history must survive release deletion.
+              - column:
+                  name: release_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: binary_url
+                  type: text
+                  constraints:
+                    nullable: false
+              - column:
+                  name: stage_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_by
+                  type: uuid
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: release_history
+            baseColumnNames: stage_id
+            constraintName: fk_release_history_stage
+            referencedTableName: stage
+            referencedColumnNames: id

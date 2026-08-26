@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: cdrm
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${OIDC_ISSUER_URI}
+datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+cdrm:
+  security:
+    client-id: ${OIDC_CLIENT_ID:cdrm}

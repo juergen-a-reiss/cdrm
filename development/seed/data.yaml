@@ -1,0 +1,97 @@
+# kubernetes_context is the kubeconfig context name to deploy into — resolved against
+# the backend's kubeconfig file (KUBECONFIG env var, default ~/.kube/config) at deploy
+# time. "minikube" is what `minikube start` configures by default.
+#
+# All four stages share that single minikube cluster, so namespace_prefix keeps them
+# from colliding: a workload with kubernetesNameSpace "platform" ends up as
+# "dev-platform" in the development stage, "qa-platform" in qa, etc. The resulting
+# namespaces must exist in the cluster, e.g. `kubectl create namespace dev-platform`.
+stages:
+  - name: development
+    description: Development environment
+    order: 1
+    deployment_policy: IMMEDIATE
+    kubernetes_context: minikube
+    namespace_prefix: dev-
+  - name: qa
+    description: Quality assurance environment
+    order: 2
+    deployment_policy: IMMEDIATE
+    kubernetes_context: minikube
+    namespace_prefix: qa-
+  - name: staging
+    description: Pre-production environment
+    order: 3
+    deployment_policy: IMMEDIATE
+    kubernetes_context: minikube
+    namespace_prefix: staging-
+  - name: production
+    description: Production environment
+    order: 4
+    deployment_policy: SCHEDULED
+    kubernetes_context: minikube
+    namespace_prefix: prod-
+
+products:
+  - name: Platform
+    description: Core platform services
+    stage_deployment_crons:
+      - stage: production
+        cron: "0 0 2 * * *"
+  - name: Payments
+    description: Payment processing services
+    stage_deployment_crons:
+      - stage: production
+        cron: "0 0 3 * * *"
+  - name: Mobile
+    description: Mobile backend services
+    # No production deployment time configured yet on purpose — demonstrates the
+    # "release can't be promoted into an unconfigured SCHEDULED stage" behavior.
+
+workloads:
+  - name: platform-api
+    product: Platform
+    description: Platform API workload
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: platform
+  - name: platform-worker
+    product: Platform
+    description: Platform background worker workload
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: platform
+  - name: payments-gateway
+    product: Payments
+    description: Payment gateway workload
+    kubernetes: true
+    kubernetes_kind: STATEFUL_SET
+    kubernetes_namespace: website
+  - name: payments-ledger
+    product: Payments
+    description: Payment ledger workload
+    kubernetes: false
+  - name: mobile-bff
+    product: Mobile
+    description: Mobile backend-for-frontend workload
+    kubernetes: false
+
+releases:
+  - workload: platform-api
+    binary_url: https://hub.docker.com/nginx:1.30-alpine
+    description: Initial release
+  - workload: platform-api
+    binary_url: https://hub.docker.com/nginx:1.31-alpine
+    description: Adds pagination support
+  - workload: platform-worker
+    binary_url: https://hub.docker.com/nginx:1.30-alpine
+    description: Initial release
+  - workload: payments-gateway
+    binary_url: https://hub.docker.com/nginx:1.30-alpine
+    description: Initial release
+  - workload: payments-ledger
+    binary_url: https://hub.docker.com/nginx:1.30-alpine
+    description: Initial release
+  - workload: mobile-bff
+    binary_url: https://artifacts.example.com/mobile-bff/1.0.0/mobile-bff.tar.gz
+    description: Initial release

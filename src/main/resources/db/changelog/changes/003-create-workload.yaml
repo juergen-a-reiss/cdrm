@@ -1,0 +1,66 @@
+databaseChangeLog:
+  - changeSet:
+      id: 003-create-workload
+      author: juergen
+      changes:
+        - createTable:
+            tableName: workload
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: name
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: product_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: description
+                  type: text
+              - column:
+                  name: kubernetes
+                  type: boolean
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: kubernetes_kind
+                  type: varchar(50)
+              - column:
+                  name: name_space
+                  type: varchar(128)
+              - column:
+                  name: created_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: modified_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_by
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: modified_by
+                  type: uuid
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: workload
+            baseColumnNames: product_id
+            constraintName: fk_workload_product
+            referencedTableName: product
+            referencedColumnNames: id

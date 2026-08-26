@@ -1,0 +1,64 @@
+databaseChangeLog:
+  - changeSet:
+      id: 009-add-deployment-scheduling
+      author: juergen
+      changes:
+        - addColumn:
+            tableName: stage
+            columns:
+              - column:
+                  name: deployment_policy
+                  type: varchar(20)
+                  defaultValue: IMMEDIATE
+                  constraints:
+                    nullable: false
+        - addColumn:
+            tableName: release_history
+            columns:
+              - column:
+                  name: deployed_at
+                  type: timestamp with time zone
+        - createTable:
+            tableName: product_stage
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: product_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: stage_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              # Only rows for stages a product has actually configured a time for — sparse,
+              # like workload_stage. No configured row = releases can't promote into that
+              # stage for that product while its policy is SCHEDULED.
+              - column:
+                  name: deployment_cron
+                  type: varchar(120)
+                  constraints:
+                    nullable: false
+        - addUniqueConstraint:
+            tableName: product_stage
+            columnNames: product_id, stage_id
+            constraintName: uq_product_stage
+        - addForeignKeyConstraint:
+            baseTableName: product_stage
+            baseColumnNames: product_id
+            constraintName: fk_product_stage_product
+            referencedTableName: product
+            referencedColumnNames: id
+            onDelete: CASCADE
+        - addForeignKeyConstraint:
+            baseTableName: product_stage
+            baseColumnNames: stage_id
+            constraintName: fk_product_stage_stage
+            referencedTableName: stage
+            referencedColumnNames: id

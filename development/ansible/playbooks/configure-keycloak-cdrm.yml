@@ -1,0 +1,228 @@
+---
+# Keycloak Admin REST API: https://www.keycloak.org/docs-api/latest/rest-api/
+- name: Configure Keycloak CDRM realm
+  hosts: localhost
+  gather_facts: false
+  vars:
+    keycloak_url: "http://keycloak:8080" # The internal port is 8080.
+    keycloak_admin_user: "admin"
+    keycloak_admin_password: "admin"
+    realm_name: "cdrm"
+    realm_display_name: "Continuous Delivery Release Management"
+    frontend_url: "http://localhost:5173"
+    # 8h access tokens — manual testing convenience only, do not use in production.
+    access_token_lifespan_seconds: 28800
+    client_name: "cdrm"
+    test_user_password: "test"
+    client_roles:
+      - cdrm-admin
+      - cdrm-developer
+      - cdrm-productowner
+    user_names:
+      cdrm-admin:
+        firstName: John
+        lastName: Doe
+      cdrm-developer:
+        firstName: Mr.
+        lastName: Code
+      cdrm-productowner:
+        firstName: Product
+        lastName: Owner
+
+  tasks:
+    - name: Obtain admin access token
+      uri:
+        url: "{{ keycloak_url }}/realms/master/protocol/openid-connect/token"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          client_id: admin-cli
+          username: "{{ keycloak_admin_user }}"
+          password: "{{ keycloak_admin_password }}"
+          grant_type: password
+        status_code: 200
+      register: auth
+
+    - name: Create realm '{{ realm_name }}'
+      uri:
+        url: "{{ keycloak_url }}/admin/realms"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          realm: "{{ realm_name }}"
+          enabled: true
+          displayName: "{{ realm_display_name }}"
+        status_code: [201, 409]
+
+    - name: Configure realm '{{ realm_name }}'
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          realm: "{{ realm_name }}"
+          accessTokenLifespan: "{{ access_token_lifespan_seconds }}"
+        status_code: 204
+
+    - name: Create client '{{ client_name }}'
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/clients"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          clientId: "{{ client_name }}"
+          enabled: true
+          publicClient: true
+          standardFlowEnabled: true
+          directAccessGrantsEnabled: true
+          redirectUris:
+            - "{{ frontend_url }}/auth/callback"
+            - "{{ frontend_url }}/auth/silent-renew"
+          webOrigins:
+            - "{{ frontend_url }}"
+          attributes:
+            pkce.code.challenge.method: "S256"
+            post.logout.redirect.uris: "{{ frontend_url }}"
+        status_code: [201, 409]
+
+    - name: Fetch client UUID for '{{ client_name }}'
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/clients?clientId={{ client_name }}"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+        status_code: 200
+      register: client_info
+
+    - name: Configure client '{{ client_name }}'
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/clients/{{ client_info.json[0].id }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          clientId: "{{ client_name }}"
+          enabled: true
+          publicClient: true
+          standardFlowEnabled: true
+          directAccessGrantsEnabled: true
+          redirectUris:
+            - "{{ frontend_url }}/auth/callback"
+            - "{{ frontend_url }}/auth/silent-renew"
+          webOrigins:
+            - "{{ frontend_url }}"
+          attributes:
+            pkce.code.challenge.method: "S256"
+            post.logout.redirect.uris: "{{ frontend_url }}"
+        status_code: 204
+
+    - name: Create client roles
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/clients/{{ client_info.json[0].id }}/roles"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ item }}"
+        status_code: [201, 409]
+      loop: "{{ client_roles }}"
+
+    - name: Create test users (one per role)
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/users"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          username: "{{ item }}"
+          email: "{{ item }}@cdrm.local"
+          enabled: true
+          emailVerified: true
+          firstName: "{{ user_names[item].firstName }}"
+          lastName: "{{ user_names[item].lastName }}"
+        status_code: [201, 409]
+      loop: "{{ client_roles }}"
+
+    - name: Fetch all realm users
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/users?max=200"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+        status_code: 200
+      register: realm_users
+
+    - name: Build username → UUID map
+      set_fact:
+        user_id_map: >-
+          {{ dict(realm_users.json | map(attribute='username') | zip(realm_users.json | map(attribute='id'))) }}
+
+    - name: Set test user names
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/users/{{ user_id_map[item] }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          firstName: "{{ user_names[item].firstName }}"
+          lastName: "{{ user_names[item].lastName }}"
+        status_code: 204
+      loop: "{{ client_roles }}"
+
+    - name: Set test user passwords (non-temporary)
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/users/{{ user_id_map[item] }}/reset-password"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          type: password
+          value: "{{ test_user_password }}"
+          temporary: false
+        status_code: 204
+      loop: "{{ client_roles }}"
+
+    - name: Fetch all client roles
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/clients/{{ client_info.json[0].id }}/roles"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+        status_code: 200
+      register: all_roles
+
+    - name: Build role name → representation map
+      set_fact:
+        role_map: >-
+          {{ dict(all_roles.json | map(attribute='name') | zip(all_roles.json)) }}
+
+    - name: Assign matching client role to each test user
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/users/{{ user_id_map[item] }}/role-mappings/clients/{{ client_info.json[0].id }}"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body: "{{ [role_map[item]] }}"
+        status_code: 204
+      loop: "{{ client_roles }}"
