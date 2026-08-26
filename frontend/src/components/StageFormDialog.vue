@@ -7,7 +7,8 @@
 import { ref, watch } from 'vue'
 import { ApiError } from '../api/http'
 import { stagesApi } from '../api/stages'
-import type { DeploymentPolicy, StageResponse } from '../api/types'
+import { clustersApi } from '../api/clusters'
+import type { ClusterResponse, DeploymentPolicy, StageResponse } from '../api/types'
 
 const props = defineProps<{
   modelValue: boolean
@@ -30,20 +31,27 @@ const order = ref(0)
 const deploymentPolicy = ref<DeploymentPolicy>('IMMEDIATE')
 const kubernetesContext = ref('')
 const namespacePrefix = ref('')
+const clusterIds = ref<string[]>([])
+const clusters = ref<ClusterResponse[]>([])
 const saving = ref(false)
 const error = ref<string | null>(null)
 
 watch(
   () => [props.modelValue, props.stage] as const,
-  ([open, stage]) => {
-    if (open) {
-      name.value = stage?.name ?? ''
-      description.value = stage?.description ?? ''
-      order.value = stage?.order ?? 0
-      deploymentPolicy.value = stage?.deploymentPolicy ?? 'IMMEDIATE'
-      kubernetesContext.value = stage?.kubernetesContext ?? ''
-      namespacePrefix.value = stage?.namespacePrefix ?? ''
-      error.value = null
+  async ([open, stage]) => {
+    if (!open) return
+    error.value = null
+    name.value = stage?.name ?? ''
+    description.value = stage?.description ?? ''
+    order.value = stage?.order ?? 0
+    deploymentPolicy.value = stage?.deploymentPolicy ?? 'IMMEDIATE'
+    kubernetesContext.value = stage?.kubernetesContext ?? ''
+    namespacePrefix.value = stage?.namespacePrefix ?? ''
+    clusterIds.value = stage?.clusters.map((cluster) => cluster.id) ?? []
+    try {
+      clusters.value = await clustersApi.list()
+    } catch (e) {
+      error.value = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to load form data'
     }
   },
   { immediate: true },
@@ -64,6 +72,7 @@ async function save() {
       deploymentPolicy: deploymentPolicy.value,
       kubernetesContext: kubernetesContext.value.trim() || null,
       namespacePrefix: namespacePrefix.value.trim() || null,
+      clusterIds: clusterIds.value,
     }
     if (props.stage) {
       await stagesApi.update(props.stage.id, request)
@@ -101,6 +110,19 @@ async function save() {
           label="Namespace Prefix"
           placeholder="e.g. dev-"
           hint="Prepended to a workload's namespace — only needed if this stage shares a cluster with other stages"
+          persistent-hint
+          class="mt-4"
+        />
+        <v-select
+          v-model="clusterIds"
+          :items="clusters"
+          item-title="name"
+          item-value="id"
+          label="Clusters"
+          multiple
+          chips
+          closable-chips
+          hint="Clusters this stage deploys into"
           persistent-hint
           class="mt-4"
         />

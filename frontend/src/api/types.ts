@@ -3,6 +3,35 @@
 
 export type DeploymentPolicy = 'IMMEDIATE' | 'SCHEDULED'
 
+export type ClusterType = 'K8S' | 'PROXMOX'
+
+export interface ClusterRequest {
+  name: string
+  description: string | null
+  clusterType: ClusterType
+  url: string
+  k8sNamespaces?: string | null
+}
+
+export interface ClusterResponse {
+  id: string
+  name: string
+  description: string | null
+  clusterType: ClusterType
+  url: string
+  k8sNamespaces: string | null
+  createdAt: string
+  modifiedAt: string
+  createdBy: string
+  modifiedBy: string
+}
+
+export interface StageClusterInfo {
+  id: string
+  name: string
+  clusterType: ClusterType
+}
+
 export interface StageRequest {
   name: string
   description: string | null
@@ -14,6 +43,8 @@ export interface StageRequest {
   // Prepended to a workload's kubernetesNameSpace when deploying into this stage —
   // only needed when multiple stages share the same cluster (kubernetesContext).
   namespacePrefix?: string | null
+  // Omit/null = leave existing cluster links unchanged; [] = unlink from all clusters.
+  clusterIds?: string[] | null
 }
 
 export interface StageResponse {
@@ -24,6 +55,7 @@ export interface StageResponse {
   deploymentPolicy: DeploymentPolicy
   kubernetesContext: string | null
   namespacePrefix: string | null
+  clusters: StageClusterInfo[]
   createdAt: string
   modifiedAt: string
   createdBy: string

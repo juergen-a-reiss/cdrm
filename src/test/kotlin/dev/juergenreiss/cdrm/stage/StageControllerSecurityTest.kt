@@ -37,7 +37,7 @@ class StageControllerSecurityTest {
     @MockitoBean
     private lateinit var jwtDecoder: JwtDecoder
 
-    private val adminAuthority = SimpleGrantedAuthority("ROLE_cdrm-admin")
+    private val adminAuthority = SimpleGrantedAuthority("ROLE_cdrm-devops")
 
     private fun sampleResponse() = StageResponse(
         id = UUID.randomUUID(),
@@ -47,6 +47,7 @@ class StageControllerSecurityTest {
         deploymentPolicy = DeploymentPolicy.IMMEDIATE,
         kubernetesContext = null,
         namespacePrefix = null,
+        clusters = emptyList(),
         createdAt = Instant.now(),
         modifiedAt = Instant.now(),
         createdBy = UUID.randomUUID(),

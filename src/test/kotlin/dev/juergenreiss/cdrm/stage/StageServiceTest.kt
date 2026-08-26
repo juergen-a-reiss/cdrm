@@ -1,5 +1,8 @@
 package dev.juergenreiss.cdrm.stage
 
+import dev.juergenreiss.cdrm.cluster.Cluster
+import dev.juergenreiss.cdrm.cluster.ClusterRepository
+import dev.juergenreiss.cdrm.cluster.ClusterType
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
@@ -16,6 +19,7 @@ import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.AuditorAware
 import org.springframework.data.domain.Sort
 import org.springframework.web.server.ResponseStatusException
+import java.net.URI
 import java.time.Instant
 import java.util.Optional
 import java.util.UUID
@@ -27,13 +31,19 @@ class StageServiceTest {
     private lateinit var repository: StageRepository
 
     @Mock
+    private lateinit var clusterRepository: ClusterRepository
+
+    @Mock
+    private lateinit var stageClusterRepository: StageClusterRepository
+
+    @Mock
     private lateinit var currentUser: AuditorAware<UUID>
 
     private lateinit var service: StageService
 
     @BeforeEach
     fun setUp() {
-        service = StageService(repository, currentUser)
+        service = StageService(repository, clusterRepository, stageClusterRepository, currentUser)
     }
 
     private fun persistedStage(
@@ -54,6 +64,18 @@ class StageServiceTest {
         modifiedAt = Instant.now(),
         createdBy = createdBy,
         modifiedBy = modifiedBy,
+    )
+
+    private fun persistedCluster(name: String = "Cluster") = Cluster(
+        id = UUID.randomUUID(),
+        name = name,
+        description = null,
+        clusterType = ClusterType.K8S,
+        url = URI("https://$name.example.com").toURL(),
+        createdAt = Instant.now(),
+        modifiedAt = Instant.now(),
+        createdBy = UUID.randomUUID(),
+        modifiedBy = UUID.randomUUID(),
     )
 
     @Test
@@ -149,6 +171,97 @@ class StageServiceTest {
 
         assertEquals(404, exception.statusCode.value())
         verify(repository, never()).save(any())
+    }
+
+    @Test
+    fun `update reconciles cluster links to match the requested set`() {
+        val stageId = UUID.randomUUID()
+        val stage = persistedStage(id = stageId)
+        given(repository.findById(stageId)).willReturn(Optional.of(stage))
+        given(repository.save(stage)).willReturn(stage)
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+
+        val keep = persistedCluster("keep")
+        val add = persistedCluster("add")
+        val remove = persistedCluster("remove")
+
+        given(stageClusterRepository.findByStageId(stageId)).willReturn(
+            listOf(
+                StageCluster(stageId = stageId, clusterId = keep.id!!),
+                StageCluster(stageId = stageId, clusterId = remove.id!!),
+            )
+        )
+
+        val requestedIds = listOf(keep.id!!, add.id!!)
+        given(clusterRepository.findAllById(requestedIds.toSet())).willReturn(listOf(keep, add))
+
+        service.update(
+            stageId,
+            StageRequest(
+                name = "Draft",
+                description = null,
+                order = 1,
+                deploymentPolicy = DeploymentPolicy.IMMEDIATE,
+                clusterIds = requestedIds,
+            )
+        )
+
+        @Suppress("UNCHECKED_CAST")
+        val removeCaptor = ArgumentCaptor.forClass(List::class.java) as ArgumentCaptor<List<StageCluster>>
+        verify(stageClusterRepository).deleteAll(removeCaptor.capture())
+        assertEquals(listOf(remove.id), removeCaptor.value.map { it.clusterId })
+
+        @Suppress("UNCHECKED_CAST")
+        val addCaptor = ArgumentCaptor.forClass(List::class.java) as ArgumentCaptor<List<StageCluster>>
+        verify(stageClusterRepository).saveAll(addCaptor.capture())
+        assertEquals(listOf(add.id), addCaptor.value.map { it.clusterId })
+    }
+
+    @Test
+    fun `update with null clusterIds leaves cluster links untouched`() {
+        val stageId = UUID.randomUUID()
+        val stage = persistedStage(id = stageId)
+        given(repository.findById(stageId)).willReturn(Optional.of(stage))
+        given(repository.save(stage)).willReturn(stage)
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+
+        service.update(
+            stageId,
+            StageRequest(name = "Draft", description = null, order = 1, deploymentPolicy = DeploymentPolicy.IMMEDIATE, clusterIds = null)
+        )
+
+        verify(stageClusterRepository, never()).saveAll(any<List<StageCluster>>())
+        verify(stageClusterRepository, never()).deleteAll(any<List<StageCluster>>())
+    }
+
+    @Test
+    fun `update rejects unknown cluster ids without touching links`() {
+        val stageId = UUID.randomUUID()
+        val stage = persistedStage(id = stageId)
+        given(repository.findById(stageId)).willReturn(Optional.of(stage))
+        given(repository.save(stage)).willReturn(stage)
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+
+        val known = persistedCluster("known")
+        val unknownId = UUID.randomUUID()
+        given(clusterRepository.findAllById(setOf(known.id!!, unknownId))).willReturn(listOf(known))
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.update(
+                stageId,
+                StageRequest(
+                    name = "Draft",
+                    description = null,
+                    order = 1,
+                    deploymentPolicy = DeploymentPolicy.IMMEDIATE,
+                    clusterIds = listOf(known.id!!, unknownId),
+                )
+            )
+        }
+
+        assertEquals(400, exception.statusCode.value())
+        verify(stageClusterRepository, never()).saveAll(any<List<StageCluster>>())
+        verify(stageClusterRepository, never()).deleteAll(any<List<StageCluster>>())
     }
 
     @Test

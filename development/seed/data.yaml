@@ -4,8 +4,18 @@
 #
 # All four stages share that single minikube cluster, so namespace_prefix keeps them
 # from colliding: a workload with kubernetesNameSpace "platform" ends up as
-# "dev-platform" in the development stage, "qa-platform" in qa, etc. The resulting
-# namespaces must exist in the cluster, e.g. `kubectl create namespace dev-platform`.
+# "dev-platform" in the development stage, "qa-platform" in qa, etc. The cluster's
+# k8s_namespaces below lists every resulting stage-prefixed namespace — seed.py
+# creates them from this list (and deletes them on --reset), so it must stay in sync
+# with the stages' namespace_prefix values and workloads' kubernetes_namespace values.
+
+clusters:
+  - name: minikube
+    description: "Local Minicube"
+    cluster_type: "K8S"
+    url: "http://127.0.0.1:1964/api/v1"
+    k8s_namespaces: dev-platform,qa-platform,int-platform,prod-platform,dev-website,qa-website,int-website,prod-website,
+
 stages:
   - name: development
     description: Development environment
@@ -13,24 +23,28 @@ stages:
     deployment_policy: IMMEDIATE
     kubernetes_context: minikube
     namespace_prefix: dev-
+    clusters: [minikube]
   - name: qa
     description: Quality assurance environment
     order: 2
     deployment_policy: IMMEDIATE
     kubernetes_context: minikube
     namespace_prefix: qa-
+    clusters: [minikube]
   - name: staging
     description: Pre-production environment
     order: 3
     deployment_policy: IMMEDIATE
     kubernetes_context: minikube
     namespace_prefix: staging-
+    clusters: [minikube]
   - name: production
     description: Production environment
     order: 4
     deployment_policy: SCHEDULED
     kubernetes_context: minikube
     namespace_prefix: prod-
+    clusters: [minikube]
 
 products:
   - name: Platform

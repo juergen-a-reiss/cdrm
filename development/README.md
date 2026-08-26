@@ -79,44 +79,41 @@ Run `start.sh` after `up.sh` to apply the Ansible-based configuration:
 
 **What it configures:**
 
-- Creates the `cdrm` realm ("Continuous Delivery Release Management") with a PKCE-enabled `cdrm` client, the client roles `cdrm-admin`, `cdrm-developer`, `cdrm-productowner`, and one test user per role (password `test`)
+- Creates the `cdrm` realm ("Continuous Delivery Release Management") with a PKCE-enabled `cdrm` client, the client roles `cdrm-devops`, `cdrm-developer`, `cdrm-productowner`, and one test user per role (password `test`)
 
 Playbooks: `ansible/playbooks/configure-keycloak-cdrm.yml`
-
-### Custom theme
-
-A custom login theme is mounted from `src/keycloak-theme/` into the `platform` theme slot. The background image is at `src/keycloak-theme/login/resources/img/background.png`.
 
 ## Networking
 
 All containers share the `shared_net` bridge network (`172.30.200.0/24`), allowing inter-container communication by service name.
 
+## Frontend
+
+The Vue frontend lives in `frontend/` at the repo root (not part of this Docker Compose project).
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Serves on http://localhost:5173 — the address already registered as the `cdrm` Keycloak client's redirect URI by `start.sh`. The Vite dev server proxies `/api/*` to `http://localhost:8080`, so the cdrm backend must also be running (`./gradlew bootRun` from the repo root). `frontend/.env` supplies `VITE_OIDC_AUTHORITY`/`VITE_OIDC_CLIENT_ID` pointing at the local Keycloak realm — already present for this dev setup.
+
+
 ## Minikube
 
-cdrm's local dev setup deploys into a `minikube` cluster (the default context name `minikube start` configures). All four cdrm stages (development/qa/staging/production) share that one cluster, so each stage's `namespace_prefix` (see `seed/data.yaml`) keeps them from colliding on namespace.
+cdrm's local dev setup deploys into a `minikube` cluster (the default context name `minikube start` configures). All four cdrm stages (development/qa/staging/production) share that one cluster, so each stage's `namespace_prefix` (see `seed/data.yaml`) keeps them from colliding on namespace. To get a graphical view use `minikube dashboard --port=1964`.
 
-You might need to instal and run:
 
-```bash
-sudo apt install ansible python3-kubernetes
-ansible-galaxy collection install -r development/ansible/requirements.yml
-./development/configure-minikube.sh
-```
+### Setting up seed data
 
-### Prerequisites
+This script is not idempotent.  It also creates the namespaces listed in `seed/data.yaml`'s `clusters[].k8s_namespaces` (and the bootstrapped Deployment/StatefulSet objects) in minikube — keep that list in sync with the stages' `namespace_prefix` and workloads' `kubernetes_namespace` values.
+
+Run ./seed.py --token 
 
 ```bash
-sudo apt install ansible python3-kubernetes
-ansible-galaxy collection install -r ansible/requirements.yml
+./seed.py --token 
 ```
 
-### Setting up namespaces
+With a token for a devops role. Consider using the keycloak.http to get such a token.
 
-```bash
-minikube start
-./configure-minikube.sh
-```
-
-Unlike `start.sh`, this runs directly on the host rather than inside a container — minikube's docker driver puts the API server on its own docker network, not `shared_net`, so a containerized ansible run would need extra network/cert-mount plumbing to reach it. Running on the host reuses the same kubeconfig/context the cdrm backend itself resolves `minikube` against. The playbook is idempotent — safe to re-run.
-
-Playbook: `ansible/playbooks/configure-minikube-namespaces.yml`

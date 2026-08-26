@@ -33,8 +33,8 @@ function hasAnyRole(...roles: string[]): boolean {
   return roles.some((role) => currentRoles.value.includes(role))
 }
 
-export const isAdmin = computed(() => hasAnyRole('cdrm-admin'))
-export const canManageProducts = computed(() => hasAnyRole('cdrm-admin', 'cdrm-productowner'))
-export const canManageWorkloads = computed(() => hasAnyRole('cdrm-admin', 'cdrm-productowner', 'cdrm-developer'))
-export const canManageReleases = computed(() => hasAnyRole('cdrm-admin', 'cdrm-productowner', 'cdrm-developer'))
+export const isAdmin = computed(() => hasAnyRole('cdrm-devops'))
+export const canManageProducts = computed(() => hasAnyRole('cdrm-devops', 'cdrm-productowner'))
+export const canManageWorkloads = computed(() => hasAnyRole('cdrm-devops', 'cdrm-productowner', 'cdrm-developer'))
+export const canManageReleases = computed(() => hasAnyRole('cdrm-devops', 'cdrm-productowner', 'cdrm-developer'))
 export const canPromoteReleases = computed(() => hasAnyRole('cdrm-productowner'))

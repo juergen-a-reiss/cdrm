@@ -4,6 +4,7 @@
 package dev.juergenreiss.cdrm.cluster
 
 import org.slf4j.LoggerFactory
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.AuditorAware
 import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
@@ -22,7 +23,7 @@ class ClusterService(
     private val log = LoggerFactory.getLogger(ClusterService::class.java)
 
     fun findAll(): List<ClusterResponse> =
-        repository.findAll(Sort.by("order")).map { it.toResponse() }
+        repository.findAll(Sort.by("name")).map { it.toResponse() }
 
     fun findById(id: UUID): ClusterResponse =
         repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }.toResponse()
@@ -63,7 +64,12 @@ class ClusterService(
     fun delete(id: UUID) {
         if (!repository.existsById(id)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
         val userId = currentUserId()
-        repository.deleteById(id)
+        try {
+            repository.deleteById(id)
+            repository.flush()
+        } catch (e: DataIntegrityViolationException) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "Cluster is still linked to one or more stages")
+        }
         log.info("Deleted cluster {} by user {}", id, userId)
     }
 

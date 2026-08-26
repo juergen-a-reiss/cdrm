@@ -7,6 +7,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', redirect: '/stages' },
+    { path: '/clusters', name: 'clusters', component: () => import('../views/ClustersView.vue') },
     { path: '/stages', name: 'stages', component: () => import('../views/StagesView.vue') },
     { path: '/products', name: 'products', component: () => import('../views/ProductsView.vue') },
     { path: '/workloads', name: 'workloads', component: () => import('../views/WorkloadsView.vue') },

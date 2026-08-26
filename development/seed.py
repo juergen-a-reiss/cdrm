@@ -39,7 +39,7 @@ DB_TABLES = ["release_history", "release", "workload_stage", "workload", "produc
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--token", help="Bearer token for a user with the cdrm-admin role (required unless --reset)")
+    parser.add_argument("--token", help="Bearer token for a user with the cdrm-devops role (required unless --reset)")
     parser.add_argument("--api-url", default="http://localhost:8080", help="Backend base URL")
     parser.add_argument(
         "--data", type=Path, default=Path(__file__).parent / "seed" / "data.yaml", help="Path to the YAML seed data file"
@@ -67,11 +67,35 @@ def post(api_url: str, token: str, path: str, body: dict) -> dict:
         print(f"Failed POST {path} (HTTP {e.code}): {e.read().decode()}", file=sys.stderr)
         sys.exit(1)
 
+def seed_clusters(api_url: str, token: str, clusters: list[dict]) -> dict[str, str]:
+    print("Seeding clusters...")
+    print(clusters)
+    ids = {}
+    for cluster in clusters:
+        body = {
+            "name": cluster["name"],
+            "description": cluster.get("description"),
+            "clusterType": cluster.get("cluster_type"),
+            "url": cluster.get("url"),
+            "k8sNamespaces": cluster.get("k8s_namespaces"),
+        }
+        result = post(api_url, token, "/clusters", body)
+        ids[cluster["name"]] = result["id"]
+        print(f"  cluster: {cluster['name']} ({result['id']})")
+    return ids
 
-def seed_stages(api_url: str, token: str, stages: list[dict]) -> dict[str, str]:
+def seed_stages(api_url: str, token: str, stages: list[dict], cluster_ids: dict[str, str]) -> dict[str, str]:
     print("Seeding stages...")
     ids = {}
     for stage in stages:
+        cluster_names = stage.get("clusters", [])
+        stage_cluster_ids = []
+        for cluster_name in cluster_names:
+            cluster_id = cluster_ids.get(cluster_name)
+            if cluster_id is None:
+                print(f"Error: stage '{stage['name']}' references unknown cluster '{cluster_name}'", file=sys.stderr)
+                sys.exit(1)
+            stage_cluster_ids.append(cluster_id)
         body = {
             "name": stage["name"],
             "description": stage.get("description"),
@@ -79,6 +103,7 @@ def seed_stages(api_url: str, token: str, stages: list[dict]) -> dict[str, str]:
             "deploymentPolicy": stage.get("deployment_policy", "IMMEDIATE"),
             "kubernetesContext": stage.get("kubernetes_context"),
             "namespacePrefix": stage.get("namespace_prefix"),
+            "clusterIds": stage_cluster_ids,
         }
         result = post(api_url, token, "/stages", body)
         ids[stage["name"]] = result["id"]
@@ -187,22 +212,20 @@ spec:
 """
 
 
-def stage_namespaces(stages: list[dict], workloads: list[dict]) -> list[str]:
-    """Every distinct stage-prefixed namespace a kubernetes-managed workload deploys into."""
+def cluster_namespaces(clusters: list[dict]) -> list[str]:
+    """Every distinct namespace configured across all clusters' k8s_namespaces."""
     seen: dict[str, None] = {}
-    for workload in workloads:
-        if not workload.get("kubernetes"):
-            continue
-        base_namespace = workload["kubernetes_namespace"]
-        for stage in stages:
-            namespace = f"{stage.get('namespace_prefix') or ''}{base_namespace}"
-            seen.setdefault(namespace)
+    for cluster in clusters:
+        for namespace in (cluster.get("k8s_namespaces") or "").split(","):
+            namespace = namespace.strip()
+            if namespace:
+                seen.setdefault(namespace)
     return list(seen)
 
 
-def bootstrap_kubernetes_objects(stages: list[dict], workloads: list[dict]) -> None:
+def bootstrap_kubernetes_objects(clusters: list[dict], stages: list[dict], workloads: list[dict]) -> None:
     print("Bootstrapping Kubernetes objects in minikube...")
-    for namespace in stage_namespaces(stages, workloads):
+    for namespace in cluster_namespaces(clusters):
         kubectl_apply(namespace_manifest(namespace), f"namespace {namespace}")
 
     for workload in workloads:
@@ -239,7 +262,7 @@ def reset_database() -> None:
     print(f"  truncated: {', '.join(DB_TABLES)}")
 
 
-def reset_kubernetes_objects(stages: list[dict], workloads: list[dict]) -> None:
+def reset_kubernetes_objects(clusters: list[dict], stages: list[dict], workloads: list[dict]) -> None:
     print("Deleting bootstrapped Kubernetes objects...")
     kinds = {"DEPLOYMENT": "deployment", "STATEFUL_SET": "statefulset"}
     for workload in workloads:
@@ -256,7 +279,7 @@ def reset_kubernetes_objects(stages: list[dict], workloads: list[dict]) -> None:
                 sys.exit(1)
             print(f"  {result.stdout.strip() or f'{resource} {name} in {namespace}: not found'}")
 
-    for namespace in stage_namespaces(stages, workloads):
+    for namespace in cluster_namespaces(clusters):
         result = kubectl("delete", "namespace", namespace, "--ignore-not-found")
         if result.returncode != 0:
             print(f"Error deleting namespace '{namespace}': {result.stderr}", file=sys.stderr)
@@ -279,15 +302,16 @@ def main() -> None:
 
     if args.reset:
         reset_database()
-        reset_kubernetes_objects(data["stages"], data["workloads"])
+        reset_kubernetes_objects(data["clusters"], data["stages"], data["workloads"])
         print("Done.")
         return
 
-    stage_ids = seed_stages(args.api_url, args.token, data["stages"])
+    cluster_ids = seed_clusters(args.api_url, args.token, data["clusters"])
+    stage_ids = seed_stages(args.api_url, args.token, data["stages"], cluster_ids)
     product_ids = seed_products(args.api_url, args.token, data["products"], stage_ids)
     workload_ids = seed_workloads(args.api_url, args.token, data["workloads"], product_ids)
     seed_releases(args.api_url, args.token, data["releases"], workload_ids)
-    bootstrap_kubernetes_objects(data["stages"], data["workloads"])
+    bootstrap_kubernetes_objects(data["clusters"], data["stages"], data["workloads"])
 
     print("Done.")
 

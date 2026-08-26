@@ -28,6 +28,7 @@ const headers = computed<DataTableHeader<StageResponse>[]>(() => {
     { title: 'Deployment Policy', key: 'deploymentPolicy', value: (item) => POLICY_LABELS[item.deploymentPolicy] },
     { title: 'Kubernetes Context', key: 'kubernetesContext', value: (item) => item.kubernetesContext ?? '—' },
     { title: 'Namespace Prefix', key: 'namespacePrefix', value: (item) => item.namespacePrefix ?? '—' },
+    { title: 'Clusters', key: 'clusters', value: (item) => item.clusters.map((c) => c.name).join(', ') || '—' },
     { title: 'Description', key: 'description' },
   ]
   if (isAdmin.value) {

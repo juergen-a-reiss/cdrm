@@ -4,12 +4,13 @@
 -->
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ApiError } from '../api/http'
 import { workloadsApi } from '../api/workloads'
 import { productsApi } from '../api/products'
 import { stagesApi } from '../api/stages'
-import type { WorkloadResponse, ProductResponse, KubernetesKind, StageResponse } from '../api/types'
+import { clustersApi } from '../api/clusters'
+import type { WorkloadResponse, ProductResponse, KubernetesKind, StageResponse, ClusterResponse } from '../api/types'
 
 const props = defineProps<{
   modelValue: boolean
@@ -35,8 +36,31 @@ const kubernetesNameSpace = ref('')
 const stageIds = ref<string[]>([])
 const products = ref<ProductResponse[]>([])
 const stages = ref<StageResponse[]>([])
+const clusters = ref<ClusterResponse[]>([])
 const saving = ref(false)
 const error = ref<string | null>(null)
+
+// The base namespace a workload configures, before each stage's own
+// namespacePrefix is prepended at deploy time — so candidates come from every
+// stage's linked clusters' namespaces, with that stage's prefix stripped back off.
+const namespaceOptions = computed(() => {
+  const result = new Set<string>()
+  for (const stage of stages.value) {
+    const prefix = stage.namespacePrefix ?? ''
+    for (const clusterInfo of stage.clusters) {
+      const cluster = clusters.value.find((c) => c.id === clusterInfo.id)
+      const namespaces = cluster?.k8sNamespaces?.split(',').map((ns) => ns.trim()).filter((ns) => ns.length > 0) ?? []
+      for (const ns of namespaces) {
+        if (!prefix) {
+          result.add(ns)
+        } else if (ns.startsWith(prefix) && ns.length > prefix.length) {
+          result.add(ns.slice(prefix.length))
+        }
+      }
+    }
+  }
+  return [...result].sort((a, b) => a.localeCompare(b))
+})
 
 watch(
   () => [props.modelValue, props.workload] as const,
@@ -51,9 +75,14 @@ watch(
     kubernetesNameSpace.value = workload?.kubernetesNameSpace ?? ''
     stageIds.value = workload?.stages.map((stage) => stage.id) ?? []
     try {
-      const [productList, stageList] = await Promise.all([productsApi.list(), stagesApi.list()])
+      const [productList, stageList, clusterList] = await Promise.all([
+        productsApi.list(),
+        stagesApi.list(),
+        clustersApi.list(),
+      ])
       products.value = productList
       stages.value = stageList
+      clusters.value = clusterList
     } catch (e) {
       error.value = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to load form data'
     }
@@ -134,7 +163,13 @@ async function save() {
           label="Kind"
           required
         />
-        <v-text-field v-if="kubernetes" v-model="kubernetesNameSpace" label="Namespace" required />
+        <v-select
+          v-if="kubernetes"
+          v-model="kubernetesNameSpace"
+          :items="namespaceOptions"
+          label="Namespace"
+          required
+        />
         <v-select
           v-if="workload"
           v-model="stageIds"

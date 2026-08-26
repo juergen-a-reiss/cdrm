@@ -14,11 +14,11 @@ client_id=admin-cli&username=admin&password=admin&grant_type=password
 ### Get an access token for a cdrm test user (direct access grant)
 # Requires "Direct Access Grants" to be enabled on the cdrm client
 # (currently disabled by default — enable it in the admin console first).
-# Swap the username to test cdrm-admin / cdrm-developer / cdrm-productowner.
+# Swap the username to test cdrm-devops / cdrm-developer / cdrm-productowner.
 # @name cdrmToken
 POST {{keycloakUrl}}/realms/cdrm/protocol/openid-connect/token
 Content-Type: application/x-www-form-urlencoded
 
-client_id=cdrm&username=cdrm-admin&password=test&grant_type=password
+client_id=cdrm&username=cdrm-devops&password=test&grant_type=password
 
 

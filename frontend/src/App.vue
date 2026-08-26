@@ -7,6 +7,7 @@
 import { authenticatedUser, isAuthenticated, login, logout } from './auth/authService'
 
 const navItems = [
+  { title: 'Clusters', to: '/clusters', icon: 'mdi-server-network' },
   { title: 'Stages', to: '/stages', icon: 'mdi-stairs' },
   { title: 'Products', to: '/products', icon: 'mdi-package-variant-closed' },
   { title: 'Workloads', to: '/workloads', icon: 'mdi-rocket-launch' },

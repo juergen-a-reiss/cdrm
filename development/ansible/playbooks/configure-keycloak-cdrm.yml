@@ -15,11 +15,11 @@
     client_name: "cdrm"
     test_user_password: "test"
     client_roles:
-      - cdrm-admin
+      - cdrm-devops
       - cdrm-developer
       - cdrm-productowner
     user_names:
-      cdrm-admin:
+      cdrm-devops:
         firstName: John
         lastName: Doe
       cdrm-developer:

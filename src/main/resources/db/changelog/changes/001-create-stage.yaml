@@ -4,6 +4,58 @@ databaseChangeLog:
       author: juergen
       changes:
         - createTable:
+            tableName: cluster
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: name
+                  type: varchar(64)
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: description
+                  type: text
+              - column:
+                  name: url
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: cluster_type
+                  type: varchar(24)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: k8s_namespaces
+                  type: text
+              - column:
+                  name: created_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: modified_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_by
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: modified_by
+                  type: uuid
+                  constraints:
+                    nullable: false
+        - createTable:
             tableName: stage
             columns:
               - column:
@@ -52,3 +104,39 @@ databaseChangeLog:
                   type: uuid
                   constraints:
                     nullable: false
+        - createTable:
+            tableName: stage_cluster
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: stage_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: cluster_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+        - addUniqueConstraint:
+            tableName: stage_cluster
+            columnNames: stage_id, cluster_id
+            constraintName: uq_stage_cluster
+        - addForeignKeyConstraint:
+            baseTableName: stage_cluster
+            baseColumnNames: stage_id
+            constraintName: fk_stage_cluster_stage
+            referencedTableName: stage
+            referencedColumnNames: id
+            onDelete: CASCADE
+        - addForeignKeyConstraint:
+            baseTableName: stage_cluster
+            baseColumnNames: cluster_id
+            constraintName: fk_stage_cluster_cluster
+            referencedTableName: cluster
+            referencedColumnNames: id
