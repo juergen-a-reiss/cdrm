@@ -62,6 +62,11 @@ class ProductService(
     }
 
     private fun updateStageCrons(productId: UUID, entries: List<ProductStageCronRequest>) {
+        val duplicateIds = entries.groupingBy { it.stageId }.eachCount().filterValues { it > 1 }.keys
+        if (duplicateIds.isNotEmpty()) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Duplicate stage id(s): $duplicateIds")
+        }
+
         val stagesById = stageRepository.findAllById(entries.map { it.stageId }).associateBy { it.id!! }
         val unknownIds = entries.map { it.stageId }.toSet() - stagesById.keys
         if (unknownIds.isNotEmpty()) {

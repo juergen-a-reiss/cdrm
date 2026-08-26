@@ -166,6 +166,31 @@ class ProductServiceTest {
     }
 
     @Test
+    fun `create rejects duplicate stage ids in the same request`() {
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val saved = persistedProduct()
+        given(repository.save(any())).willReturn(saved)
+
+        val stage = persistedStage(DeploymentPolicy.SCHEDULED, name = "Prod")
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.create(
+                ProductRequest(
+                    name = "Product",
+                    description = null,
+                    stageDeploymentCrons = listOf(
+                        ProductStageCronRequest(stageId = stage.id!!, deploymentCron = "0 0 2 * * *"),
+                        ProductStageCronRequest(stageId = stage.id!!, deploymentCron = "0 0 3 * * *"),
+                    ),
+                )
+            )
+        }
+
+        assertEquals(400, exception.statusCode.value())
+        verify(productStageRepository, never()).save(any())
+    }
+
+    @Test
     fun `update reconciles cron config, adding, updating and removing`() {
         val productId = UUID.randomUUID()
         val product = persistedProduct(id = productId)
