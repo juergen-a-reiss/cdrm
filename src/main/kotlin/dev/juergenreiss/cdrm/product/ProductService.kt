@@ -6,6 +6,7 @@ package dev.juergenreiss.cdrm.product
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.StageRepository
 import org.slf4j.LoggerFactory
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.AuditorAware
 import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
@@ -114,7 +115,12 @@ class ProductService(
     fun delete(id: UUID) {
         if (!repository.existsById(id)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
         val userId = currentUserId()
-        repository.deleteById(id)
+        try {
+            repository.deleteById(id)
+            repository.flush()
+        } catch (e: DataIntegrityViolationException) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "Product is still referenced by one or more workloads")
+        }
         log.info("Deleted product {} by user {}", id, userId)
     }
 

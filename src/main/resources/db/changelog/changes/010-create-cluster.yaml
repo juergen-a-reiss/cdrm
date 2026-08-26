@@ -28,7 +28,7 @@ databaseChangeLog:
                     nullable: false
                     unique: true
               - column:
-                  name: type
+                  name: cluster_type
                   type: varchar(24)
                   constraints:
                     nullable: false

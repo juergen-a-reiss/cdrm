@@ -12,6 +12,7 @@ import org.mockito.Mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.junit.jupiter.MockitoExtension
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.AuditorAware
 import org.springframework.data.domain.Sort
 import org.springframework.web.server.ResponseStatusException
@@ -170,6 +171,18 @@ class StageServiceTest {
 
         assertEquals(404, exception.statusCode.value())
         verify(repository, never()).deleteById(id)
+    }
+
+    @Test
+    fun `delete throws 409 when stage is still referenced by a release`() {
+        val id = UUID.randomUUID()
+        given(repository.existsById(id)).willReturn(true)
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(repository.flush()).willThrow(DataIntegrityViolationException::class.java)
+
+        val exception = assertThrows(ResponseStatusException::class.java) { service.delete(id) }
+
+        assertEquals(409, exception.statusCode.value())
     }
 
     @Test

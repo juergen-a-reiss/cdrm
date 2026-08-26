@@ -15,6 +15,7 @@ import org.mockito.Mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.junit.jupiter.MockitoExtension
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.AuditorAware
 import org.springframework.data.domain.Sort
 import org.springframework.web.server.ResponseStatusException
@@ -253,6 +254,40 @@ class WorkloadServiceTest {
         val exception = assertThrows(ResponseStatusException::class.java) { service.findById(id) }
 
         assertEquals(404, exception.statusCode.value())
+    }
+
+    @Test
+    fun `delete removes existing workload after resolving current user`() {
+        val id = UUID.randomUUID()
+        given(repository.existsById(id)).willReturn(true)
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+
+        service.delete(id)
+
+        verify(repository).deleteById(id)
+    }
+
+    @Test
+    fun `delete throws 404 when missing`() {
+        val id = UUID.randomUUID()
+        given(repository.existsById(id)).willReturn(false)
+
+        val exception = assertThrows(ResponseStatusException::class.java) { service.delete(id) }
+
+        assertEquals(404, exception.statusCode.value())
+        verify(repository, never()).deleteById(id)
+    }
+
+    @Test
+    fun `delete throws 409 when workload is still referenced by a release`() {
+        val id = UUID.randomUUID()
+        given(repository.existsById(id)).willReturn(true)
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(repository.flush()).willThrow(DataIntegrityViolationException::class.java)
+
+        val exception = assertThrows(ResponseStatusException::class.java) { service.delete(id) }
+
+        assertEquals(409, exception.statusCode.value())
     }
 
     @Test

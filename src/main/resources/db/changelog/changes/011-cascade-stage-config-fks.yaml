@@ -1,0 +1,29 @@
+databaseChangeLog:
+  - changeSet:
+      id: 011-cascade-stage-config-fks
+      author: juergen
+      comment: >
+        product_stage/workload_stage rows are sparse config data, not independent
+        entities — deleting a Stage should clean them up the same way deleting a
+        Product/Workload already does, instead of being blocked by them.
+      changes:
+        - dropForeignKeyConstraint:
+            baseTableName: product_stage
+            constraintName: fk_product_stage_stage
+        - addForeignKeyConstraint:
+            baseTableName: product_stage
+            baseColumnNames: stage_id
+            constraintName: fk_product_stage_stage
+            referencedTableName: stage
+            referencedColumnNames: id
+            onDelete: CASCADE
+        - dropForeignKeyConstraint:
+            baseTableName: workload_stage
+            constraintName: fk_workload_stage_stage
+        - addForeignKeyConstraint:
+            baseTableName: workload_stage
+            baseColumnNames: stage_id
+            constraintName: fk_workload_stage_stage
+            referencedTableName: stage
+            referencedColumnNames: id
+            onDelete: CASCADE

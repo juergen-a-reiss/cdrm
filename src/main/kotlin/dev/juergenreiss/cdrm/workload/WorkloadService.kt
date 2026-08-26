@@ -5,6 +5,7 @@ package dev.juergenreiss.cdrm.workload
 
 import dev.juergenreiss.cdrm.stage.StageRepository
 import org.slf4j.LoggerFactory
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.AuditorAware
 import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
@@ -112,7 +113,12 @@ class WorkloadService(
     fun delete(id: UUID) {
         if (!repository.existsById(id)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
         val userId = currentUserId()
-        repository.deleteById(id)
+        try {
+            repository.deleteById(id)
+            repository.flush()
+        } catch (e: DataIntegrityViolationException) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "Workload is still referenced by one or more releases")
+        }
         log.info("Deleted workload {} by user {}", id, userId)
     }
 
