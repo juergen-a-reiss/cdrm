@@ -147,3 +147,17 @@ any issue that happens in production. Redeploy does the following:
 * Create an immutable entry in the release history used for statistics.
 
 This redeploy does not change the *head* status.
+
+# Release History Dashboard
+
+## Release History Graph
+
+The ultimate management questions will be answered here:
+
+* How many releases/rollbacks did we do last month to production?
+* How is the releases/rollbacks per month trend?
+* How does this look like by product or by workload?
+
+## Release History Details
+
+Here we see the release history details als a table view.

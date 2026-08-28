@@ -19,6 +19,9 @@ class ReleaseController(private val service: ReleaseService) {
     @GetMapping("/{id}/history")
     fun history(@PathVariable id: UUID): List<ReleaseHistoryEntry> = service.history(id)
 
+    @GetMapping("/history")
+    fun historyOverview(): List<ReleaseHistoryOverviewEntry> = service.historyOverview()
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     fun create(@RequestBody request: ReleaseRequest): ReleaseResponse = service.create(request)

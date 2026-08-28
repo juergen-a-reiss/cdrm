@@ -43,6 +43,25 @@ data class ReleaseStageInfo(
 data class ReleaseHistoryEntry(
     val id: UUID,
     val binaryUrl: String,
+    val action: ReleaseHistoryAction,
+    val stage: ReleaseStageInfo,
+    val timestamp: Instant,
+    val deployedAt: Instant?,
+    val createdBy: UUID,
+)
+
+// Null product/workload fields mean the release (and since then, possibly the
+// workload itself) has been deleted — release_history has no FK to either so it
+// survives that, but the identity of who it belonged to can no longer be resolved.
+data class ReleaseHistoryOverviewEntry(
+    val id: UUID,
+    val releaseId: UUID,
+    val binaryUrl: String,
+    val action: ReleaseHistoryAction,
+    val productId: UUID?,
+    val productName: String?,
+    val workloadId: UUID?,
+    val workloadName: String?,
     val stage: ReleaseStageInfo,
     val timestamp: Instant,
     val deployedAt: Instant?,

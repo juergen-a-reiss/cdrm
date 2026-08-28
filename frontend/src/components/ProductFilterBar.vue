@@ -10,7 +10,7 @@ import { useProductFilter } from '../composables/useProductFilter'
 import { productsApi } from '../api/products'
 
 const { items: products } = useResourceList(productsApi.list)
-const { selectedProductIds, clear } = useProductFilter()
+const { selectedProductIds } = useProductFilter()
 
 const productOptions = computed(() =>
   products.value
@@ -21,24 +21,19 @@ const isActive = computed(() => selectedProductIds.value.length > 0)
 </script>
 
 <template>
-  <div class="d-flex align-center ga-2 flex-wrap mb-4">
-    <v-select
-      v-model="selectedProductIds"
-      :items="productOptions"
-      label="Filter by product"
-      :color="isActive ? 'primary' : undefined"
-      multiple
-      chips
-      closable-chips
-      clearable
-      hide-details
-      width="320"
-      class="filter-select"
-    />
-    <v-btn v-if="isActive" variant="text" size="small" prepend-icon="mdi-filter-remove" @click="clear">
-      Clear filter
-    </v-btn>
-  </div>
+  <v-select
+    v-model="selectedProductIds"
+    :items="productOptions"
+    label="Filter by product"
+    :color="isActive ? 'primary' : undefined"
+    multiple
+    chips
+    closable-chips
+    clearable
+    hide-details
+    width="320"
+    class="filter-select"
+  />
 </template>
 
 <style scoped>

@@ -22,6 +22,7 @@ import { ApiError } from '../api/http'
 import type { ReleaseHistoryEntry, ReleaseResponse } from '../api/types'
 import { canManageReleases, canPromoteReleases, canRedeployReleases, canRollbackReleases } from '../auth/roles'
 import { formatDateTime } from '../utils/formatDateTime'
+import { RELEASE_HISTORY_ACTION_LABELS } from '../utils/releaseHistoryAction'
 
 interface ReleaseRow {
   id: string
@@ -187,7 +188,7 @@ async function onRedeployed() {
 
 <template>
   <v-alert v-if="actionError" type="error" :text="actionError" class="mb-4" />
-  <div class="d-flex flex-wrap ga-2 align-center">
+  <div class="d-flex flex-wrap ga-2 align-center mb-4">
     <ProductFilterBar />
     <StageFilterBar />
     <WorkloadFilterBar />
@@ -197,7 +198,7 @@ async function onRedeployed() {
       :color="headOnly ? 'primary' : undefined"
       density="compact"
       hide-details
-      class="flex-grow-0 mb-4"
+      class="flex-grow-0"
     />
   </div>
   <ResourceTable
@@ -270,6 +271,7 @@ async function onRedeployed() {
             <thead>
               <tr>
                 <th>Stage</th>
+                <th>Action</th>
                 <th>Promoted</th>
                 <th>Deployed</th>
                 <th>By</th>
@@ -278,6 +280,7 @@ async function onRedeployed() {
             <tbody>
               <tr v-for="entry in historyByRelease[item.id]" :key="entry.id">
                 <td>{{ entry.stage.name }}</td>
+                <td>{{ RELEASE_HISTORY_ACTION_LABELS[entry.action] }}</td>
                 <td>{{ formatDateTime(entry.timestamp) }}</td>
                 <td>{{ entry.deployedAt ? formatDateTime(entry.deployedAt) : 'Pending' }}</td>
                 <td>{{ entry.createdBy }}</td>

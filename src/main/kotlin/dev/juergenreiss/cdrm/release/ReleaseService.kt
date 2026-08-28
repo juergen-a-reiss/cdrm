@@ -56,6 +56,39 @@ class ReleaseService(
             ReleaseHistoryEntry(
                 id = entry.id!!,
                 binaryUrl = entry.binaryUrl,
+                action = entry.action,
+                stage = ReleaseStageInfo(id = stage.id!!, name = stage.name, order = stage.order),
+                timestamp = entry.createdAt!!,
+                deployedAt = entry.deployedAt,
+                createdBy = entry.createdBy,
+            )
+        }
+    }
+
+    // Every release-history entry across every release, for the history dashboard's chart
+    // and table. Batches the workload/product/stage lookups instead of resolving them
+    // per-entry, since this can return every deployment event the system has ever recorded.
+    fun historyOverview(): List<ReleaseHistoryOverviewEntry> {
+        val entries = releaseHistoryRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))
+        val workloadIds = entries.mapNotNull { it.workloadId }.toSet()
+        val workloadsById = workloadRepository.findAllById(workloadIds).associateBy { it.id }
+        val productIds = workloadsById.values.map { it.productId }.toSet()
+        val productsById = productRepository.findAllById(productIds).associateBy { it.id }
+        val stagesById = stageRepository.findAllById(entries.map { it.stageId }.toSet()).associateBy { it.id }
+
+        return entries.map { entry ->
+            val workload = entry.workloadId?.let { workloadsById[it] }
+            val product = workload?.let { productsById[it.productId] }
+            val stage = stagesById[entry.stageId] ?: throw IllegalStateException("Stage ${entry.stageId} not found")
+            ReleaseHistoryOverviewEntry(
+                id = entry.id!!,
+                releaseId = entry.releaseId,
+                binaryUrl = entry.binaryUrl,
+                action = entry.action,
+                productId = product?.id,
+                productName = product?.name,
+                workloadId = workload?.id,
+                workloadName = workload?.name,
                 stage = ReleaseStageInfo(id = stage.id!!, name = stage.name, order = stage.order),
                 timestamp = entry.createdAt!!,
                 deployedAt = entry.deployedAt,
@@ -82,7 +115,7 @@ class ReleaseService(
                 modifiedBy = userId,
             )
         )
-        recordHistory(saved, initialStage, workload, userId)
+        recordHistory(saved, initialStage, workload, userId, ReleaseHistoryAction.CREATED)
         incrementReleaseMetric("cdrm.releases.promoted", workload, initialStage)
         log.info("Created release {} ('{}') by user {}, starting at stage {}", saved.id, saved.binaryUrl, userId, initialStage.name)
         return saved.toResponse()
@@ -111,7 +144,7 @@ class ReleaseService(
         release.modifiedBy = userId
         val saved = repository.save(release)
         if (newStage != null) {
-            recordHistory(saved, newStage, newWorkload!!, userId)
+            recordHistory(saved, newStage, newWorkload!!, userId, ReleaseHistoryAction.CREATED)
         }
         log.info("Updated release {} ('{}') by user {}", saved.id, saved.binaryUrl, saved.modifiedBy)
         return saved.toResponse()
@@ -137,7 +170,7 @@ class ReleaseService(
         release.currentStageId = nextStage.id!!
         release.modifiedBy = userId
         val saved = repository.save(release)
-        recordHistory(saved, nextStage, workload, userId)
+        recordHistory(saved, nextStage, workload, userId, ReleaseHistoryAction.PROMOTED)
         incrementReleaseMetric("cdrm.releases.promoted", workload, nextStage)
         log.info("Promoted release {} ('{}') to stage {} by user {}", saved.id, saved.binaryUrl, nextStage.name, saved.modifiedBy)
         return saved.toResponse()
@@ -162,7 +195,7 @@ class ReleaseService(
         val userId = currentUserId()
         release.modifiedBy = userId
         val saved = repository.save(release)
-        recordHistory(saved, stage, workload, userId)
+        recordHistory(saved, stage, workload, userId, ReleaseHistoryAction.ROLLED_BACK)
         incrementReleaseMetric("cdrm.releases.rollback", workload, stage)
         log.info("Rolled back release {} ('{}') to head at stage {} by user {}", saved.id, saved.binaryUrl, stage.name, saved.modifiedBy)
         return saved.toResponse()
@@ -201,7 +234,7 @@ class ReleaseService(
         }
         requireDeployable(workload, targetStage)
         val userId = currentUserId()
-        recordHistory(release, targetStage, workload, userId)
+        recordHistory(release, targetStage, workload, userId, ReleaseHistoryAction.REDEPLOYED)
         incrementReleaseMetric("cdrm.releases.redeploy", workload, targetStage)
         log.info("Redeployed release {} ('{}') to stage {} by user {}", release.id, release.binaryUrl, targetStage.name, userId)
         return release.toResponse()
@@ -237,12 +270,14 @@ class ReleaseService(
     // optimization so the common case (cluster reachable) resolves within the request.
     // The row is always created with deployedAt null first — on failure it's simply left
     // that way, and DeploymentSchedulerJob retries it (and SCHEDULED-stage rows) every tick.
-    private fun recordHistory(release: Release, stage: Stage, workload: Workload, userId: UUID) {
+    private fun recordHistory(release: Release, stage: Stage, workload: Workload, userId: UUID, action: ReleaseHistoryAction) {
         val entry = releaseHistoryRepository.save(
             ReleaseHistory(
                 releaseId = release.id!!,
+                workloadId = workload.id!!,
                 binaryUrl = release.binaryUrl,
                 stageId = stage.id!!,
+                action = action,
                 deployedAt = null,
                 createdBy = userId,
             )

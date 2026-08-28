@@ -10,7 +10,7 @@ import { useWorkloadFilter } from '../composables/useWorkloadFilter'
 import { workloadsApi } from '../api/workloads'
 
 const { items: workloads } = useResourceList(workloadsApi.list)
-const { selectedWorkloadIds, clear } = useWorkloadFilter()
+const { selectedWorkloadIds } = useWorkloadFilter()
 
 const workloadOptions = computed(() =>
   workloads.value
@@ -21,24 +21,19 @@ const isActive = computed(() => selectedWorkloadIds.value.length > 0)
 </script>
 
 <template>
-  <div class="d-flex align-center ga-2 flex-wrap mb-4">
-    <v-select
-      v-model="selectedWorkloadIds"
-      :items="workloadOptions"
-      label="Filter by workload"
-      :color="isActive ? 'primary' : undefined"
-      multiple
-      chips
-      closable-chips
-      clearable
-      hide-details
-      width="320"
-      class="filter-select"
-    />
-    <v-btn v-if="isActive" variant="text" size="small" prepend-icon="mdi-filter-remove" @click="clear">
-      Clear filter
-    </v-btn>
-  </div>
+  <v-select
+    v-model="selectedWorkloadIds"
+    :items="workloadOptions"
+    label="Filter by workload"
+    :color="isActive ? 'primary' : undefined"
+    multiple
+    chips
+    closable-chips
+    clearable
+    hide-details
+    width="320"
+    class="filter-select"
+  />
 </template>
 
 <style scoped>

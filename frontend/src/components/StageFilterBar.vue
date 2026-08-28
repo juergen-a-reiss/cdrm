@@ -10,7 +10,7 @@ import { useStageFilter } from '../composables/useStageFilter'
 import { stagesApi } from '../api/stages'
 
 const { items: stages } = useResourceList(stagesApi.list)
-const { selectedStageIds, clear } = useStageFilter()
+const { selectedStageIds } = useStageFilter()
 
 const stageOptions = computed(() =>
   stages.value
@@ -21,24 +21,19 @@ const isActive = computed(() => selectedStageIds.value.length > 0)
 </script>
 
 <template>
-  <div class="d-flex align-center ga-2 flex-wrap mb-4">
-    <v-select
-      v-model="selectedStageIds"
-      :items="stageOptions"
-      label="Filter by stage"
-      :color="isActive ? 'primary' : undefined"
-      multiple
-      chips
-      closable-chips
-      clearable
-      hide-details
-      width="320"
-      class="filter-select"
-    />
-    <v-btn v-if="isActive" variant="text" size="small" prepend-icon="mdi-filter-remove" @click="clear">
-      Clear filter
-    </v-btn>
-  </div>
+  <v-select
+    v-model="selectedStageIds"
+    :items="stageOptions"
+    label="Filter by stage"
+    :color="isActive ? 'primary' : undefined"
+    multiple
+    chips
+    closable-chips
+    clearable
+    hide-details
+    width="320"
+    class="filter-select"
+  />
 </template>
 
 <style scoped>

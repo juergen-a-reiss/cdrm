@@ -22,11 +22,23 @@ class ReleaseHistory(
     @Column(name = "release_id", nullable = false)
     val releaseId: UUID,
 
+    // Denormalized (not an FK) for the same reason as binaryUrl: a workload can be
+    // deleted once none of its releases reference it anymore, but by-workload/by-product
+    // statistics still need to attribute this entry correctly after that happens. Null
+    // only for rows migrated from before this column existed whose release was already
+    // deleted by then, so the backfill had nothing to join against.
+    @Column(name = "workload_id")
+    val workloadId: UUID? = null,
+
     @Column(name = "binary_url", nullable = false)
     val binaryUrl: String,
 
     @Column(name = "stage_id", nullable = false)
     val stageId: UUID,
+
+    @Column(name = "action", nullable = false)
+    @Enumerated(EnumType.STRING)
+    val action: ReleaseHistoryAction = ReleaseHistoryAction.PROMOTED,
 
     // Null while a SCHEDULED-policy deployment hasn't fired yet; set immediately for
     // IMMEDIATE policy, later by the scheduler job otherwise.

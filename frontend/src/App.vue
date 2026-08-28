@@ -12,6 +12,7 @@ const navItems = [
   { title: 'Products', to: '/products', icon: 'mdi-package-variant-closed' },
   { title: 'Workloads', to: '/workloads', icon: 'mdi-rocket-launch' },
   { title: 'Releases', to: '/releases', icon: 'mdi-tag' },
+  { title: 'Release History', to: '/release-history', icon: 'mdi-chart-bar' },
 ]
 </script>
 

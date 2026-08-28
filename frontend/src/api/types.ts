@@ -165,9 +165,29 @@ export interface ReleaseResponse {
   modifiedBy: string
 }
 
+export type ReleaseHistoryAction = 'CREATED' | 'PROMOTED' | 'ROLLED_BACK' | 'REDEPLOYED'
+
 export interface ReleaseHistoryEntry {
   id: string
   binaryUrl: string
+  action: ReleaseHistoryAction
+  stage: ReleaseStageInfo
+  timestamp: string
+  deployedAt: string | null
+  createdBy: string
+}
+
+// Null product/workload fields mean the release (and possibly since then the
+// workload itself) has been deleted, so its identity can no longer be resolved.
+export interface ReleaseHistoryOverviewEntry {
+  id: string
+  releaseId: string
+  binaryUrl: string
+  action: ReleaseHistoryAction
+  productId: string | null
+  productName: string | null
+  workloadId: string | null
+  workloadName: string | null
   stage: ReleaseStageInfo
   timestamp: string
   deployedAt: string | null

@@ -12,6 +12,11 @@ export const router = createRouter({
     { path: '/products', name: 'products', component: () => import('../views/ProductsView.vue') },
     { path: '/workloads', name: 'workloads', component: () => import('../views/WorkloadsView.vue') },
     { path: '/releases', name: 'releases', component: () => import('../views/ReleasesView.vue') },
+    {
+      path: '/release-history',
+      name: 'release-history',
+      component: () => import('../views/ReleaseHistoryDashboardView.vue'),
+    },
     { path: '/:pathMatch(.*)*', redirect: '/stages' },
   ],
 })

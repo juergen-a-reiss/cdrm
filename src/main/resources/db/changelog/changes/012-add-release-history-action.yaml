@@ -1,0 +1,29 @@
+databaseChangeLog:
+  - changeSet:
+      id: 012-add-release-history-action
+      author: juergen
+      comment: >
+        Tracks which operation produced each release_history row (create/promote/
+        rollback/redeploy) and denormalizes workload_id so by-workload/by-product
+        statistics keep working once a workload's releases (and then the workload
+        itself) are deleted — release_history has no FK to either on purpose, so it
+        must carry what it needs to stand alone.
+      changes:
+        - addColumn:
+            tableName: release_history
+            columns:
+              - column:
+                  name: workload_id
+                  type: uuid
+              - column:
+                  name: action
+                  type: varchar(20)
+                  defaultValue: PROMOTED
+                  constraints:
+                    nullable: false
+        - sql:
+            sql: >-
+              UPDATE release_history rh
+              SET workload_id = r.workload_id
+              FROM release r
+              WHERE rh.release_id = r.id

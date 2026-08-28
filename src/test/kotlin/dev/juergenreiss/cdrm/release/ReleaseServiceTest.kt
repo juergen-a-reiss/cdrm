@@ -195,6 +195,7 @@ class ReleaseServiceTest {
         assertEquals(dev.id, captor.value.stageId)
         assertEquals(saved.binaryUrl, captor.value.binaryUrl)
         assertEquals(userId, captor.value.createdBy)
+        assertEquals(ReleaseHistoryAction.CREATED, captor.value.action)
         assertNotNull(captor.value.deployedAt)
     }
 
@@ -369,6 +370,7 @@ class ReleaseServiceTest {
         verify(releaseHistoryRepository, org.mockito.Mockito.times(2)).save(captor.capture())
         assertEquals(qa.id, captor.value.stageId)
         assertEquals(userId, captor.value.createdBy)
+        assertEquals(ReleaseHistoryAction.PROMOTED, captor.value.action)
         assertNotNull(captor.value.deployedAt)
         assertEquals(
             1.0,
@@ -476,6 +478,7 @@ class ReleaseServiceTest {
         verify(releaseHistoryRepository, org.mockito.Mockito.times(2)).save(captor.capture())
         assertEquals(targetReleaseId, captor.value.releaseId)
         assertEquals(prod.id, captor.value.stageId)
+        assertEquals(ReleaseHistoryAction.ROLLED_BACK, captor.value.action)
         assertNotNull(captor.value.deployedAt)
 
         assertEquals(
@@ -540,6 +543,7 @@ class ReleaseServiceTest {
         val captor = ArgumentCaptor.forClass(ReleaseHistory::class.java)
         verify(releaseHistoryRepository, org.mockito.Mockito.times(2)).save(captor.capture())
         assertEquals(dev.id, captor.value.stageId)
+        assertEquals(ReleaseHistoryAction.REDEPLOYED, captor.value.action)
         assertNotNull(captor.value.deployedAt)
 
         assertEquals(
@@ -583,6 +587,7 @@ class ReleaseServiceTest {
         val captor = ArgumentCaptor.forClass(ReleaseHistory::class.java)
         verify(releaseHistoryRepository, org.mockito.Mockito.times(2)).save(captor.capture())
         assertEquals(prod.id, captor.value.stageId)
+        assertEquals(ReleaseHistoryAction.REDEPLOYED, captor.value.action)
     }
 
     @Test
@@ -841,6 +846,65 @@ class ReleaseServiceTest {
         assertEquals(stage.name, result[0].stage.name)
         assertEquals(entry.binaryUrl, result[0].binaryUrl)
         assertEquals(deployedAt, result[0].deployedAt)
+    }
+
+    @Test
+    fun `historyOverview resolves product, workload and stage for each entry`() {
+        val stage = persistedStage(order = 1, name = "Prod")
+        val product = persistedProduct(name = "Platform")
+        val workload = persistedWorkload(productId = product.id!!)
+        val entry = ReleaseHistory(
+            id = UUID.randomUUID(),
+            releaseId = UUID.randomUUID(),
+            workloadId = workload.id,
+            binaryUrl = "https://registry.example.com/app:1.0.0",
+            stageId = stage.id!!,
+            action = ReleaseHistoryAction.PROMOTED,
+            createdAt = Instant.now(),
+            createdBy = UUID.randomUUID(),
+        )
+        given(releaseHistoryRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))).willReturn(listOf(entry))
+        given(workloadRepository.findAllById(setOf(workload.id!!))).willReturn(listOf(workload))
+        given(productRepository.findAllById(setOf(product.id!!))).willReturn(listOf(product))
+        given(stageRepository.findAllById(setOf(stage.id!!))).willReturn(listOf(stage))
+
+        val result = service.historyOverview()
+
+        assertEquals(1, result.size)
+        assertEquals(entry.releaseId, result[0].releaseId)
+        assertEquals(ReleaseHistoryAction.PROMOTED, result[0].action)
+        assertEquals(workload.id, result[0].workloadId)
+        assertEquals(workload.name, result[0].workloadName)
+        assertEquals(product.id, result[0].productId)
+        assertEquals(product.name, result[0].productName)
+        assertEquals(stage.name, result[0].stage.name)
+    }
+
+    @Test
+    fun `historyOverview reports null product and workload when the workload is gone`() {
+        val stage = persistedStage(order = 1, name = "Prod")
+        val entry = ReleaseHistory(
+            id = UUID.randomUUID(),
+            releaseId = UUID.randomUUID(),
+            workloadId = null,
+            binaryUrl = "https://registry.example.com/app:1.0.0",
+            stageId = stage.id!!,
+            action = ReleaseHistoryAction.ROLLED_BACK,
+            createdAt = Instant.now(),
+            createdBy = UUID.randomUUID(),
+        )
+        given(releaseHistoryRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))).willReturn(listOf(entry))
+        given(stageRepository.findAllById(setOf(stage.id!!))).willReturn(listOf(stage))
+
+        val result = service.historyOverview()
+
+        assertEquals(1, result.size)
+        assertEquals(ReleaseHistoryAction.ROLLED_BACK, result[0].action)
+        assertNull(result[0].workloadId)
+        assertNull(result[0].workloadName)
+        assertNull(result[0].productId)
+        assertNull(result[0].productName)
+        assertEquals(stage.name, result[0].stage.name)
     }
 
     @Test
