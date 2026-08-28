@@ -29,6 +29,12 @@ class ReleaseController(private val service: ReleaseService) {
     @PostMapping("/{id}/promote")
     fun promote(@PathVariable id: UUID): ReleaseResponse = service.promote(id)
 
+    @PostMapping("/{id}/rollback")
+    fun rollback(@PathVariable id: UUID): ReleaseResponse = service.rollback(id)
+
+    @PostMapping("/{id}/redeploy")
+    fun redeploy(@PathVariable id: UUID, @RequestBody request: RedeployRequest): ReleaseResponse = service.redeploy(id, request)
+
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     fun delete(@PathVariable id: UUID) = service.delete(id)

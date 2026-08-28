@@ -83,7 +83,7 @@ class ReleaseService(
             )
         )
         recordHistory(saved, initialStage, workload, userId)
-        recordPromotionMetric(workload, initialStage)
+        incrementReleaseMetric("cdrm.releases.promoted", workload, initialStage)
         log.info("Created release {} ('{}') by user {}, starting at stage {}", saved.id, saved.binaryUrl, userId, initialStage.name)
         return saved.toResponse()
     }
@@ -138,9 +138,73 @@ class ReleaseService(
         release.modifiedBy = userId
         val saved = repository.save(release)
         recordHistory(saved, nextStage, workload, userId)
-        recordPromotionMetric(workload, nextStage)
+        incrementReleaseMetric("cdrm.releases.promoted", workload, nextStage)
         log.info("Promoted release {} ('{}') to stage {} by user {}", saved.id, saved.binaryUrl, nextStage.name, saved.modifiedBy)
         return saved.toResponse()
+    }
+
+    // Restores a release that was superseded as head (by a newer release deployed to the
+    // same stage) back to head, without moving it — its currentStageId is already the
+    // right stage since nothing about its own position ever changed. Only meaningful for
+    // a release that currently isn't head: promoting the actual head further along the
+    // pipeline is what regular promote() is for.
+    @Transactional
+    fun rollback(id: UUID): ReleaseResponse {
+        val release = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        val workload = workloadRepository.findById(release.workloadId)
+            .orElseThrow { IllegalStateException("Workload ${release.workloadId} not found") }
+        val stage = stageRepository.findById(release.currentStageId)
+            .orElseThrow { IllegalStateException("Stage ${release.currentStageId} not found") }
+        if (isHead(release)) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "Release is already the head at stage '${stage.name}'")
+        }
+        requireDeployable(workload, stage)
+        val userId = currentUserId()
+        release.modifiedBy = userId
+        val saved = repository.save(release)
+        recordHistory(saved, stage, workload, userId)
+        incrementReleaseMetric("cdrm.releases.rollback", workload, stage)
+        log.info("Rolled back release {} ('{}') to head at stage {} by user {}", saved.id, saved.binaryUrl, stage.name, saved.modifiedBy)
+        return saved.toResponse()
+    }
+
+    // Re-deploys the release's already-recorded binary to its own current stage (only if
+    // it's head there — otherwise regular promote()/rollback() are the way to change what's
+    // deployed) or to any earlier stage, without moving the release itself. Existing at all
+    // stages, the release's currentStageId and head status are unaffected by construction:
+    // a lower-stage target was never a headship candidate for this release to begin with,
+    // and a same-stage target requires already being head, so the new history entry there
+    // just reaffirms the existing head rather than changing it.
+    @Transactional
+    fun redeploy(id: UUID, request: RedeployRequest): ReleaseResponse {
+        val release = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        val workload = workloadRepository.findById(release.workloadId)
+            .orElseThrow { IllegalStateException("Workload ${release.workloadId} not found") }
+        val orderedStages = orderedStagesFor(release.workloadId)
+        val currentIndex = orderedStages.indexOfFirst { it.id == release.currentStageId }
+        if (currentIndex == -1) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "Current stage is no longer part of the workload's stages")
+        }
+        val targetIndex = orderedStages.indexOfFirst { it.id == request.stageId }
+        if (targetIndex == -1) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown stage id, or stage is not linked to this workload")
+        }
+        if (targetIndex > currentIndex) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot redeploy to a stage later than the release's current stage")
+        }
+        val targetStage = orderedStages[targetIndex]
+        if (targetIndex == currentIndex && !isHead(release)) {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Can only redeploy to the current stage if this release is the head release there",
+            )
+        }
+        requireDeployable(workload, targetStage)
+        val userId = currentUserId()
+        recordHistory(release, targetStage, workload, userId)
+        incrementReleaseMetric("cdrm.releases.redeploy", workload, targetStage)
+        log.info("Redeployed release {} ('{}') to stage {} by user {}", release.id, release.binaryUrl, targetStage.name, userId)
+        return release.toResponse()
     }
 
     @Transactional
@@ -195,15 +259,35 @@ class ReleaseService(
         )
     }
 
-    private fun recordPromotionMetric(workload: Workload, stage: Stage) {
+    private fun incrementReleaseMetric(counterName: String, workload: Workload, stage: Stage) {
         val product = productRepository.findById(workload.productId)
             .orElseThrow { IllegalStateException("Product ${workload.productId} not found") }
         meterRegistry.counter(
-            "cdrm.releases.promoted",
+            counterName,
             "product", product.name,
             "workload", workload.name,
             "stage", stage.name,
         ).increment()
+    }
+
+    // The head of a (workload, stage) pair is whichever release currently sitting at that
+    // stage has the most recent history entry there — i.e. the last one actually deployed,
+    // regardless of whether it got there via create(), promote(), or rollback().
+    private fun headReleaseId(workloadId: UUID, stageId: UUID): UUID? {
+        val candidateIds = repository.findByWorkloadIdAndCurrentStageId(workloadId, stageId).mapNotNull { it.id }
+        if (candidateIds.isEmpty()) return null
+        return releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(stageId, candidateIds)?.releaseId
+    }
+
+    private fun isHead(release: Release): Boolean =
+        headReleaseId(release.workloadId, release.currentStageId) == release.id
+
+    private fun redeployableStagesFor(release: Release): List<Stage> {
+        val orderedStages = orderedStagesFor(release.workloadId)
+        val currentIndex = orderedStages.indexOfFirst { it.id == release.currentStageId }
+        if (currentIndex == -1) return emptyList()
+        val upToAndIncludingCurrent = orderedStages.subList(0, currentIndex + 1)
+        return if (isHead(release)) upToAndIncludingCurrent else upToAndIncludingCurrent.dropLast(1)
     }
 
     private fun validateBinaryUrl(url: String) {
@@ -234,6 +318,8 @@ class ReleaseService(
         val orderedStages = orderedStagesFor(workloadId)
         val currentIndex = orderedStages.indexOfFirst { it.id == currentStageId }
         val canPromote = currentIndex != -1 && currentIndex != orderedStages.lastIndex
+        val canRollback = !isHead(this)
+        val redeployableStages = redeployableStagesFor(this).map { ReleaseStageInfo(id = it.id!!, name = it.name, order = it.order) }
         val lastDeployedAt = releaseHistoryRepository.findTopByReleaseIdAndDeployedAtIsNotNullOrderByDeployedAtDesc(id!!)?.deployedAt
         return ReleaseResponse(
             id = id!!,
@@ -242,6 +328,8 @@ class ReleaseService(
             workloadId = workloadId,
             currentStage = ReleaseStageInfo(id = currentStage.id!!, name = currentStage.name, order = currentStage.order),
             canPromote = canPromote,
+            canRollback = canRollback,
+            redeployableStages = redeployableStages,
             lastDeployedAt = lastDeployedAt,
             createdAt = createdAt!!,
             modifiedAt = modifiedAt!!,

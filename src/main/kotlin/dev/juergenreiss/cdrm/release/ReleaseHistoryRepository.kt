@@ -14,6 +14,8 @@ interface ReleaseHistoryRepository : JpaRepository<ReleaseHistory, UUID> {
 
     fun findTopByReleaseIdAndDeployedAtIsNotNullOrderByDeployedAtDesc(releaseId: UUID): ReleaseHistory?
 
+    fun findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(stageId: UUID, releaseIds: Collection<UUID>): ReleaseHistory?
+
     // Locked so a second app instance (or a slow-running overlapping tick) can't
     // process the same pending row twice.
     @Lock(LockModeType.PESSIMISTIC_WRITE)

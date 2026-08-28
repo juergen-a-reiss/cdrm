@@ -48,6 +48,8 @@ class SecurityConfig(
                 authorize(HttpMethod.DELETE, "/workloads/**", hasAnyRole("cdrm-devops", "cdrm-productowner", "cdrm-developer"))
                 authorize("/workloads/**", authenticated)
                 authorize(HttpMethod.POST, "/releases/*/promote", hasRole("cdrm-productowner"))
+                authorize(HttpMethod.POST, "/releases/*/rollback", hasRole("cdrm-productowner"))
+                authorize(HttpMethod.POST, "/releases/*/redeploy", hasRole("cdrm-productowner"))
                 authorize(HttpMethod.POST, "/releases/**", hasAnyRole("cdrm-devops", "cdrm-productowner", "cdrm-developer"))
                 authorize(HttpMethod.PUT, "/releases/**", hasAnyRole("cdrm-devops", "cdrm-productowner", "cdrm-developer"))
                 authorize(HttpMethod.DELETE, "/releases/**", hasAnyRole("cdrm-devops", "cdrm-productowner", "cdrm-developer"))

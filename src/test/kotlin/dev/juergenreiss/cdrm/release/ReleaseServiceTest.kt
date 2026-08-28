@@ -164,8 +164,10 @@ class ReleaseServiceTest {
         val workloadId = UUID.randomUUID()
         val userId = UUID.randomUUID()
         given(currentUser.currentAuditor).willReturn(Optional.of(userId))
-        val workload = persistedWorkload(id = workloadId)
+        val product = persistedProduct()
+        val workload = persistedWorkload(id = workloadId, productId = product.id!!)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
 
         val dev = persistedStage(order = 1, name = "Dev")
         val qa = persistedStage(order = 2, name = "QA")
@@ -249,6 +251,7 @@ class ReleaseServiceTest {
         val productId = UUID.randomUUID()
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = productId)))
+        given(productRepository.findById(productId)).willReturn(Optional.of(persistedProduct(id = productId)))
 
         val dev = persistedStage(order = 1, name = "Dev", deploymentPolicy = DeploymentPolicy.SCHEDULED)
         stubWorkloadStages(workloadId, listOf(dev))
@@ -293,8 +296,10 @@ class ReleaseServiceTest {
     fun `create leaves deployedAt null when the immediate deployment attempt fails`() {
         val workloadId = UUID.randomUUID()
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
-        val workload = persistedWorkload(id = workloadId, kubernetes = true)
+        val product = persistedProduct()
+        val workload = persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = true)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
 
         val dev = persistedStage(order = 1, name = "Dev", kubernetesContext = "prod-cluster")
         stubWorkloadStages(workloadId, listOf(dev))
@@ -429,6 +434,298 @@ class ReleaseServiceTest {
         val exception = assertThrows(ResponseStatusException::class.java) { service.promote(releaseId) }
 
         assertEquals(409, exception.statusCode.value())
+    }
+
+    @Test
+    fun `rollback redeploys a superseded release without moving its stage`() {
+        val workloadId = UUID.randomUUID()
+        val prod = persistedStage(order = 1, name = "Prod")
+        stubWorkloadStages(workloadId, listOf(prod))
+
+        val product = persistedProduct(name = "Platform")
+        val workload = persistedWorkload(id = workloadId, productId = product.id!!)
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
+        given(stageRepository.findById(prod.id!!)).willReturn(Optional.of(prod))
+
+        val headReleaseId = UUID.randomUUID()
+        val targetReleaseId = UUID.randomUUID()
+        val target = persistedRelease(id = targetReleaseId, workloadId = workloadId, currentStageId = prod.id!!)
+        given(repository.findById(targetReleaseId)).willReturn(Optional.of(target))
+        given(repository.save(target)).willReturn(target)
+        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, prod.id!!)).willReturn(
+            listOf(persistedRelease(id = headReleaseId, workloadId = workloadId, currentStageId = prod.id!!), target)
+        )
+        given(
+            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(
+                prod.id!!, listOf(headReleaseId, targetReleaseId)
+            )
+        ).willReturn(
+            ReleaseHistory(releaseId = headReleaseId, binaryUrl = "https://registry.example.com/head", stageId = prod.id!!, createdBy = UUID.randomUUID())
+        )
+
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(deploymentExecutor.attemptDeploy(workload, prod, target.binaryUrl)).willReturn(true)
+        stubHistorySaveEchoesArgument()
+
+        val result = service.rollback(targetReleaseId)
+
+        assertEquals(prod.id, result.currentStage.id)
+
+        val captor = ArgumentCaptor.forClass(ReleaseHistory::class.java)
+        verify(releaseHistoryRepository, org.mockito.Mockito.times(2)).save(captor.capture())
+        assertEquals(targetReleaseId, captor.value.releaseId)
+        assertEquals(prod.id, captor.value.stageId)
+        assertNotNull(captor.value.deployedAt)
+
+        assertEquals(
+            1.0,
+            meterRegistry.get("cdrm.releases.rollback")
+                .tags("product", "Platform", "workload", workload.name, "stage", "Prod")
+                .counter()
+                .count(),
+        )
+    }
+
+    @Test
+    fun `rollback throws 409 when the release is already head at its stage`() {
+        val workloadId = UUID.randomUUID()
+        val prod = persistedStage(order = 1, name = "Prod")
+        val releaseId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
+        given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId)))
+        given(stageRepository.findById(prod.id!!)).willReturn(Optional.of(prod))
+        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, prod.id!!)).willReturn(listOf(release))
+        given(
+            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
+        ).willReturn(
+            ReleaseHistory(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = prod.id!!, createdBy = UUID.randomUUID())
+        )
+
+        val exception = assertThrows(ResponseStatusException::class.java) { service.rollback(releaseId) }
+
+        assertEquals(409, exception.statusCode.value())
+        verify(repository, never()).save(any())
+    }
+
+    @Test
+    fun `redeploy to a lower stage deploys there without moving currentStageId`() {
+        val workloadId = UUID.randomUUID()
+        val dev = persistedStage(order = 1, name = "Dev")
+        val qa = persistedStage(order = 2, name = "QA")
+        val prod = persistedStage(order = 3, name = "Prod")
+        stubWorkloadStages(workloadId, listOf(dev, qa, prod))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev, qa, prod))
+        given(stageRepository.findById(prod.id!!)).willReturn(Optional.of(prod))
+
+        val product = persistedProduct(name = "Platform")
+        val workload = persistedWorkload(id = workloadId, productId = product.id!!)
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
+
+        val releaseId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
+        given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(deploymentExecutor.attemptDeploy(workload, dev, release.binaryUrl)).willReturn(true)
+        stubHistorySaveEchoesArgument()
+
+        val result = service.redeploy(releaseId, RedeployRequest(stageId = dev.id!!))
+
+        assertEquals(prod.id, result.currentStage.id)
+        assertEquals(prod.id, release.currentStageId)
+        verify(repository, never()).save(any())
+
+        val captor = ArgumentCaptor.forClass(ReleaseHistory::class.java)
+        verify(releaseHistoryRepository, org.mockito.Mockito.times(2)).save(captor.capture())
+        assertEquals(dev.id, captor.value.stageId)
+        assertNotNull(captor.value.deployedAt)
+
+        assertEquals(
+            1.0,
+            meterRegistry.get("cdrm.releases.redeploy")
+                .tags("product", "Platform", "workload", workload.name, "stage", "Dev")
+                .counter()
+                .count(),
+        )
+    }
+
+    @Test
+    fun `redeploy to the current stage succeeds when the release is head there`() {
+        val workloadId = UUID.randomUUID()
+        val prod = persistedStage(order = 1, name = "Prod")
+        stubWorkloadStages(workloadId, listOf(prod))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(prod))
+        given(stageRepository.findById(prod.id!!)).willReturn(Optional.of(prod))
+
+        val product = persistedProduct(name = "Platform")
+        val workload = persistedWorkload(id = workloadId, productId = product.id!!)
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
+
+        val releaseId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
+        given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, prod.id!!)).willReturn(listOf(release))
+        given(
+            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
+        ).willReturn(
+            ReleaseHistory(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = prod.id!!, createdBy = UUID.randomUUID())
+        )
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(deploymentExecutor.attemptDeploy(workload, prod, release.binaryUrl)).willReturn(true)
+        stubHistorySaveEchoesArgument()
+
+        val result = service.redeploy(releaseId, RedeployRequest(stageId = prod.id!!))
+
+        assertEquals(prod.id, result.currentStage.id)
+        val captor = ArgumentCaptor.forClass(ReleaseHistory::class.java)
+        verify(releaseHistoryRepository, org.mockito.Mockito.times(2)).save(captor.capture())
+        assertEquals(prod.id, captor.value.stageId)
+    }
+
+    @Test
+    fun `redeploy throws 409 when targeting the current stage while not head`() {
+        val workloadId = UUID.randomUUID()
+        val prod = persistedStage(order = 1, name = "Prod")
+        stubWorkloadStages(workloadId, listOf(prod))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(prod))
+
+        val releaseId = UUID.randomUUID()
+        val headReleaseId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
+        given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId)))
+        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, prod.id!!)).willReturn(
+            listOf(release, persistedRelease(id = headReleaseId, workloadId = workloadId, currentStageId = prod.id!!))
+        )
+        given(
+            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(
+                prod.id!!, listOf(releaseId, headReleaseId)
+            )
+        ).willReturn(
+            ReleaseHistory(releaseId = headReleaseId, binaryUrl = "https://registry.example.com/head", stageId = prod.id!!, createdBy = UUID.randomUUID())
+        )
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.redeploy(releaseId, RedeployRequest(stageId = prod.id!!))
+        }
+
+        assertEquals(409, exception.statusCode.value())
+        verify(releaseHistoryRepository, never()).save(any())
+    }
+
+    @Test
+    fun `redeploy throws 400 when target stage is later than the current stage`() {
+        val workloadId = UUID.randomUUID()
+        val dev = persistedStage(order = 1, name = "Dev")
+        val qa = persistedStage(order = 2, name = "QA")
+        stubWorkloadStages(workloadId, listOf(dev, qa))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev, qa))
+
+        val releaseId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = dev.id!!)
+        given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId)))
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.redeploy(releaseId, RedeployRequest(stageId = qa.id!!))
+        }
+
+        assertEquals(400, exception.statusCode.value())
+        verify(releaseHistoryRepository, never()).save(any())
+    }
+
+    @Test
+    fun `redeploy throws 400 when target stage is unknown to the workload`() {
+        val workloadId = UUID.randomUUID()
+        val dev = persistedStage(order = 1, name = "Dev")
+        stubWorkloadStages(workloadId, listOf(dev))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev))
+
+        val releaseId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = dev.id!!)
+        given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId)))
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.redeploy(releaseId, RedeployRequest(stageId = UUID.randomUUID()))
+        }
+
+        assertEquals(400, exception.statusCode.value())
+    }
+
+    @Test
+    fun `toResponse exposes redeployableStages up to and including the current stage when head`() {
+        val workloadId = UUID.randomUUID()
+        val dev = persistedStage(order = 1, name = "Dev")
+        val qa = persistedStage(order = 2, name = "QA")
+        val prod = persistedStage(order = 3, name = "Prod")
+        stubWorkloadStages(workloadId, listOf(dev, qa, prod))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev, qa, prod))
+        given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
+
+        val releaseId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = qa.id!!)
+        given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, qa.id!!)).willReturn(listOf(release))
+        given(
+            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(qa.id!!, listOf(releaseId))
+        ).willReturn(
+            ReleaseHistory(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = qa.id!!, createdBy = UUID.randomUUID())
+        )
+
+        val result = service.findById(releaseId)
+
+        assertEquals(listOf(dev.id, qa.id), result.redeployableStages.map { it.id })
+    }
+
+    @Test
+    fun `toResponse excludes the current stage from redeployableStages when not head`() {
+        val workloadId = UUID.randomUUID()
+        val dev = persistedStage(order = 1, name = "Dev")
+        val qa = persistedStage(order = 2, name = "QA")
+        stubWorkloadStages(workloadId, listOf(dev, qa))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev, qa))
+        given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
+
+        val releaseId = UUID.randomUUID()
+        val headReleaseId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = qa.id!!)
+        given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, qa.id!!)).willReturn(
+            listOf(release, persistedRelease(id = headReleaseId, workloadId = workloadId, currentStageId = qa.id!!))
+        )
+        given(
+            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(qa.id!!, listOf(releaseId, headReleaseId))
+        ).willReturn(
+            ReleaseHistory(releaseId = headReleaseId, binaryUrl = "https://registry.example.com/head", stageId = qa.id!!, createdBy = UUID.randomUUID())
+        )
+
+        val result = service.findById(releaseId)
+
+        assertEquals(listOf(dev.id), result.redeployableStages.map { it.id })
+    }
+
+    @Test
+    fun `toResponse reports canRollback false when the release is head`() {
+        val workloadId = UUID.randomUUID()
+        val prod = persistedStage(order = 1, name = "Prod")
+        val releaseId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
+        given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        given(stageRepository.findById(prod.id!!)).willReturn(Optional.of(prod))
+        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, prod.id!!)).willReturn(listOf(release))
+        given(
+            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
+        ).willReturn(
+            ReleaseHistory(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = prod.id!!, createdBy = UUID.randomUUID())
+        )
+
+        val result = service.findById(releaseId)
+
+        assertFalse(result.canRollback)
     }
 
     @Test

@@ -8,6 +8,7 @@ import { computed, ref, watch } from 'vue'
 import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
 import ResourceTable from '../components/ResourceTable.vue'
 import ReleaseFormDialog from '../components/ReleaseFormDialog.vue'
+import ReleaseRedeployDialog from '../components/ReleaseRedeployDialog.vue'
 import ProductFilterBar from '../components/ProductFilterBar.vue'
 import StageFilterBar from '../components/StageFilterBar.vue'
 import WorkloadFilterBar from '../components/WorkloadFilterBar.vue'
@@ -19,7 +20,7 @@ import { releasesApi } from '../api/releases'
 import { workloadsApi } from '../api/workloads'
 import { ApiError } from '../api/http'
 import type { ReleaseHistoryEntry, ReleaseResponse } from '../api/types'
-import { canManageReleases, canPromoteReleases } from '../auth/roles'
+import { canManageReleases, canPromoteReleases, canRedeployReleases, canRollbackReleases } from '../auth/roles'
 import { formatDateTime } from '../utils/formatDateTime'
 
 interface ReleaseRow {
@@ -28,8 +29,11 @@ interface ReleaseRow {
   description: string | null
   workloadName: string
   currentStageName: string
+  isHead: boolean
   lastDeployedAtDisplay: string
   canPromote: boolean
+  canRollback: boolean
+  canRedeploy: boolean
   raw: ReleaseResponse
 }
 
@@ -38,6 +42,7 @@ const { items: workloads } = useResourceList(workloadsApi.list)
 const { matches: matchesProduct } = useProductFilter()
 const { matches: matchesStage } = useStageFilter()
 const { matches: matchesWorkload } = useWorkloadFilter()
+const headOnly = ref(false)
 
 const workloadNameById = computed(() => new Map(workloads.value.map((workload) => [workload.id, workload.name])))
 const workloadProductIdById = computed(() => new Map(workloads.value.map((workload) => [workload.id, workload.productId])))
@@ -49,7 +54,8 @@ const rows = computed<ReleaseRow[]>(() =>
       return (
         (productId === undefined || matchesProduct(productId)) &&
         matchesStage(release.currentStage.id) &&
-        matchesWorkload(release.workloadId)
+        matchesWorkload(release.workloadId) &&
+        (!headOnly.value || !release.canRollback)
       )
     })
     .map((release) => ({
@@ -58,13 +64,18 @@ const rows = computed<ReleaseRow[]>(() =>
       description: release.description,
       workloadName: workloadNameById.value.get(release.workloadId) ?? release.workloadId,
       currentStageName: release.currentStage.name,
+      isHead: !release.canRollback,
       lastDeployedAtDisplay: release.lastDeployedAt ? formatDateTime(release.lastDeployedAt) : 'Pending',
       canPromote: release.canPromote,
+      canRollback: release.canRollback,
+      canRedeploy: release.redeployableStages.length > 0,
       raw: release,
     })),
 )
 
-const showActions = computed(() => canManageReleases.value || canPromoteReleases.value)
+const showActions = computed(
+  () => canManageReleases.value || canPromoteReleases.value || canRollbackReleases.value || canRedeployReleases.value,
+)
 
 const headers = computed<DataTableHeader<ReleaseRow>[]>(() => {
   const base: DataTableHeader<ReleaseRow>[] = [
@@ -75,13 +86,15 @@ const headers = computed<DataTableHeader<ReleaseRow>[]>(() => {
     { title: 'Description', key: 'description' },
   ]
   if (showActions.value) {
-    base.push({ title: 'Actions', key: 'actions', sortable: false, width: 160 })
+    base.push({ title: 'Actions', key: 'actions', sortable: false, width: 240 })
   }
   return base
 })
 
 const dialogOpen = ref(false)
 const editingRelease = ref<ReleaseResponse | null>(null)
+const redeployDialogOpen = ref(false)
+const redeployingRelease = ref<ReleaseResponse | null>(null)
 const actionError = ref<string | null>(null)
 
 const expanded = ref<string[]>([])
@@ -137,14 +150,55 @@ async function promoteRelease(release: ReleaseResponse) {
     actionError.value = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to promote release'
   }
 }
+
+async function rollbackRelease(release: ReleaseResponse) {
+  if (!confirm(`Roll back stage "${release.currentStage.name}" to this release?`)) {
+    return
+  }
+  actionError.value = null
+  try {
+    await releasesApi.rollback(release.id)
+    // A new history entry was recorded; force the next expand to re-fetch instead of showing stale history.
+    delete historyByRelease.value[release.id]
+    await reload()
+  } catch (e) {
+    actionError.value = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to roll back release'
+  }
+}
+
+function redeployTitle(row: ReleaseRow): string {
+  if (!row.canRedeploy) return 'No eligible target stage'
+  return row.isHead ? 'Redeploy to the current or an earlier stage' : 'Redeploy to an earlier stage'
+}
+
+function openRedeploy(release: ReleaseResponse) {
+  redeployingRelease.value = release
+  redeployDialogOpen.value = true
+}
+
+async function onRedeployed() {
+  if (redeployingRelease.value) {
+    // A new history entry was recorded; force the next expand to re-fetch instead of showing stale history.
+    delete historyByRelease.value[redeployingRelease.value.id]
+  }
+  await reload()
+}
 </script>
 
 <template>
   <v-alert v-if="actionError" type="error" :text="actionError" class="mb-4" />
-  <div class="d-flex flex-wrap ga-2">
+  <div class="d-flex flex-wrap ga-2 align-center">
     <ProductFilterBar />
     <StageFilterBar />
     <WorkloadFilterBar />
+    <v-checkbox
+      v-model="headOnly"
+      label="Head releases only"
+      :color="headOnly ? 'primary' : undefined"
+      density="compact"
+      hide-details
+      class="flex-grow-0 mb-4"
+    />
   </div>
   <ResourceTable
     :headers="headers"
@@ -154,6 +208,18 @@ async function promoteRelease(release: ReleaseResponse) {
     expandable-rows
     v-model:expanded="expanded"
   >
+    <template #item.currentStageName="{ item }">
+      <span class="d-flex align-center ga-1">
+        {{ item.currentStageName }}
+        <v-icon
+          v-if="item.isHead"
+          icon="mdi-crown"
+          size="small"
+          color="amber-darken-2"
+          title="Head release for this stage"
+        />
+      </span>
+    </template>
     <template v-if="canManageReleases" #top>
       <v-toolbar flat>
         <v-toolbar-title>Releases</v-toolbar-title>
@@ -171,6 +237,26 @@ async function promoteRelease(release: ReleaseResponse) {
         :disabled="!item.canPromote"
         :title="item.canPromote ? 'Promote to next stage' : 'Already at the final stage'"
         @click.stop="promoteRelease(item.raw)"
+      />
+      <v-btn
+        v-if="canRollbackReleases"
+        icon="mdi-history"
+        size="small"
+        variant="text"
+        class="mr-2"
+        :disabled="!item.canRollback"
+        :title="item.canRollback ? 'Roll back stage to this release' : 'Already the head release for this stage'"
+        @click.stop="rollbackRelease(item.raw)"
+      />
+      <v-btn
+        v-if="canRedeployReleases"
+        icon="mdi-cloud-upload-outline"
+        size="small"
+        variant="text"
+        class="mr-2"
+        :disabled="!item.canRedeploy"
+        :title="redeployTitle(item)"
+        @click.stop="openRedeploy(item.raw)"
       />
       <v-icon v-if="canManageReleases" icon="mdi-pencil" size="small" class="mr-2" @click.stop="openEdit(item.raw)" />
       <v-icon v-if="canManageReleases" icon="mdi-delete" size="small" @click.stop="removeRelease(item.raw)" />
@@ -205,4 +291,5 @@ async function promoteRelease(release: ReleaseResponse) {
   </ResourceTable>
 
   <ReleaseFormDialog v-model="dialogOpen" :release="editingRelease" @saved="reload" />
+  <ReleaseRedeployDialog v-model="redeployDialogOpen" :release="redeployingRelease" @saved="onRedeployed" />
 </template>

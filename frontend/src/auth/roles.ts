@@ -38,3 +38,5 @@ export const canManageProducts = computed(() => hasAnyRole('cdrm-devops', 'cdrm-
 export const canManageWorkloads = computed(() => hasAnyRole('cdrm-devops', 'cdrm-productowner', 'cdrm-developer'))
 export const canManageReleases = computed(() => hasAnyRole('cdrm-devops', 'cdrm-productowner', 'cdrm-developer'))
 export const canPromoteReleases = computed(() => hasAnyRole('cdrm-productowner'))
+export const canRollbackReleases = computed(() => hasAnyRole('cdrm-productowner'))
+export const canRedeployReleases = computed(() => hasAnyRole('cdrm-productowner'))

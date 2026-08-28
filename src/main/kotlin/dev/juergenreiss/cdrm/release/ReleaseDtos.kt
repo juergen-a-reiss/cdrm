@@ -12,6 +12,10 @@ data class ReleaseRequest(
     val workloadId: UUID,
 )
 
+data class RedeployRequest(
+    val stageId: UUID,
+)
+
 data class ReleaseResponse(
     val id: UUID,
     val binaryUrl: String,
@@ -19,6 +23,10 @@ data class ReleaseResponse(
     val workloadId: UUID,
     val currentStage: ReleaseStageInfo,
     val canPromote: Boolean,
+    val canRollback: Boolean,
+    // The current stage (only if this release is head there) plus every stage before it —
+    // the valid targets for redeploy().
+    val redeployableStages: List<ReleaseStageInfo>,
     val lastDeployedAt: Instant?,
     val createdAt: Instant,
     val modifiedAt: Instant,

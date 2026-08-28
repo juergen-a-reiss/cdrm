@@ -1,8 +1,9 @@
 # Continuous Delivery Release Management
 
 Continuous delivery is a widely adopted framework that encourages small, incremental updates to a software product at a
-high pace. See https://en.wikipedia.org/wiki/Continuous_delivery. For me, the eye-opener
-was https://www.amazon.de/Continuous-Delivery-Deployment-Automation-Addison-Wesley/dp/0321601912
+high pace. See
+<https://en.wikipedia.org/wiki/Continuous_delivery>. For me, the eye-opener was
+<https://www.amazon.de/Continuous-Delivery-Deployment-Automation-Addison-Wesley/dp/0321601912>
 
 Continuous delivery requires that
 
@@ -32,7 +33,8 @@ This tool will make your life easier by:
 ## Stages
 
 Any continuous delivery pipeline consists of stages. There might be more than one pipelines in an organization. Stages
-usually have names like "development", "staging", "uat" and "production".
+usually have names like "development",
+"staging", "uat" and "production".
 
 Essential in this context is that any pipeline has a first stage and a last stage. To be more precise: A stage might
 have a successor - if it does not have a successor, it is the last stage (usually production). Further, any stage in an
@@ -64,8 +66,9 @@ or more stages and the usage of namespaces should be restricted to stages, the n
 usage in a stage.
 
 In case a cluster is used by more than one stages, it would be a good practice to have "namespace prefix". E.g. the
-development stage could define a "dev" prefix to the namespace name. This will help you to get organized and keep an
-overview. If the prefix is configured, then on this stage deployment would be restricted to namespaces with this prefix.
+development stage could define a "dev"
+prefix to the namespace name. This will help you to get organized and keep an overview. If the prefix is configured,
+then on this stage deployment would be restricted to namespaces with this prefix.
 
 ### Proxmox Clusters
 
@@ -90,6 +93,8 @@ prefix is used (if any) to resolve the namespace.
 
 ## Release
 
+Releases are managed by users with the "cdrm-productowner" role.
+
 A release keeps track of the lifecycle of an artifact: The release is created when the artifact is first deployed to the
 first stage (the first depends on the product configuration). A release can be promoted to any higher stage. This will -
 depending on the config of the stage - result in either immediate deployment or scheduled deployment.
@@ -100,3 +105,45 @@ Releases will be typically created via the build pipeline (GitHub actions, jenki
 promotion process is typically done via UI (either the product UI or any other UI that you build that connects to the
 API).
 
+### Release Promotion
+
+After a release is created (for example by a build tool), it is usually in the lowest stage. When it has proved itself
+to be useful and it has passed all tests in this stage, it can be promoted. Promotion does the following:
+
+* Identify the next stage.
+* Deploy the binary artifact to the next stage.
+* Mark the Release object to be in this next stage.
+* Increment the counter "cdrm.releases.promoted" with the labels product, workload and stage. This should be used in a
+  graphana dashboard.
+* Create an immutable entry in the release history used for statistics.
+
+This release is now the *head* release for this stage/workload combination. In general a head release is the release with the most recent promote or rollback release history entry.
+
+### Release Rollback
+
+A rollback can be done from any non-head release - but not from a head release, obviously. It can be triggered via API
+or via GUI. Rollback does the following:Identify the next stage.
+
+* Deploy the binary artifact to the current stage.
+* Increment the counter "cdrm.releases.rollback" with the labels product, workload and stage. This should be used in a
+  graphana dashboard.
+* Create an immutable entry in the release history used for statistics.
+
+This release is now the *head* release for this stage/workload combination.
+
+It is not possible to rollback to a release that already was promoted to the next stage.
+
+### Release Redeploy
+
+A redeploy can be done from any release. It can be done to the current and any lower stage. It can only be done to the
+current stage if the release is the head release. Redeploy cannot be done to a higher stage. It can be triggered via API
+or via GUI. The idea of redeploy is to have a way to safely redeploy the current image on the target cluster if this
+would be necessary for any reason. Or deploy anything that is in production to a lower stage - for example to examine
+any issue that happens in production. Redeploy does the following:
+
+* Deploy the binary artifact to the selected stage.
+* Increment the counter "cdrm.releases.redeploy" with the labels product, workload and stage. This should be used in a
+  graphana dashboard.
+* Create an immutable entry in the release history used for statistics.
+
+This redeploy does not change the *head* status.

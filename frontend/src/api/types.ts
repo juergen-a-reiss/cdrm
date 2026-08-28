@@ -137,6 +137,10 @@ export interface ReleaseRequest {
   workloadId: string
 }
 
+export interface RedeployRequest {
+  stageId: string
+}
+
 export interface ReleaseStageInfo {
   id: string
   name: string
@@ -150,6 +154,10 @@ export interface ReleaseResponse {
   workloadId: string
   currentStage: ReleaseStageInfo
   canPromote: boolean
+  canRollback: boolean
+  // The current stage (only if this release is head there) plus every stage before it —
+  // the valid targets for redeploy.
+  redeployableStages: ReleaseStageInfo[]
   lastDeployedAt: string | null
   createdAt: string
   modifiedAt: string

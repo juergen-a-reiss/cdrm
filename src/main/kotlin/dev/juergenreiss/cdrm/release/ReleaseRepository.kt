@@ -6,4 +6,6 @@ package dev.juergenreiss.cdrm.release
 import org.springframework.data.jpa.repository.JpaRepository
 import java.util.*
 
-interface ReleaseRepository : JpaRepository<Release, UUID>
+interface ReleaseRepository : JpaRepository<Release, UUID> {
+    fun findByWorkloadIdAndCurrentStageId(workloadId: UUID, currentStageId: UUID): List<Release>
+}
