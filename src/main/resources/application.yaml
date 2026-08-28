@@ -25,3 +25,14 @@ spring:
 cdrm:
   security:
     client-id: ${OIDC_CLIENT_ID:cdrm}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include:
+          - health
+          - prometheus
+  endpoint:
+    health:
+      show-details: always

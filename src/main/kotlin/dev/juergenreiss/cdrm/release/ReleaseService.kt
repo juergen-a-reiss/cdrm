@@ -3,6 +3,7 @@
 
 package dev.juergenreiss.cdrm.release
 
+import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.product.ProductStageRepository
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.Stage
@@ -10,6 +11,7 @@ import dev.juergenreiss.cdrm.stage.StageRepository
 import dev.juergenreiss.cdrm.workload.Workload
 import dev.juergenreiss.cdrm.workload.WorkloadRepository
 import dev.juergenreiss.cdrm.workload.WorkloadStageRepository
+import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.AuditorAware
 import org.springframework.data.domain.Sort
@@ -30,9 +32,11 @@ class ReleaseService(
     private val stageRepository: StageRepository,
     private val workloadRepository: WorkloadRepository,
     private val workloadStageRepository: WorkloadStageRepository,
+    private val productRepository: ProductRepository,
     private val productStageRepository: ProductStageRepository,
     private val deploymentExecutor: DeploymentExecutor,
     private val currentUser: AuditorAware<UUID>,
+    private val meterRegistry: MeterRegistry,
 ) {
 
     private val log = LoggerFactory.getLogger(ReleaseService::class.java)
@@ -79,6 +83,7 @@ class ReleaseService(
             )
         )
         recordHistory(saved, initialStage, workload, userId)
+        recordPromotionMetric(workload, initialStage)
         log.info("Created release {} ('{}') by user {}, starting at stage {}", saved.id, saved.binaryUrl, userId, initialStage.name)
         return saved.toResponse()
     }
@@ -114,6 +119,7 @@ class ReleaseService(
 
     @Transactional
     fun promote(id: UUID): ReleaseResponse {
+
         val release = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
         val workload = workloadRepository.findById(release.workloadId)
             .orElseThrow { IllegalStateException("Workload ${release.workloadId} not found") }
@@ -132,6 +138,7 @@ class ReleaseService(
         release.modifiedBy = userId
         val saved = repository.save(release)
         recordHistory(saved, nextStage, workload, userId)
+        recordPromotionMetric(workload, nextStage)
         log.info("Promoted release {} ('{}') to stage {} by user {}", saved.id, saved.binaryUrl, nextStage.name, saved.modifiedBy)
         return saved.toResponse()
     }
@@ -186,6 +193,17 @@ class ReleaseService(
             "Recorded history for release {} at stage {} for workload {}: {}",
             release.id, stage.id, workload.id, if (entry.deployedAt != null) "deployed" else "pending",
         )
+    }
+
+    private fun recordPromotionMetric(workload: Workload, stage: Stage) {
+        val product = productRepository.findById(workload.productId)
+            .orElseThrow { IllegalStateException("Product ${workload.productId} not found") }
+        meterRegistry.counter(
+            "cdrm.releases.promoted",
+            "product", product.name,
+            "workload", workload.name,
+            "stage", stage.name,
+        ).increment()
     }
 
     private fun validateBinaryUrl(url: String) {

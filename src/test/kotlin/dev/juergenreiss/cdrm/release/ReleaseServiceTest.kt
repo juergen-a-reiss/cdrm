@@ -1,5 +1,7 @@
 package dev.juergenreiss.cdrm.release
 
+import dev.juergenreiss.cdrm.product.Product
+import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.product.ProductStage
 import dev.juergenreiss.cdrm.product.ProductStageRepository
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
@@ -9,6 +11,7 @@ import dev.juergenreiss.cdrm.workload.Workload
 import dev.juergenreiss.cdrm.workload.WorkloadRepository
 import dev.juergenreiss.cdrm.workload.WorkloadStage
 import dev.juergenreiss.cdrm.workload.WorkloadStageRepository
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -51,6 +54,9 @@ class ReleaseServiceTest {
     private lateinit var workloadStageRepository: WorkloadStageRepository
 
     @Mock
+    private lateinit var productRepository: ProductRepository
+
+    @Mock
     private lateinit var productStageRepository: ProductStageRepository
 
     @Mock
@@ -58,6 +64,8 @@ class ReleaseServiceTest {
 
     @Mock
     private lateinit var currentUser: AuditorAware<UUID>
+
+    private val meterRegistry = SimpleMeterRegistry()
 
     private lateinit var service: ReleaseService
 
@@ -69,9 +77,11 @@ class ReleaseServiceTest {
             stageRepository,
             workloadRepository,
             workloadStageRepository,
+            productRepository,
             productStageRepository,
             deploymentExecutor,
             currentUser,
+            meterRegistry,
         )
     }
 
@@ -103,6 +113,16 @@ class ReleaseServiceTest {
         productId = productId,
         description = null,
         kubernetes = kubernetes,
+        createdAt = Instant.now(),
+        modifiedAt = Instant.now(),
+        createdBy = UUID.randomUUID(),
+        modifiedBy = UUID.randomUUID(),
+    )
+
+    private fun persistedProduct(id: UUID = UUID.randomUUID(), name: String = "product-$id") = Product(
+        id = id,
+        name = name,
+        description = null,
         createdAt = Instant.now(),
         modifiedAt = Instant.now(),
         createdBy = UUID.randomUUID(),
@@ -323,8 +343,10 @@ class ReleaseServiceTest {
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = dev.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
         given(repository.save(release)).willReturn(release)
-        val workload = persistedWorkload(id = workloadId)
+        val product = persistedProduct(name = "Platform")
+        val workload = persistedWorkload(id = workloadId, productId = product.id!!)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
         val userId = UUID.randomUUID()
         given(currentUser.currentAuditor).willReturn(Optional.of(userId))
         given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
@@ -343,6 +365,13 @@ class ReleaseServiceTest {
         assertEquals(qa.id, captor.value.stageId)
         assertEquals(userId, captor.value.createdBy)
         assertNotNull(captor.value.deployedAt)
+        assertEquals(
+            1.0,
+            meterRegistry.get("cdrm.releases.promoted")
+                .tags("product", "Platform", "workload", workload.name, "stage", "QA")
+                .counter()
+                .count(),
+        )
     }
 
     @Test
