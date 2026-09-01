@@ -6,6 +6,8 @@ package dev.juergenreiss.cdrm.release
 import dev.juergenreiss.cdrm.product.Product
 import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.product.ProductStageRepository
+import dev.juergenreiss.cdrm.security.RebacContext
+import dev.juergenreiss.cdrm.security.ReleaseActionClaim
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.Stage
 import dev.juergenreiss.cdrm.stage.StageRepository
@@ -48,18 +50,36 @@ class ReleaseService(
     private val deploymentExecutor: DeploymentExecutor,
     private val currentUser: AuditorAware<UUID>,
     private val meterRegistry: MeterRegistry,
+    private val rebac: RebacContext,
 ) {
 
     private val log = LoggerFactory.getLogger(ReleaseService::class.java)
 
-    fun findAll(): List<ReleaseResponse> =
-        repository.findAll(Sort.by("image")).map { it.toResponse() }
+    // ReBAC (see README): cdrm-products/cdrm-workloads restrict visibility by the
+    // release's workload and its product — batches those lookups instead of one pair
+    // per release.
+    fun findAll(): List<ReleaseResponse> {
+        val releases = repository.findAll(Sort.by("image"))
+        val workloadsById = workloadRepository.findAllById(releases.map { it.workloadId }.toSet()).associateBy { it.id }
+        val productNameById = productRepository.findAllById(workloadsById.values.map { it.productId }.toSet())
+            .associate { it.id to it.name }
+        return releases
+            .filter { release ->
+                val workload = workloadsById[release.workloadId] ?: return@filter false
+                rebac.canSeeWorkload(productNameById[workload.productId] ?: "", workload.name)
+            }
+            .map { it.toResponse() }
+    }
 
-    fun findById(id: UUID): ReleaseResponse =
-        repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }.toResponse()
+    fun findById(id: UUID): ReleaseResponse {
+        val release = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        requireVisible(release)
+        return release.toResponse()
+    }
 
     fun history(id: UUID): List<ReleaseHistoryEntry> {
-        if (!repository.existsById(id)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val release = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        requireVisible(release)
         val entries = releaseHistoryRepository.findByReleaseIdOrderByCreatedAtDesc(id)
         // Only needed for the still-live stage's deploymentPolicy/order — name/id on the
         // entry itself are read straight off the row, not joined.
@@ -84,11 +104,14 @@ class ReleaseService(
     // Every release-history entry across every release, for the history dashboard's chart
     // and table. Product/workload/stage name and id are read straight off each row (a
     // snapshot taken when it was recorded) rather than joined live, so this stays correct
-    // even for entries whose product/workload/stage has since been deleted. The stage and
+    // even for entries whose product/workload/stage has since been deleted — including
+    // for the ReBAC visibility check below, which can use the row's own snapshotted
+    // product/workload names directly rather than needing a live join. The stage and
     // product-stage-cron lookups below are only for the still-live stage's
     // deploymentPolicy/order and scheduledAt, batched rather than done per entry.
     fun historyOverview(): List<ReleaseHistoryOverviewEntry> {
         val entries = releaseHistoryRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))
+            .filter { rebac.canSeeWorkload(it.productName, it.workloadName) }
         val stagesById = stageRepository.findAllById(entries.map { it.stageId }.toSet()).associateBy { it.id }
         val cronByProductAndStage = productStagesFor(entries)
 
@@ -124,10 +147,12 @@ class ReleaseService(
         val userId = currentUserId()
         val workload = workloadRepository.findById(request.workloadId)
             .orElseThrow { ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown workload") }
+        val product = productFor(workload)
+        requireWorkloadVisible(product, workload)
         validateImage(request.image, workload.kubernetes)
         val initialStage = firstStageFor(request.workloadId)
+        requireReleaseAction(ReleaseActionClaim.PROMOTE, initialStage.name, "cdrm-devops", "cdrm-productowner", "cdrm-developer")
         requireDeployable(workload, initialStage)
-        val product = productFor(workload)
         val saved = repository.save(
             Release(
                 image = request.image,
@@ -147,9 +172,13 @@ class ReleaseService(
     @Transactional
     fun update(id: UUID, request: ReleaseRequest): ReleaseResponse {
         val release = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        requireVisible(release)
         if (request.image != release.image) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "image cannot be changed after creation")
         }
+        val currentStage = stageRepository.findById(release.currentStageId)
+            .orElseThrow { IllegalStateException("Stage ${release.currentStageId} not found") }
+        requireReleaseAction(ReleaseActionClaim.EDIT, currentStage.name, "cdrm-devops", "cdrm-productowner", "cdrm-developer")
         val userId = currentUserId()
         release.description = request.description
 
@@ -158,6 +187,7 @@ class ReleaseService(
         if (request.workloadId != release.workloadId) {
             val workload = workloadRepository.findById(request.workloadId)
                 .orElseThrow { ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown workload") }
+            requireWorkloadVisible(productFor(workload), workload)
             newStage = firstStageFor(request.workloadId)
             requireDeployable(workload, newStage)
             release.currentStageId = newStage.id!!
@@ -179,6 +209,7 @@ class ReleaseService(
     fun promote(id: UUID): ReleaseResponse {
 
         val release = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        requireVisible(release)
         val workload = workloadRepository.findById(release.workloadId)
             .orElseThrow { IllegalStateException("Workload ${release.workloadId} not found") }
         val orderedStages = orderedStagesFor(release.workloadId)
@@ -190,6 +221,7 @@ class ReleaseService(
             throw ResponseStatusException(HttpStatus.CONFLICT, "Release is already at the final stage")
         }
         val nextStage = orderedStages[currentIndex + 1]
+        requireReleaseAction(ReleaseActionClaim.PROMOTE, nextStage.name, "cdrm-productowner")
         requireDeployable(workload, nextStage)
         val product = productFor(workload)
         val userId = currentUserId()
@@ -210,10 +242,12 @@ class ReleaseService(
     @Transactional
     fun rollback(id: UUID): ReleaseResponse {
         val release = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        requireVisible(release)
         val workload = workloadRepository.findById(release.workloadId)
             .orElseThrow { IllegalStateException("Workload ${release.workloadId} not found") }
         val stage = stageRepository.findById(release.currentStageId)
             .orElseThrow { IllegalStateException("Stage ${release.currentStageId} not found") }
+        requireReleaseAction(ReleaseActionClaim.ROLLBACK, stage.name, "cdrm-productowner")
         if (isHead(release)) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "Release is already the head at stage '${stage.name}'")
         }
@@ -238,6 +272,7 @@ class ReleaseService(
     @Transactional
     fun redeploy(id: UUID, request: RedeployRequest): ReleaseResponse {
         val release = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        requireVisible(release)
         val workload = workloadRepository.findById(release.workloadId)
             .orElseThrow { IllegalStateException("Workload ${release.workloadId} not found") }
         val orderedStages = orderedStagesFor(release.workloadId)
@@ -253,6 +288,7 @@ class ReleaseService(
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Cannot redeploy to a stage later than the release's current stage")
         }
         val targetStage = orderedStages[targetIndex]
+        requireReleaseAction(ReleaseActionClaim.REDEPLOY, targetStage.name, "cdrm-productowner")
         if (targetIndex == currentIndex && !isHead(release)) {
             throw ResponseStatusException(
                 HttpStatus.CONFLICT,
@@ -270,7 +306,11 @@ class ReleaseService(
 
     @Transactional
     fun delete(id: UUID) {
-        if (!repository.existsById(id)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val release = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        requireVisible(release)
+        val stage = stageRepository.findById(release.currentStageId)
+            .orElseThrow { IllegalStateException("Stage ${release.currentStageId} not found") }
+        requireReleaseAction(ReleaseActionClaim.DELETE, stage.name, "cdrm-devops", "cdrm-productowner", "cdrm-developer")
         val userId = currentUserId()
         repository.deleteById(id)
         log.info("Deleted release {} by user {}", id, userId)
@@ -360,6 +400,46 @@ class ReleaseService(
         productRepository.findById(workload.productId)
             .orElseThrow { IllegalStateException("Product ${workload.productId} not found") }
 
+    // ReBAC (see README): 404 (not 403) for a release whose workload/product the caller
+    // can't see, so a restricted user can't tell a hidden release apart from one that
+    // simply doesn't exist.
+    private fun requireVisible(release: Release) {
+        val workload = workloadRepository.findById(release.workloadId).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        val product = productFor(workload)
+        if (!rebac.canSeeWorkload(product.name, workload.name)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+    }
+
+    // Same visibility rule as requireVisible(), but for a workload being newly targeted
+    // (create(), or update() changing a release's workload) rather than one already on
+    // an existing release — 400 "Unknown workload" here, matching the error an actually
+    // unknown workloadId gets, so a hidden workload isn't distinguishable from a
+    // nonexistent one.
+    private fun requireWorkloadVisible(product: Product, workload: Workload) {
+        if (!rebac.canSeeWorkload(product.name, workload.name)) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown workload")
+        }
+    }
+
+    // ReBAC (see README): cdrm-release-actions, when set on the caller, is authoritative
+    // for this action+stage — it can grant access a role wouldn't otherwise have (e.g.
+    // cdrm-manager, who has no baseline release permission) as well as narrow one that
+    // would (e.g. cdrm-productowner). When unset, falls back to today's exact
+    // role-based rule for that action, passed in as fallbackRoles. Also drives the
+    // canPromote/canRollback/canEdit/canDelete/redeployableStages flags on
+    // ReleaseResponse, so the frontend can disable actions the caller can't perform
+    // without duplicating this claim-parsing logic in TypeScript.
+    private fun allowsReleaseAction(action: ReleaseActionClaim, stageName: String, vararg fallbackRoles: String): Boolean =
+        rebac.allowsReleaseAction(action, stageName) ?: fallbackRoles.any { rebac.hasRole(it) }
+
+    private fun requireReleaseAction(action: ReleaseActionClaim, stageName: String, vararg fallbackRoles: String) {
+        if (!allowsReleaseAction(action, stageName, *fallbackRoles)) {
+            throw ResponseStatusException(
+                HttpStatus.FORBIDDEN,
+                "Not allowed to ${action.name.lowercase()} at stage '$stageName'",
+            )
+        }
+    }
+
     // The head of a (workload, stage) pair is whichever release currently sitting at that
     // stage has the most recent history entry there — i.e. the last one actually deployed,
     // regardless of whether it got there via create(), promote(), or rollback().
@@ -417,9 +497,16 @@ class ReleaseService(
         val currentStage = stageRepository.findById(currentStageId).orElseThrow()
         val orderedStages = orderedStagesFor(workloadId)
         val currentIndex = orderedStages.indexOfFirst { it.id == currentStageId }
-        val canPromote = currentIndex != -1 && currentIndex != orderedStages.lastIndex
-        val canRollback = !isHead(this)
-        val redeployableStages = redeployableStagesFor(this).map { ReleaseStageInfo(id = it.id!!, name = it.name, order = it.order) }
+        val hasNextStage = currentIndex != -1 && currentIndex != orderedStages.lastIndex
+        val canPromote = hasNextStage &&
+            allowsReleaseAction(ReleaseActionClaim.PROMOTE, orderedStages[currentIndex + 1].name, "cdrm-productowner")
+        val head = isHead(this)
+        val canRollback = !head && allowsReleaseAction(ReleaseActionClaim.ROLLBACK, currentStage.name, "cdrm-productowner")
+        val canEdit = allowsReleaseAction(ReleaseActionClaim.EDIT, currentStage.name, "cdrm-devops", "cdrm-productowner", "cdrm-developer")
+        val canDelete = allowsReleaseAction(ReleaseActionClaim.DELETE, currentStage.name, "cdrm-devops", "cdrm-productowner", "cdrm-developer")
+        val redeployableStages = redeployableStagesFor(this)
+            .filter { allowsReleaseAction(ReleaseActionClaim.REDEPLOY, it.name, "cdrm-productowner") }
+            .map { ReleaseStageInfo(id = it.id!!, name = it.name, order = it.order) }
         val lastDeployedAt = releaseHistoryRepository.findTopByReleaseIdAndDeployedAtIsNotNullOrderByDeployedAtDesc(id!!)?.deployedAt
         return ReleaseResponse(
             id = id!!,
@@ -429,6 +516,8 @@ class ReleaseService(
             currentStage = ReleaseStageInfo(id = currentStage.id!!, name = currentStage.name, order = currentStage.order),
             canPromote = canPromote,
             canRollback = canRollback,
+            canEdit = canEdit,
+            canDelete = canDelete,
             redeployableStages = redeployableStages,
             lastDeployedAt = lastDeployedAt,
             deployError = deployError,

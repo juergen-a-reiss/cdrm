@@ -3,6 +3,7 @@
 
 package dev.juergenreiss.cdrm.product
 
+import dev.juergenreiss.cdrm.security.RebacContext
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.StageRepository
 import org.slf4j.LoggerFactory
@@ -25,15 +26,22 @@ class ProductService(
     private val productStageRepository: ProductStageRepository,
     private val stageRepository: StageRepository,
     private val currentUser: AuditorAware<UUID>,
+    private val rebac: RebacContext,
 ) {
 
     private val log = LoggerFactory.getLogger(ProductService::class.java)
 
+    // ReBAC (see README): cdrm-products, when set on the caller, restricts visibility
+    // to an exact-match subset — silently for the list, as a 404 for a specific id (so
+    // a hidden product doesn't leak its existence via a 403 vs. 404 distinction).
     fun findAll(): List<ProductResponse> =
-        repository.findAll(Sort.by("name")).map { it.toResponse() }
+        repository.findAll(Sort.by("name")).filter { rebac.canSeeProduct(it.name) }.map { it.toResponse() }
 
-    fun findById(id: UUID): ProductResponse =
-        repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }.toResponse()
+    fun findById(id: UUID): ProductResponse {
+        val product = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        if (!rebac.canSeeProduct(product.name)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        return product.toResponse()
+    }
 
     @Transactional
     fun create(request: ProductRequest): ProductResponse {

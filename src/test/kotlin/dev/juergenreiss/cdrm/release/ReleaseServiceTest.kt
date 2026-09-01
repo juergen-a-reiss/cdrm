@@ -4,6 +4,8 @@ import dev.juergenreiss.cdrm.product.Product
 import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.product.ProductStage
 import dev.juergenreiss.cdrm.product.ProductStageRepository
+import dev.juergenreiss.cdrm.security.RebacContext
+import dev.juergenreiss.cdrm.security.ReleaseActionClaim
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.Stage
 import dev.juergenreiss.cdrm.stage.StageRepository
@@ -23,10 +25,14 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
+import org.mockito.ArgumentMatchers.anyString
 import org.mockito.BDDMockito.given
 import org.mockito.Mock
+import org.mockito.Mockito.doReturn
+import org.mockito.Mockito.lenient
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
+import org.mockito.Spy
 import org.mockito.junit.jupiter.MockitoExtension
 import org.springframework.data.domain.AuditorAware
 import org.springframework.data.domain.Sort
@@ -65,6 +71,13 @@ class ReleaseServiceTest {
     @Mock
     private lateinit var currentUser: AuditorAware<UUID>
 
+    // A real (spied) instance, not a full mock: with no SecurityContext set up in these
+    // unit tests, its canSeeWorkload()/allowsReleaseAction() naturally behave as
+    // "unrestricted"/"claim not set" without needing to stub them — only hasRole() (used
+    // as the fallback when a claim isn't set) needs overriding below.
+    @Spy
+    private lateinit var rebac: RebacContext
+
     private val meterRegistry = SimpleMeterRegistry()
 
     private lateinit var service: ReleaseService
@@ -82,7 +95,11 @@ class ReleaseServiceTest {
             deploymentExecutor,
             currentUser,
             meterRegistry,
+            rebac,
         )
+        // Unrestricted by default — matches every test written before ReBAC existed.
+        // Tests that specifically exercise ReBAC restrictions override this.
+        lenient().doReturn(true).`when`(rebac).hasRole(anyString())
     }
 
     private fun persistedStage(
@@ -182,6 +199,15 @@ class ReleaseServiceTest {
         )
     }
 
+    // requireVisible()/requireWorkloadVisible() need a real workload+product to check
+    // ReBAC visibility against — stubs both with a throwaway product, since these tests
+    // don't care about the product's identity, just that lookup succeeds.
+    private fun stubWorkloadVisible(workloadId: UUID) {
+        val product = persistedProduct()
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = product.id!!)))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
+    }
+
     // recordHistory() reads back the row it just created (to mutate/re-save it on a
     // successful immediate deploy), so the mock must echo its argument instead of the
     // Mockito default of null.
@@ -233,7 +259,7 @@ class ReleaseServiceTest {
     fun `create throws 400 when workload has no linked stages`() {
         val workloadId = UUID.randomUUID()
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
-        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId)))
+        stubWorkloadVisible(workloadId)
         stubWorkloadStages(workloadId, emptyList())
 
         val exception = assertThrows(ResponseStatusException::class.java) {
@@ -249,7 +275,9 @@ class ReleaseServiceTest {
     fun `create rejects an image reference that carries a URL scheme for a kubernetes workload`() {
         val workloadId = UUID.randomUUID()
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
-        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, kubernetes = true)))
+        val product = persistedProduct()
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = true)))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
 
         val exception = assertThrows(ResponseStatusException::class.java) {
             service.create(
@@ -264,7 +292,9 @@ class ReleaseServiceTest {
     fun `create rejects an image reference with a space in it for a kubernetes workload`() {
         val workloadId = UUID.randomUUID()
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
-        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, kubernetes = true)))
+        val product = persistedProduct()
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = true)))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
 
         val exception = assertThrows(ResponseStatusException::class.java) {
             service.create(ReleaseRequest(image = "nginx 30", description = null, workloadId = workloadId))
@@ -327,6 +357,7 @@ class ReleaseServiceTest {
         val productId = UUID.randomUUID()
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = productId)))
+        given(productRepository.findById(productId)).willReturn(Optional.of(persistedProduct(id = productId)))
 
         val dev = persistedStage(order = 1, name = "Dev", deploymentPolicy = DeploymentPolicy.SCHEDULED)
         stubWorkloadStages(workloadId, listOf(dev))
@@ -374,7 +405,9 @@ class ReleaseServiceTest {
     fun `create rejects a kubernetes workload with no cluster configured for the stage`() {
         val workloadId = UUID.randomUUID()
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
-        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, kubernetes = true)))
+        val product = persistedProduct()
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = true)))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
 
         val dev = persistedStage(order = 1, name = "Dev", kubernetesContext = null)
         stubWorkloadStages(workloadId, listOf(dev))
@@ -426,8 +459,12 @@ class ReleaseServiceTest {
     fun `update rejects changing image`() {
         val releaseId = UUID.randomUUID()
         val stageId = UUID.randomUUID()
-        val release = persistedRelease(id = releaseId, image = "registry.example.com/app:1.0.0", currentStageId = stageId)
+        val workloadId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, image = "registry.example.com/app:1.0.0", workloadId = workloadId, currentStageId = stageId)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        val product = persistedProduct()
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = product.id!!)))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
 
         val exception = assertThrows(ResponseStatusException::class.java) {
             service.update(
@@ -524,6 +561,7 @@ class ReleaseServiceTest {
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = dev.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = productId)))
+        given(productRepository.findById(productId)).willReturn(Optional.of(persistedProduct(id = productId)))
         given(productStageRepository.findByProductIdAndStageId(productId, qa.id!!)).willReturn(null)
 
         val exception = assertThrows(ResponseStatusException::class.java) { service.promote(releaseId) }
@@ -543,7 +581,7 @@ class ReleaseServiceTest {
         val releaseId = UUID.randomUUID()
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = qa.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
-        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId)))
+        stubWorkloadVisible(workloadId)
 
         val exception = assertThrows(ResponseStatusException::class.java) { service.promote(releaseId) }
 
@@ -561,7 +599,7 @@ class ReleaseServiceTest {
         val releaseId = UUID.randomUUID()
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = orphanStageId)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
-        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId)))
+        stubWorkloadVisible(workloadId)
 
         val exception = assertThrows(ResponseStatusException::class.java) { service.promote(releaseId) }
 
@@ -627,7 +665,7 @@ class ReleaseServiceTest {
         val releaseId = UUID.randomUUID()
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
-        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId)))
+        stubWorkloadVisible(workloadId)
         given(stageRepository.findById(prod.id!!)).willReturn(Optional.of(prod))
         given(repository.findByWorkloadIdAndCurrentStageId(workloadId, prod.id!!)).willReturn(listOf(release))
         given(
@@ -731,7 +769,7 @@ class ReleaseServiceTest {
         val headReleaseId = UUID.randomUUID()
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
-        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId)))
+        stubWorkloadVisible(workloadId)
         given(repository.findByWorkloadIdAndCurrentStageId(workloadId, prod.id!!)).willReturn(
             listOf(release, persistedRelease(id = headReleaseId, workloadId = workloadId, currentStageId = prod.id!!))
         )
@@ -762,7 +800,7 @@ class ReleaseServiceTest {
         val releaseId = UUID.randomUUID()
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = dev.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
-        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId)))
+        stubWorkloadVisible(workloadId)
 
         val exception = assertThrows(ResponseStatusException::class.java) {
             service.redeploy(releaseId, RedeployRequest(stageId = qa.id!!))
@@ -782,7 +820,7 @@ class ReleaseServiceTest {
         val releaseId = UUID.randomUUID()
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = dev.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
-        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId)))
+        stubWorkloadVisible(workloadId)
 
         val exception = assertThrows(ResponseStatusException::class.java) {
             service.redeploy(releaseId, RedeployRequest(stageId = UUID.randomUUID()))
@@ -794,6 +832,7 @@ class ReleaseServiceTest {
     @Test
     fun `toResponse exposes redeployableStages up to and including the current stage when head`() {
         val workloadId = UUID.randomUUID()
+        stubWorkloadVisible(workloadId)
         val dev = persistedStage(order = 1, name = "Dev")
         val qa = persistedStage(order = 2, name = "QA")
         val prod = persistedStage(order = 3, name = "Prod")
@@ -819,6 +858,7 @@ class ReleaseServiceTest {
     @Test
     fun `toResponse excludes the current stage from redeployableStages when not head`() {
         val workloadId = UUID.randomUUID()
+        stubWorkloadVisible(workloadId)
         val dev = persistedStage(order = 1, name = "Dev")
         val qa = persistedStage(order = 2, name = "QA")
         stubWorkloadStages(workloadId, listOf(dev, qa))
@@ -846,6 +886,7 @@ class ReleaseServiceTest {
     @Test
     fun `toResponse reports canRollback false when the release is head`() {
         val workloadId = UUID.randomUUID()
+        stubWorkloadVisible(workloadId)
         val prod = persistedStage(order = 1, name = "Prod")
         val releaseId = UUID.randomUUID()
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
@@ -866,6 +907,7 @@ class ReleaseServiceTest {
     @Test
     fun `toResponse reports canPromote false at the final stage`() {
         val workloadId = UUID.randomUUID()
+        stubWorkloadVisible(workloadId)
         val dev = persistedStage(order = 1, name = "Dev")
         val qa = persistedStage(order = 2, name = "QA")
         stubWorkloadStages(workloadId, listOf(dev, qa))
@@ -884,6 +926,7 @@ class ReleaseServiceTest {
     @Test
     fun `toResponse exposes lastDeployedAt from history`() {
         val workloadId = UUID.randomUUID()
+        stubWorkloadVisible(workloadId)
         val dev = persistedStage(order = 1, name = "Dev")
         stubWorkloadStages(workloadId, listOf(dev))
         given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev))
@@ -915,6 +958,10 @@ class ReleaseServiceTest {
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
         given(repository.save(release)).willReturn(release)
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val oldProduct = persistedProduct()
+        given(workloadRepository.findById(oldWorkloadId)).willReturn(Optional.of(persistedWorkload(id = oldWorkloadId, productId = oldProduct.id!!)))
+        given(productRepository.findById(oldProduct.id!!)).willReturn(Optional.of(oldProduct))
+        given(stageRepository.findById(oldStage.id!!)).willReturn(Optional.of(oldStage))
         val product = persistedProduct()
         given(workloadRepository.findById(newWorkloadId)).willReturn(Optional.of(persistedWorkload(id = newWorkloadId, productId = product.id!!)))
         given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
@@ -939,6 +986,7 @@ class ReleaseServiceTest {
     @Test
     fun `update to the same workload does not record history`() {
         val workloadId = UUID.randomUUID()
+        stubWorkloadVisible(workloadId)
         val stage = persistedStage(order = 1, name = "Dev")
 
         val releaseId = UUID.randomUUID()
@@ -957,10 +1005,13 @@ class ReleaseServiceTest {
 
     @Test
     fun `history returns entries mapped with resolved stage info and deployedAt`() {
-        val releaseId = UUID.randomUUID()
-        given(repository.existsById(releaseId)).willReturn(true)
-
+        val workloadId = UUID.randomUUID()
+        stubWorkloadVisible(workloadId)
         val stage = persistedStage(order = 1, name = "Dev")
+        val releaseId = UUID.randomUUID()
+        given(repository.findById(releaseId)).willReturn(
+            Optional.of(persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = stage.id!!))
+        )
         val deployedAt = Instant.now()
         val entry = persistedHistoryEntry(
             releaseId = releaseId,
@@ -1039,7 +1090,7 @@ class ReleaseServiceTest {
     @Test
     fun `history throws 404 when release is missing`() {
         val releaseId = UUID.randomUUID()
-        given(repository.existsById(releaseId)).willReturn(false)
+        given(repository.findById(releaseId)).willReturn(Optional.empty())
 
         val exception = assertThrows(ResponseStatusException::class.java) { service.history(releaseId) }
 

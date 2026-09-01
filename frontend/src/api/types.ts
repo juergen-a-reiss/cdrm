@@ -155,8 +155,10 @@ export interface ReleaseResponse {
   currentStage: ReleaseStageInfo
   canPromote: boolean
   canRollback: boolean
-  // The current stage (only if this release is head there) plus every stage before it —
-  // the valid targets for redeploy.
+  canEdit: boolean
+  canDelete: boolean
+  // The current stage (only if this release is head there) plus every stage before it,
+  // minus any the caller's cdrm-release-actions claim disallows redeploy to.
   redeployableStages: ReleaseStageInfo[]
   lastDeployedAt: string | null
   // Set only when this response is the direct result of an action (create/promote/

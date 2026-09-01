@@ -18,6 +18,7 @@
       - cdrm-devops
       - cdrm-developer
       - cdrm-productowner
+      - cdrm-manager
     user_names:
       cdrm-devops:
         firstName: John
@@ -28,6 +29,108 @@
       cdrm-productowner:
         firstName: Product
         lastName: Owner
+      cdrm-manager:
+        firstName: The
+        lastName: Manager
+    # ReBAC (see README): custom user attributes cdrm mirrors into JWT claims of the
+    # same name via a protocol mapper per attribute, each a multivalued string claim
+    # (Keycloak attributes are natively Map<String, List<String>>, matching the "list
+    # of ..." shape every one of these attributes documents).
+    rebac_attributes:
+      - cdrm-products
+      - cdrm-workloads
+      - cdrm-release-actions
+    # Keycloak's realm "User profile" (Realm settings -> User profile tab) only lets an
+    # attribute persist and appear in the admin console if it's declared here first —
+    # an attribute set via the Admin REST API but absent from this list is silently
+    # dropped (unless "unmanaged attributes" is enabled realm-wide, which this avoids).
+    # edit: [admin] (not "user") since these are access-control data, not something a
+    # user should be able to self-service edit.
+    rebac_attribute_group: rebac
+    rebac_attribute_definitions:
+      - name: cdrm-products
+        displayName: "ReBAC: Products"
+        group: "{{ rebac_attribute_group }}"
+        multivalued: true
+        permissions:
+          view: [admin, user]
+          edit: [admin]
+        validations: {}
+      - name: cdrm-workloads
+        displayName: "ReBAC: Workloads"
+        group: "{{ rebac_attribute_group }}"
+        multivalued: true
+        permissions:
+          view: [admin, user]
+          edit: [admin]
+        validations: {}
+      - name: cdrm-release-actions
+        displayName: "ReBAC: Release Actions"
+        group: "{{ rebac_attribute_group }}"
+        multivalued: true
+        permissions:
+          view: [admin, user]
+          edit: [admin]
+        validations: {}
+    rebac_attribute_group_definition:
+      name: "{{ rebac_attribute_group }}"
+      displayHeader: "ReBAC"
+      displayDescription: "Relationship-based access control attributes cdrm reads from the JWT (see README)"
+    # One restricted-to-a-single-value pair per attribute, on the role that owns that
+    # resource conceptually (product owners restricted by product, developers by
+    # workload, managers by which release actions/stages they can use) — enough to
+    # demonstrate each attribute in isolation without combining restrictions on one user.
+    rebac_demo_users:
+      - username: cdrm-productowner-platform
+        role: cdrm-productowner
+        firstName: Product
+        lastName: Owner - Platform
+        attributes:
+          cdrm-products: ["Platform"]
+      - username: cdrm-productowner-platform-early
+        role: cdrm-productowner
+        firstName: Product
+        lastName: Owner - Platform
+        attributes:
+          cdrm-products: ["Platform"]
+          cdrm-release-actions: ["promote: development, qa"]
+      - username: cdrm-productowner-platform-late
+        role: cdrm-productowner
+        firstName: Product
+        lastName: Owner - Platform
+        attributes:
+          cdrm-products: ["Platform"]
+          cdrm-release-actions: ["promote: staging, production"]
+      - username: cdrm-productowner-payments
+        role: cdrm-productowner
+        firstName: Product
+        lastName: Owner - Payments
+        attributes:
+          cdrm-products: ["Payments"]
+      - username: cdrm-developer-platform-api
+        role: cdrm-developer
+        firstName: Mr.
+        lastName: Code - platform-api
+        attributes:
+          cdrm-workloads: ["platform-api"]
+      - username: cdrm-developer-payments-gateway
+        role: cdrm-developer
+        firstName: Mr.
+        lastName: Code - payments-gateway
+        attributes:
+          cdrm-workloads: ["payments-gateway"]
+      - username: cdrm-manager-platform
+        role: cdrm-manager
+        firstName: The
+        lastName: Manager - dev and qa
+        attributes:
+          cdrm-products: ["Platform"]
+      - username: cdrm-manager-payments
+        role: cdrm-manager
+        firstName: The
+        lastName: Manager - all stages
+        attributes:
+          cdrm-products: ["Payments"]
 
   tasks:
     - name: Obtain admin access token
@@ -69,6 +172,38 @@
           realm: "{{ realm_name }}"
           accessTokenLifespan: "{{ access_token_lifespan_seconds }}"
         status_code: 204
+
+    - name: Fetch current realm user profile configuration
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/users/profile"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+        status_code: 200
+      register: user_profile
+
+    - name: Declare ReBAC attributes in the realm's user profile
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/users/profile"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          # Drop-then-append instead of a plain append, so re-running with a changed
+          # definition converges instead of leaving the old one in place.
+          attributes: >-
+            {{
+              (user_profile.json.attributes | rejectattr('name', 'in', rebac_attributes) | list)
+              + rebac_attribute_definitions
+            }}
+          groups: >-
+            {{
+              (user_profile.json.groups | rejectattr('name', 'equalto', rebac_attribute_group) | list)
+              + [rebac_attribute_group_definition]
+            }}
+        status_code: 200
 
     - name: Create client '{{ client_name }}'
       uri:
@@ -140,6 +275,41 @@
         status_code: [201, 409]
       loop: "{{ client_roles }}"
 
+    - name: Fetch existing client protocol mappers
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/clients/{{ client_info.json[0].id }}/protocol-mappers/models"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+        status_code: 200
+      register: existing_mappers
+
+    - name: Create ReBAC attribute -> JWT claim protocol mappers
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/clients/{{ client_info.json[0].id }}/protocol-mappers/models"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ item }}"
+          protocol: openid-connect
+          protocolMapper: oidc-usermodel-attribute-mapper
+          config:
+            user.attribute: "{{ item }}"
+            claim.name: "{{ item }}"
+            jsonType.label: String
+            multivalued: "true"
+            id.token.claim: "true"
+            access.token.claim: "true"
+            userinfo.token.claim: "true"
+        status_code: 201
+      loop: "{{ rebac_attributes }}"
+      # Re-running with an unchanged name would 400 rather than 409, unlike the other
+      # create-if-missing tasks in this playbook — so skip explicitly instead.
+      when: item not in (existing_mappers.json | map(attribute='name') | list)
+
     - name: Create test users (one per role)
       uri:
         url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/users"
@@ -157,6 +327,25 @@
           lastName: "{{ user_names[item].lastName }}"
         status_code: [201, 409]
       loop: "{{ client_roles }}"
+
+    - name: Create ReBAC demo users (2 per attribute, restricted to one value each)
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/users"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          username: "{{ item.username }}"
+          email: "{{ item.username }}@cdrm.local"
+          enabled: true
+          emailVerified: true
+          firstName: "{{ item.firstName }}"
+          lastName: "{{ item.lastName }}"
+          attributes: "{{ item.attributes }}"
+        status_code: [201, 409]
+      loop: "{{ rebac_demo_users }}"
 
     - name: Fetch all realm users
       uri:
@@ -186,6 +375,23 @@
         status_code: 204
       loop: "{{ client_roles }}"
 
+    - name: Set ReBAC demo user names, email and attributes
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/users/{{ user_id_map[item.username] }}"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          email: "{{ item.username }}@cdrm.local"
+          emailVerified: true
+          firstName: "{{ item.firstName }}"
+          lastName: "{{ item.lastName }}"
+          attributes: "{{ item.attributes }}"
+        status_code: 204
+      loop: "{{ rebac_demo_users }}"
+
     - name: Set test user passwords (non-temporary)
       uri:
         url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/users/{{ user_id_map[item] }}/reset-password"
@@ -200,6 +406,21 @@
           temporary: false
         status_code: 204
       loop: "{{ client_roles }}"
+
+    - name: Set ReBAC demo user passwords (non-temporary)
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/users/{{ user_id_map[item.username] }}/reset-password"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          type: password
+          value: "{{ test_user_password }}"
+          temporary: false
+        status_code: 204
+      loop: "{{ rebac_demo_users }}"
 
     - name: Fetch all client roles
       uri:
@@ -226,3 +447,15 @@
         body: "{{ [role_map[item]] }}"
         status_code: 204
       loop: "{{ client_roles }}"
+
+    - name: Assign matching client role to each ReBAC demo user
+      uri:
+        url: "{{ keycloak_url }}/admin/realms/{{ realm_name }}/users/{{ user_id_map[item.username] }}/role-mappings/clients/{{ client_info.json[0].id }}"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ auth.json.access_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body: "{{ [role_map[item.role]] }}"
+        status_code: 204
+      loop: "{{ rebac_demo_users }}"

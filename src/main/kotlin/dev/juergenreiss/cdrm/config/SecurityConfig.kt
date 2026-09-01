@@ -47,12 +47,12 @@ class SecurityConfig(
                 authorize(HttpMethod.PUT, "/workloads/**", hasAnyRole("cdrm-devops", "cdrm-productowner", "cdrm-developer"))
                 authorize(HttpMethod.DELETE, "/workloads/**", hasAnyRole("cdrm-devops", "cdrm-productowner", "cdrm-developer"))
                 authorize("/workloads/**", authenticated)
-                authorize(HttpMethod.POST, "/releases/*/promote", hasRole("cdrm-productowner"))
-                authorize(HttpMethod.POST, "/releases/*/rollback", hasRole("cdrm-productowner"))
-                authorize(HttpMethod.POST, "/releases/*/redeploy", hasRole("cdrm-productowner"))
-                authorize(HttpMethod.POST, "/releases/**", hasAnyRole("cdrm-devops", "cdrm-productowner", "cdrm-developer"))
-                authorize(HttpMethod.PUT, "/releases/**", hasAnyRole("cdrm-devops", "cdrm-productowner", "cdrm-developer"))
-                authorize(HttpMethod.DELETE, "/releases/**", hasAnyRole("cdrm-devops", "cdrm-productowner", "cdrm-developer"))
+                // Write access to releases is decided in ReleaseService, not here: the
+                // cdrm-release-actions ReBAC attribute (see README), when a user has it,
+                // is authoritative over the role-based default below — it can grant
+                // access a role wouldn't otherwise have (e.g. cdrm-manager, who has no
+                // baseline release permission) as well as narrow one that would. This
+                // gate only needs to require a logged-in cdrm user.
                 authorize("/releases/**", authenticated)
                 authorize(anyRequest, authenticated)
             }

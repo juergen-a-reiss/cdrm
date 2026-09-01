@@ -1,5 +1,6 @@
 package dev.juergenreiss.cdrm.product
 
+import dev.juergenreiss.cdrm.security.RebacContext
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.Stage
 import dev.juergenreiss.cdrm.stage.StageRepository
@@ -38,11 +39,14 @@ class ProductServiceTest {
     @Mock
     private lateinit var currentUser: AuditorAware<UUID>
 
+    @Mock
+    private lateinit var rebac: RebacContext
+
     private lateinit var service: ProductService
 
     @BeforeEach
     fun setUp() {
-        service = ProductService(repository, productStageRepository, stageRepository, currentUser)
+        service = ProductService(repository, productStageRepository, stageRepository, currentUser, rebac)
     }
 
     private fun persistedStage(deploymentPolicy: DeploymentPolicy, name: String = "Stage") = Stage(
@@ -269,5 +273,29 @@ class ProductServiceTest {
         // what must NOT happen is any write.
         verify(productStageRepository, never()).save(any())
         verify(productStageRepository, never()).deleteAll(any<List<ProductStage>>())
+    }
+
+    @Test
+    fun `findAll returns only products the caller's cdrm-products claim allows`() {
+        val visible = persistedProduct().apply { name = "Platform" }
+        val hidden = persistedProduct().apply { name = "Payments" }
+        given(repository.findAll(org.springframework.data.domain.Sort.by("name"))).willReturn(listOf(visible, hidden))
+        given(rebac.canSeeProduct("Platform")).willReturn(true)
+        given(rebac.canSeeProduct("Payments")).willReturn(false)
+
+        val result = service.findAll()
+
+        assertEquals(listOf("Platform"), result.map { it.name })
+    }
+
+    @Test
+    fun `findById throws 404 for a product the caller's cdrm-products claim hides`() {
+        val product = persistedProduct().apply { name = "Payments" }
+        given(repository.findById(product.id!!)).willReturn(Optional.of(product))
+        given(rebac.canSeeProduct("Payments")).willReturn(false)
+
+        val exception = assertThrows(ResponseStatusException::class.java) { service.findById(product.id!!) }
+
+        assertEquals(404, exception.statusCode.value())
     }
 }

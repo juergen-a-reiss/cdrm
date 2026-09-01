@@ -204,4 +204,17 @@ rest of the data.
 
 ### ReBAC Relationship Based Access Control
 
-To be coming soon.
+The access to resources can be restricted by additional user attributes in the JWT token. The following attributes are
+supported:
+
+- `cdrm-products`: a list of product names. If set, the user will be allowed to see the configured products.
+  Restrictions in products will also apply in workloads and releases. There must be an exact match with the product
+  name.
+- `cdrm-workloads`: a list of workload names. If set, the user will be allowed to see the configured workloads.
+  Restrictions in workloads will also apply in releases. There must be an exact match with the workload name.
+- `cdrm-release-actions`: a list of release actions that are allowed for the user. The general format is the action name
+  followed by a comma separated list of stages. For example: `promote: dev, qa` will allow the user to create release
+  objects and promote to qa. Valid actions are: promote, rollback, redeploy, delete, edit.
+
+If an attribute is not set, then ReBAC does not apply for this user for this attribute.
+

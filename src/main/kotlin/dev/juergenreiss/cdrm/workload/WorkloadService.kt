@@ -3,6 +3,8 @@
 
 package dev.juergenreiss.cdrm.workload
 
+import dev.juergenreiss.cdrm.product.ProductRepository
+import dev.juergenreiss.cdrm.security.RebacContext
 import dev.juergenreiss.cdrm.stage.StageRepository
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
@@ -20,16 +22,31 @@ class WorkloadService(
     private val repository: WorkloadRepository,
     private val stageRepository: StageRepository,
     private val workloadStageRepository: WorkloadStageRepository,
+    private val productRepository: ProductRepository,
     private val currentUser: AuditorAware<UUID>,
+    private val rebac: RebacContext,
 ) {
 
     private val log = LoggerFactory.getLogger(WorkloadService::class.java)
 
-    fun findAll(): List<WorkloadResponse> =
-        repository.findAll(Sort.by("name")).map { it.toResponse() }
+    // ReBAC (see README): cdrm-products restricts by the workload's product, and
+    // cdrm-workloads further restricts by the workload's own name — both, when set on
+    // the caller, exact-match. Batches the product lookup instead of one per workload.
+    fun findAll(): List<WorkloadResponse> {
+        val workloads = repository.findAll(Sort.by("name"))
+        val productNameById = productRepository.findAllById(workloads.map { it.productId }.toSet())
+            .associate { it.id to it.name }
+        return workloads
+            .filter { rebac.canSeeWorkload(productNameById[it.productId] ?: "", it.name) }
+            .map { it.toResponse() }
+    }
 
-    fun findById(id: UUID): WorkloadResponse =
-        repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }.toResponse()
+    fun findById(id: UUID): WorkloadResponse {
+        val workload = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        val productName = productRepository.findById(workload.productId).orElseThrow().name
+        if (!rebac.canSeeWorkload(productName, workload.name)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        return workload.toResponse()
+    }
 
     @Transactional
     fun create(request: WorkloadRequest): WorkloadResponse {

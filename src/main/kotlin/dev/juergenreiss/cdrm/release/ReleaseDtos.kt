@@ -24,8 +24,11 @@ data class ReleaseResponse(
     val currentStage: ReleaseStageInfo,
     val canPromote: Boolean,
     val canRollback: Boolean,
-    // The current stage (only if this release is head there) plus every stage before it —
-    // the valid targets for redeploy().
+    val canEdit: Boolean,
+    val canDelete: Boolean,
+    // The current stage (only if this release is head there) plus every stage before it,
+    // minus any the caller's cdrm-release-actions claim disallows redeploy to — the valid
+    // targets for redeploy().
     val redeployableStages: List<ReleaseStageInfo>,
     val lastDeployedAt: Instant?,
     // Set only when this response is the direct result of an action (create/promote/

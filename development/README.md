@@ -79,7 +79,8 @@ Run `start.sh` after `up.sh` to apply the Ansible-based configuration:
 
 **What it configures:**
 
-- Creates the `cdrm` realm ("Continuous Delivery Release Management") with a PKCE-enabled `cdrm` client, the client roles `cdrm-devops`, `cdrm-developer`, `cdrm-productowner`, and one test user per role (password `test`)
+- Creates the `cdrm` realm ("Continuous Delivery Release Management") with a PKCE-enabled `cdrm` client, the client roles `cdrm-devops`, `cdrm-developer`, `cdrm-productowner`, `cdrm-manager` and one test user per role (password `test`)
+- For ReBAC, additional users of the roles `cdrm-developer`, `cdrm-productowner` and `cdrm-manager` are created. They demostrate the attribute based access to resources (products, workloads, actions). There are 2 users with different configurations for one resource only (e.g. a user that has access to product "Platform" and one that has access to "Payments"; same for workloads and actionss).
 
 Playbooks: `ansible/playbooks/configure-keycloak-cdrm.yml`
 

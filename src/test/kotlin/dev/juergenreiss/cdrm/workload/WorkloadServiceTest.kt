@@ -1,5 +1,8 @@
 package dev.juergenreiss.cdrm.workload
 
+import dev.juergenreiss.cdrm.product.Product
+import dev.juergenreiss.cdrm.product.ProductRepository
+import dev.juergenreiss.cdrm.security.RebacContext
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.Stage
 import dev.juergenreiss.cdrm.stage.StageRepository
@@ -36,13 +39,19 @@ class WorkloadServiceTest {
     private lateinit var workloadStageRepository: WorkloadStageRepository
 
     @Mock
+    private lateinit var productRepository: ProductRepository
+
+    @Mock
     private lateinit var currentUser: AuditorAware<UUID>
+
+    @Mock
+    private lateinit var rebac: RebacContext
 
     private lateinit var service: WorkloadService
 
     @BeforeEach
     fun setUp() {
-        service = WorkloadService(repository, stageRepository, workloadStageRepository, currentUser)
+        service = WorkloadService(repository, stageRepository, workloadStageRepository, productRepository, currentUser, rebac)
     }
 
     private fun persistedStage(order: Int, name: String = "Stage-$order") = Stage(
@@ -252,6 +261,45 @@ class WorkloadServiceTest {
         given(repository.findById(id)).willReturn(Optional.empty())
 
         val exception = assertThrows(ResponseStatusException::class.java) { service.findById(id) }
+
+        assertEquals(404, exception.statusCode.value())
+    }
+
+    private fun persistedProduct(id: UUID = UUID.randomUUID(), name: String = "Product") = Product(
+        id = id,
+        name = name,
+        description = null,
+        createdAt = Instant.now(),
+        modifiedAt = Instant.now(),
+        createdBy = UUID.randomUUID(),
+        modifiedBy = UUID.randomUUID(),
+    )
+
+    @Test
+    fun `findAll returns only workloads the caller's ReBAC claims allow`() {
+        val product = persistedProduct(name = "Platform")
+        val visible = persistedWorkload(name = "platform-api", productId = product.id!!)
+        val hidden = persistedWorkload(name = "platform-worker", productId = product.id!!)
+        given(repository.findAll(Sort.by("name"))).willReturn(listOf(visible, hidden))
+        given(productRepository.findAllById(setOf(product.id!!))).willReturn(listOf(product))
+        given(workloadStageRepository.findByWorkloadId(visible.id!!)).willReturn(emptyList())
+        given(rebac.canSeeWorkload("Platform", "platform-api")).willReturn(true)
+        given(rebac.canSeeWorkload("Platform", "platform-worker")).willReturn(false)
+
+        val result = service.findAll()
+
+        assertEquals(listOf("platform-api"), result.map { it.name })
+    }
+
+    @Test
+    fun `findById throws 404 for a workload the caller's ReBAC claims hide`() {
+        val product = persistedProduct(name = "Payments")
+        val workload = persistedWorkload(name = "payments-gateway", productId = product.id!!)
+        given(repository.findById(workload.id!!)).willReturn(Optional.of(workload))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
+        given(rebac.canSeeWorkload("Payments", "payments-gateway")).willReturn(false)
+
+        val exception = assertThrows(ResponseStatusException::class.java) { service.findById(workload.id!!) }
 
         assertEquals(404, exception.statusCode.value())
     }

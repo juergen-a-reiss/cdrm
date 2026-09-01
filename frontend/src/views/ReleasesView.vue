@@ -37,6 +37,8 @@ interface ReleaseRow {
   canPromote: boolean
   canRollback: boolean
   canRedeploy: boolean
+  canEdit: boolean
+  canDelete: boolean
   raw: ReleaseResponse
 }
 
@@ -73,12 +75,24 @@ const rows = computed<ReleaseRow[]>(() =>
       canPromote: release.canPromote,
       canRollback: release.canRollback,
       canRedeploy: release.redeployableStages.length > 0,
+      canEdit: release.canEdit,
+      canDelete: release.canDelete,
       raw: release,
     })),
 )
 
+// The static role checks decide whether a caller can act on releases in general; a
+// caller's cdrm-release-actions claim (see backend RebacContext) can additionally grant
+// a specific row's action to a role with no baseline permission (e.g. cdrm-manager) —
+// so the column, and each icon within it, also shows when any row's own computed flag
+// says so, even without the matching role.
 const showActions = computed(
-  () => canManageReleases.value || canPromoteReleases.value || canRollbackReleases.value || canRedeployReleases.value,
+  () =>
+    canManageReleases.value ||
+    canPromoteReleases.value ||
+    canRollbackReleases.value ||
+    canRedeployReleases.value ||
+    rows.value.some((row) => row.canPromote || row.canRollback || row.canRedeploy || row.canEdit || row.canDelete),
 )
 
 const headers = computed<DataTableHeader<ReleaseRow>[]>(() => {
@@ -244,27 +258,27 @@ async function onRedeployed() {
     </template>
     <template v-if="showActions" #item.actions="{ item }">
       <v-btn
-        v-if="canPromoteReleases"
+        v-if="canPromoteReleases || item.canPromote"
         icon="mdi-arrow-up-bold-circle-outline"
         size="small"
         variant="text"
         class="mr-2"
         :disabled="!item.canPromote"
-        :title="item.canPromote ? 'Promote to next stage' : 'Already at the final stage'"
+        :title="item.canPromote ? 'Promote to next stage' : 'Not allowed, or already at the final stage'"
         @click.stop="promoteRelease(item.raw)"
       />
       <v-btn
-        v-if="canRollbackReleases"
+        v-if="canRollbackReleases || item.canRollback"
         icon="mdi-history"
         size="small"
         variant="text"
         class="mr-2"
         :disabled="!item.canRollback"
-        :title="item.canRollback ? 'Roll back stage to this release' : 'Already the head release for this stage'"
+        :title="item.canRollback ? 'Roll back stage to this release' : 'Not allowed, or already the head release for this stage'"
         @click.stop="rollbackRelease(item.raw)"
       />
       <v-btn
-        v-if="canRedeployReleases"
+        v-if="canRedeployReleases || item.canRedeploy"
         icon="mdi-cloud-upload-outline"
         size="small"
         variant="text"
@@ -273,8 +287,25 @@ async function onRedeployed() {
         :title="redeployTitle(item)"
         @click.stop="openRedeploy(item.raw)"
       />
-      <v-icon v-if="canManageReleases" icon="mdi-pencil" size="small" class="mr-2" @click.stop="openEdit(item.raw)" />
-      <v-icon v-if="canManageReleases" icon="mdi-delete" size="small" @click.stop="removeRelease(item.raw)" />
+      <v-btn
+        v-if="canManageReleases || item.canEdit"
+        icon="mdi-pencil"
+        size="small"
+        variant="text"
+        class="mr-2"
+        :disabled="!item.canEdit"
+        :title="item.canEdit ? 'Edit release' : 'Not allowed to edit at this stage'"
+        @click.stop="openEdit(item.raw)"
+      />
+      <v-btn
+        v-if="canManageReleases || item.canDelete"
+        icon="mdi-delete"
+        size="small"
+        variant="text"
+        :disabled="!item.canDelete"
+        :title="item.canDelete ? 'Delete release' : 'Not allowed to delete at this stage'"
+        @click.stop="removeRelease(item.raw)"
+      />
     </template>
     <template #expanded-row="{ item, columns }">
       <tr>
