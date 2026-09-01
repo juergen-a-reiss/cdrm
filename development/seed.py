@@ -310,7 +310,6 @@ def main() -> None:
     stage_ids = seed_stages(args.api_url, args.token, data["stages"], cluster_ids)
     product_ids = seed_products(args.api_url, args.token, data["products"], stage_ids)
     workload_ids = seed_workloads(args.api_url, args.token, data["workloads"], product_ids)
-    seed_releases(args.api_url, args.token, data["releases"], workload_ids)
     bootstrap_kubernetes_objects(data["clusters"], data["stages"], data["workloads"])
     seed_releases(args.api_url, args.token, data["releases"], workload_ids)
     
