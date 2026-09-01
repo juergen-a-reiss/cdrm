@@ -4,13 +4,22 @@
 -->
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useResourceList } from '../composables/useResourceList'
 import { useWorkloadFilter } from '../composables/useWorkloadFilter'
 import { workloadsApi } from '../api/workloads'
 
 const { items: workloads } = useResourceList(workloadsApi.list)
 const { selectedWorkloadIds } = useWorkloadFilter()
+
+// Selected IDs are persisted across page loads (see useIdFilter), so a stale one — e.g.
+// left over after the database was recreated and workloads got new IDs — would
+// otherwise filter every row out forever with no way to tell why. Drop anything not
+// present once the live list has loaded.
+watch(workloads, (list) => {
+  const validIds = new Set(list.map((workload) => workload.id))
+  selectedWorkloadIds.value = selectedWorkloadIds.value.filter((id) => validIds.has(id))
+})
 
 const workloadOptions = computed(() =>
   workloads.value

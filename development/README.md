@@ -117,3 +117,26 @@ Run ./seed.py --token
 
 With a token for a devops role. Consider using the keycloak.http to get such a token.
 
+
+### Generating chart demo history
+
+`./generate-release-history.py` backfills many months of realistic-looking release
+history for one workload (default `platform-api`), so the Release History Dashboard's
+chart and filters have more than a handful of same-day rows to show. Each release
+also funnels down the pipeline — by default a 20%/33%/50% per-release chance of
+reaching qa/staging/production respectively — so there are far more dev releases
+than production ones, like a real deployment pipeline. `--start-per-week`/
+`--end-per-week` describe the ramp you'll see at the *last* stage (default 1 -> 4
+releases/week); the script scales up how many releases it starts at the first stage
+to compensate for the funnel. It writes directly to the `release_history` table
+(talks to Postgres the same way `seed.py --reset` does), so it doesn't need `--token`
+and should be run after `seed.py`.
+
+```bash
+./generate-release-history.py
+```
+
+Safe to re-run: pass `--replace` to delete this script's own previously generated
+rows for the workload first. `--dry-run` prints the plan without writing anything.
+See the script's `--help` for the release-rate ramp and excluded-months options.
+

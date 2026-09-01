@@ -23,7 +23,7 @@ import { colorForKey } from '../utils/categoricalPalette'
 import { formatDateTime } from '../utils/formatDateTime'
 import { formatDeploymentStatus } from '../utils/releaseHistoryStatus'
 
-type GroupBy = 'action' | 'product' | 'workload'
+type GroupBy = 'action' | 'product' | 'workload' | 'stage'
 
 const { items: entries, loading, error } = useResourceList(releasesApi.historyOverview)
 const { matches: matchesProduct } = useProductFilter()
@@ -46,9 +46,10 @@ const groupByOptions: { title: string; value: GroupBy }[] = [
   { title: 'Action', value: 'action' },
   { title: 'Product', value: 'product' },
   { title: 'Workload', value: 'workload' },
+  { title: 'Stage', value: 'stage' },
 ]
 const groupBy = ref<GroupBy>('action')
-const chartType = ref<'bar' | 'line'>('bar')
+const chartType = ref<'bar' | 'line'>('line')
 
 // Soft cap on distinct product/workload series — beyond it the tail folds into
 // "Other" rather than generating more hues (a 9th+ color is indistinguishable
@@ -65,6 +66,25 @@ function monthsAgo(n: number): string {
   d.setDate(1)
   d.setMonth(d.getMonth() - n)
   return monthKey(d)
+}
+
+// Every YYYY-MM from startMonth to endMonth inclusive, so a quiet month in the middle
+// of the span still gets its own zero-filled slot instead of being skipped.
+function monthRange(startMonth: string, endMonth: string): string[] {
+  const [startYear, startM] = startMonth.split('-').map(Number)
+  const [endYear, endM] = endMonth.split('-').map(Number)
+  const months: string[] = []
+  let year = startYear
+  let month = startM
+  while (year < endYear || (year === endYear && month <= endM)) {
+    months.push(`${year}-${String(month).padStart(2, '0')}`)
+    month++
+    if (month > 12) {
+      month = 1
+      year++
+    }
+  }
+  return months
 }
 
 function monthLabel(month: string): string {
@@ -92,22 +112,42 @@ const filteredEntries = computed(() =>
 
 // The month axis is built from the selected range (zero-filled), not just months
 // that happen to have data — otherwise a quiet month reads as "missing" rather
-// than "zero", which misstates the trend.
+// than "zero", which misstates the trend. For "All time" there's no fixed range to
+// enumerate, so it spans the earliest to the latest month present in the filtered
+// data instead — still filling in any quiet month in between, not just the ones
+// with a match.
 const chartMonths = computed<string[]>(() => {
   if (monthsBack.value > 0) {
     return Array.from({ length: monthsBack.value }, (_, i) => monthsAgo(monthsBack.value - 1 - i))
   }
-  return [...new Set(filteredEntries.value.map(entryMonth))].sort()
+  const months = filteredEntries.value.map(entryMonth)
+  if (months.length === 0) return []
+  const sorted = [...new Set(months)].sort()
+  return monthRange(sorted[0], sorted[sorted.length - 1])
 })
 
 const chartLabels = computed(() => chartMonths.value.map(monthLabel))
 
 function entityId(entry: ReleaseHistoryOverviewEntry): string {
-  return (groupBy.value === 'product' ? entry.productId : entry.workloadId) ?? 'unknown'
+  switch (groupBy.value) {
+    case 'product':
+      return entry.productId
+    case 'stage':
+      return entry.stage.id
+    default:
+      return entry.workloadId ?? 'unknown'
+  }
 }
 
 function entityName(entry: ReleaseHistoryOverviewEntry): string {
-  return groupBy.value === 'product' ? entry.productName : entry.workloadName
+  switch (groupBy.value) {
+    case 'product':
+      return entry.productName
+    case 'stage':
+      return entry.stage.name
+    default:
+      return entry.workloadName
+  }
 }
 
 // Ranked by volume so the entities that actually matter keep their own series;

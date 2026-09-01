@@ -4,13 +4,22 @@
 -->
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useResourceList } from '../composables/useResourceList'
 import { useStageFilter } from '../composables/useStageFilter'
 import { stagesApi } from '../api/stages'
 
 const { items: stages } = useResourceList(stagesApi.list)
 const { selectedStageIds } = useStageFilter()
+
+// Selected IDs are persisted across page loads (see useIdFilter), so a stale one — e.g.
+// left over after the database was recreated and stages got new IDs — would otherwise
+// filter every row out forever with no way to tell why. Drop anything not present once
+// the live list has loaded.
+watch(stages, (list) => {
+  const validIds = new Set(list.map((stage) => stage.id))
+  selectedStageIds.value = selectedStageIds.value.filter((id) => validIds.has(id))
+})
 
 const stageOptions = computed(() =>
   stages.value

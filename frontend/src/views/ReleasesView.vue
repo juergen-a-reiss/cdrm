@@ -106,17 +106,25 @@ const historyByRelease = ref<Record<string, ReleaseHistoryEntry[]>>({})
 const historyLoading = ref<Record<string, boolean>>({})
 const historyError = ref<Record<string, string | null>>({})
 
+// A row's history can go stale without any action of the viewer's own — the background
+// scheduler job deploys pending entries independently — so every expand re-fetches
+// instead of trusting a previous fetch's cache.
+async function loadHistory(id: string) {
+  if (historyLoading.value[id]) return
+  historyLoading.value[id] = true
+  historyError.value[id] = null
+  try {
+    historyByRelease.value[id] = await releasesApi.history(id)
+  } catch (e) {
+    historyError.value[id] = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to load history'
+  } finally {
+    historyLoading.value[id] = false
+  }
+}
+
 watch(expanded, async (ids) => {
   for (const id of ids) {
-    if (historyByRelease.value[id] || historyLoading.value[id]) continue
-    historyLoading.value[id] = true
-    try {
-      historyByRelease.value[id] = await releasesApi.history(id)
-    } catch (e) {
-      historyError.value[id] = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to load history'
-    } finally {
-      historyLoading.value[id] = false
-    }
+    await loadHistory(id)
   }
 })
 
@@ -150,8 +158,8 @@ async function promoteRelease(release: ReleaseResponse) {
     if (result.deployError) {
       showToast(`Deploy failed (${result.deployError}) — it will be retried automatically once the cluster is reachable again.`)
     }
-    // Stage may have changed; force the next expand to re-fetch instead of showing stale history.
-    delete historyByRelease.value[release.id]
+    // A new history entry was recorded; refresh it now if it's currently visible.
+    if (expanded.value.includes(release.id)) await loadHistory(release.id)
     await reload()
   } catch (e) {
     actionError.value = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to promote release'
@@ -165,8 +173,8 @@ async function rollbackRelease(release: ReleaseResponse) {
   actionError.value = null
   try {
     await releasesApi.rollback(release.id)
-    // A new history entry was recorded; force the next expand to re-fetch instead of showing stale history.
-    delete historyByRelease.value[release.id]
+    // A new history entry was recorded; refresh it now if it's currently visible.
+    if (expanded.value.includes(release.id)) await loadHistory(release.id)
     await reload()
   } catch (e) {
     actionError.value = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to roll back release'
@@ -184,9 +192,9 @@ function openRedeploy(release: ReleaseResponse) {
 }
 
 async function onRedeployed() {
-  if (redeployingRelease.value) {
-    // A new history entry was recorded; force the next expand to re-fetch instead of showing stale history.
-    delete historyByRelease.value[redeployingRelease.value.id]
+  // A new history entry was recorded; refresh it now if it's currently visible.
+  if (redeployingRelease.value && expanded.value.includes(redeployingRelease.value.id)) {
+    await loadHistory(redeployingRelease.value.id)
   }
   await reload()
 }
