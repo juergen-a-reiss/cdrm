@@ -16,6 +16,8 @@ const props = defineProps<{
   // must stay off unless a consumer actually wants it.
   expandableRows?: boolean
   expanded?: string[]
+  // Client-side text filter matched against every column's rendered value.
+  search?: string
 }>()
 
 defineSlots<
@@ -43,6 +45,7 @@ const itemSlotNames = computed(() => Object.keys(slots).filter((name) => name.st
     :headers="headers"
     :items="items"
     :loading="loading"
+    :search="search"
     item-value="id"
     :class="{ 'cdrm-expandable-rows': expandableRows }"
     :expand-on-click="expandableRows"

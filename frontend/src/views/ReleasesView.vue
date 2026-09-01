@@ -23,6 +23,7 @@ import type { ReleaseHistoryEntry, ReleaseResponse } from '../api/types'
 import { canManageReleases, canPromoteReleases, canRedeployReleases, canRollbackReleases } from '../auth/roles'
 import { formatDateTime } from '../utils/formatDateTime'
 import { RELEASE_HISTORY_ACTION_LABELS } from '../utils/releaseHistoryAction'
+import { formatDeploymentStatus } from '../utils/releaseHistoryStatus'
 
 interface ReleaseRow {
   id: string
@@ -282,7 +283,7 @@ async function onRedeployed() {
                 <td>{{ entry.stage.name }}</td>
                 <td>{{ RELEASE_HISTORY_ACTION_LABELS[entry.action] }}</td>
                 <td>{{ formatDateTime(entry.timestamp) }}</td>
-                <td>{{ entry.deployedAt ? formatDateTime(entry.deployedAt) : 'Pending' }}</td>
+                <td>{{ formatDeploymentStatus(entry) }}</td>
                 <td>{{ entry.createdBy }}</td>
               </tr>
             </tbody>

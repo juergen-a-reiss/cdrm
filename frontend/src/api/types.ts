@@ -174,22 +174,28 @@ export interface ReleaseHistoryEntry {
   stage: ReleaseStageInfo
   timestamp: string
   deployedAt: string | null
+  // The SCHEDULED-policy trigger time this entry is waiting on. Null once deployed, for
+  // IMMEDIATE-policy stages, or if no cron is configured for this (product, stage).
+  scheduledAt: string | null
   createdBy: string
 }
 
-// Null product/workload fields mean the release (and possibly since then the
-// workload itself) has been deleted, so its identity can no longer be resolved.
+// productId/productName/workloadName/stage.name are a snapshot taken when the entry was
+// recorded, so they stay populated even after the product/workload/stage that produced
+// them is later deleted. workloadId stays nullable only for parity with the backing
+// entity field.
 export interface ReleaseHistoryOverviewEntry {
   id: string
   releaseId: string
   binaryUrl: string
   action: ReleaseHistoryAction
-  productId: string | null
-  productName: string | null
+  productId: string
+  productName: string
   workloadId: string | null
-  workloadName: string | null
+  workloadName: string
   stage: ReleaseStageInfo
   timestamp: string
   deployedAt: string | null
+  scheduledAt: string | null
   createdBy: string
 }

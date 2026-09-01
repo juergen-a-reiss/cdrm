@@ -5,6 +5,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
 import { useResourceList } from '../composables/useResourceList'
 import { useProductFilter } from '../composables/useProductFilter'
 import { useStageFilter } from '../composables/useStageFilter'
@@ -12,6 +13,7 @@ import { useWorkloadFilter } from '../composables/useWorkloadFilter'
 import ProductFilterBar from '../components/ProductFilterBar.vue'
 import StageFilterBar from '../components/StageFilterBar.vue'
 import WorkloadFilterBar from '../components/WorkloadFilterBar.vue'
+import ResourceTable from '../components/ResourceTable.vue'
 import ReleaseHistoryChart from '../components/ReleaseHistoryChart.vue'
 import type { ChartSeries } from '../components/ReleaseHistoryChart.vue'
 import { releasesApi } from '../api/releases'
@@ -19,11 +21,12 @@ import type { ReleaseHistoryAction, ReleaseHistoryOverviewEntry } from '../api/t
 import { RELEASE_HISTORY_ACTIONS, RELEASE_HISTORY_ACTION_COLORS, RELEASE_HISTORY_ACTION_LABELS } from '../utils/releaseHistoryAction'
 import { colorForKey } from '../utils/categoricalPalette'
 import { formatDateTime } from '../utils/formatDateTime'
+import { formatDeploymentStatus } from '../utils/releaseHistoryStatus'
 
 type GroupBy = 'action' | 'product' | 'workload'
 
 const { items: entries, loading, error } = useResourceList(releasesApi.historyOverview)
-const { selectedProductIds, matches: matchesProduct } = useProductFilter()
+const { matches: matchesProduct } = useProductFilter()
 const { matches: matchesStage } = useStageFilter()
 const { selectedWorkloadIds, matches: matchesWorkload } = useWorkloadFilter()
 
@@ -78,7 +81,7 @@ const cutoffMonth = computed(() => (monthsBack.value === 0 ? null : monthsAgo(mo
 
 const filteredEntries = computed(() =>
   entries.value.filter((entry) => {
-    if (entry.productId === null ? selectedProductIds.value.length > 0 : !matchesProduct(entry.productId)) return false
+    if (!matchesProduct(entry.productId)) return false
     if (entry.workloadId === null ? selectedWorkloadIds.value.length > 0 : !matchesWorkload(entry.workloadId)) return false
     if (!matchesStage(entry.stage.id)) return false
     if (selectedActions.value.length > 0 && !selectedActions.value.includes(entry.action)) return false
@@ -104,7 +107,7 @@ function entityId(entry: ReleaseHistoryOverviewEntry): string {
 }
 
 function entityName(entry: ReleaseHistoryOverviewEntry): string {
-  return (groupBy.value === 'product' ? entry.productName : entry.workloadName) ?? 'Unknown'
+  return groupBy.value === 'product' ? entry.productName : entry.workloadName
 }
 
 // Ranked by volume so the entities that actually matter keep their own series;
@@ -153,7 +156,49 @@ const chartValues = computed<Record<string, number[]>>(() => {
   return values
 })
 
-const tableEntries = computed(() => [...filteredEntries.value].sort((a, b) => b.timestamp.localeCompare(a.timestamp)))
+interface HistoryRow {
+  id: string
+  timestamp: string
+  actionLabel: string
+  productName: string
+  workloadName: string
+  stageName: string
+  binaryUrl: string
+  deployedDisplay: string
+  createdBy: string
+}
+
+// Free-text filter over product/workload/stage/binary-URL/etc., independent of the
+// ID-based filter bars above — this one works even for a product/workload/stage that's
+// since been deleted, since it matches against the name snapshotted onto each row.
+const search = ref('')
+
+// Backend already returns entries newest-first; no extra client-side sort needed unless
+// the user clicks a column header.
+const tableRows = computed<HistoryRow[]>(() =>
+  filteredEntries.value.map((entry) => ({
+    id: entry.id,
+    timestamp: entry.timestamp,
+    actionLabel: RELEASE_HISTORY_ACTION_LABELS[entry.action],
+    productName: entry.productName,
+    workloadName: entry.workloadName,
+    stageName: entry.stage.name,
+    binaryUrl: entry.binaryUrl,
+    deployedDisplay: formatDeploymentStatus(entry),
+    createdBy: entry.createdBy,
+  })),
+)
+
+const historyHeaders: DataTableHeader<HistoryRow>[] = [
+  { title: 'Timestamp', key: 'timestamp' },
+  { title: 'Action', key: 'actionLabel' },
+  { title: 'Product', key: 'productName' },
+  { title: 'Workload', key: 'workloadName' },
+  { title: 'Stage', key: 'stageName' },
+  { title: 'Binary URL', key: 'binaryUrl' },
+  { title: 'Deployed', key: 'deployedDisplay' },
+  { title: 'By', key: 'createdBy' },
+]
 </script>
 
 <template>
@@ -202,35 +247,22 @@ const tableEntries = computed(() => [...filteredEntries.value].sort((a, b) => b.
   </v-card>
 
   <v-card variant="outlined">
-    <v-card-title class="text-subtitle-1">Release History Details</v-card-title>
-    <v-table density="compact">
-      <thead>
-        <tr>
-          <th>Timestamp</th>
-          <th>Action</th>
-          <th>Product</th>
-          <th>Workload</th>
-          <th>Stage</th>
-          <th>Binary URL</th>
-          <th>Deployed</th>
-          <th>By</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="entry in tableEntries" :key="entry.id">
-          <td>{{ formatDateTime(entry.timestamp) }}</td>
-          <td>{{ RELEASE_HISTORY_ACTION_LABELS[entry.action] }}</td>
-          <td>{{ entry.productName ?? '—' }}</td>
-          <td>{{ entry.workloadName ?? '—' }}</td>
-          <td>{{ entry.stage.name }}</td>
-          <td>{{ entry.binaryUrl }}</td>
-          <td>{{ entry.deployedAt ? formatDateTime(entry.deployedAt) : 'Pending' }}</td>
-          <td>{{ entry.createdBy }}</td>
-        </tr>
-        <tr v-if="tableEntries.length === 0">
-          <td colspan="8" class="text-center text-medium-emphasis">No history for the selected filters.</td>
-        </tr>
-      </tbody>
-    </v-table>
+    <v-card-title class="text-subtitle-1 d-flex align-center flex-wrap ga-4">
+      <span>Release History Details</span>
+      <v-spacer />
+      <v-text-field
+        v-model="search"
+        label="Search product, workload, stage…"
+        prepend-inner-icon="mdi-magnify"
+        density="compact"
+        variant="outlined"
+        clearable
+        hide-details
+        width="280"
+      />
+    </v-card-title>
+    <ResourceTable :headers="historyHeaders" :items="tableRows" :loading="loading" :error="null" :search="search">
+      <template #item.timestamp="{ item }">{{ formatDateTime(item.timestamp) }}</template>
+    </ResourceTable>
   </v-card>
 </template>

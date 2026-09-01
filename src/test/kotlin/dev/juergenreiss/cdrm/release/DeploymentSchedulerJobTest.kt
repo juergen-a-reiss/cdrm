@@ -88,6 +88,24 @@ class DeploymentSchedulerJobTest {
         modifiedBy = UUID.randomUUID(),
     )
 
+    private fun persistedHistoryEntry(
+        releaseId: UUID,
+        stageId: UUID,
+        deployedAt: Instant? = null,
+        createdAt: Instant = Instant.now(),
+    ) = ReleaseHistory(
+        releaseId = releaseId,
+        productId = UUID.randomUUID(),
+        productName = "product",
+        workloadName = "workload",
+        binaryUrl = "https://registry.example.com/app:1.0.0",
+        stageId = stageId,
+        stageName = "stage",
+        deployedAt = deployedAt,
+        createdAt = createdAt,
+        createdBy = UUID.randomUUID(),
+    )
+
     @Test
     fun `deploys a scheduled entry once its cron time has passed`() {
         val releaseId = UUID.randomUUID()
@@ -95,14 +113,7 @@ class DeploymentSchedulerJobTest {
         val productId = UUID.randomUUID()
         val stageId = UUID.randomUUID()
 
-        val pending = ReleaseHistory(
-            releaseId = releaseId,
-            binaryUrl = "https://registry.example.com/app:1.0.0",
-            stageId = stageId,
-            deployedAt = null,
-            createdAt = Instant.now().minus(2, ChronoUnit.DAYS),
-            createdBy = UUID.randomUUID(),
-        )
+        val pending = persistedHistoryEntry(releaseId = releaseId, stageId = stageId, createdAt = Instant.now().minus(2, ChronoUnit.DAYS))
         given(releaseHistoryRepository.findPendingForUpdate()).willReturn(listOf(pending))
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         val workload = persistedWorkload(workloadId, productId)
@@ -127,14 +138,7 @@ class DeploymentSchedulerJobTest {
         val productId = UUID.randomUUID()
         val stageId = UUID.randomUUID()
 
-        val pending = ReleaseHistory(
-            releaseId = releaseId,
-            binaryUrl = "https://registry.example.com/app:1.0.0",
-            stageId = stageId,
-            deployedAt = null,
-            createdAt = Instant.now(),
-            createdBy = UUID.randomUUID(),
-        )
+        val pending = persistedHistoryEntry(releaseId = releaseId, stageId = stageId, createdAt = Instant.now())
         given(releaseHistoryRepository.findPendingForUpdate()).willReturn(listOf(pending))
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(workloadId, productId)))
@@ -157,14 +161,7 @@ class DeploymentSchedulerJobTest {
         val productId = UUID.randomUUID()
         val stageId = UUID.randomUUID()
 
-        val pending = ReleaseHistory(
-            releaseId = releaseId,
-            binaryUrl = "https://registry.example.com/app:1.0.0",
-            stageId = stageId,
-            deployedAt = null,
-            createdAt = Instant.now(),
-            createdBy = UUID.randomUUID(),
-        )
+        val pending = persistedHistoryEntry(releaseId = releaseId, stageId = stageId, createdAt = Instant.now())
         given(releaseHistoryRepository.findPendingForUpdate()).willReturn(listOf(pending))
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         val workload = persistedWorkload(workloadId, productId)
@@ -186,14 +183,7 @@ class DeploymentSchedulerJobTest {
         val productId = UUID.randomUUID()
         val stageId = UUID.randomUUID()
 
-        val pending = ReleaseHistory(
-            releaseId = releaseId,
-            binaryUrl = "https://registry.example.com/app:1.0.0",
-            stageId = stageId,
-            deployedAt = null,
-            createdAt = Instant.now(),
-            createdBy = UUID.randomUUID(),
-        )
+        val pending = persistedHistoryEntry(releaseId = releaseId, stageId = stageId, createdAt = Instant.now())
         given(releaseHistoryRepository.findPendingForUpdate()).willReturn(listOf(pending))
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         val workload = persistedWorkload(workloadId, productId)
@@ -211,14 +201,7 @@ class DeploymentSchedulerJobTest {
     @Test
     fun `skips an entry whose release no longer exists`() {
         val releaseId = UUID.randomUUID()
-        val pending = ReleaseHistory(
-            releaseId = releaseId,
-            binaryUrl = "https://registry.example.com/app:1.0.0",
-            stageId = UUID.randomUUID(),
-            deployedAt = null,
-            createdAt = Instant.now().minus(1, ChronoUnit.DAYS),
-            createdBy = UUID.randomUUID(),
-        )
+        val pending = persistedHistoryEntry(releaseId = releaseId, stageId = UUID.randomUUID(), createdAt = Instant.now().minus(1, ChronoUnit.DAYS))
         given(releaseHistoryRepository.findPendingForUpdate()).willReturn(listOf(pending))
         given(releaseRepository.findById(releaseId)).willReturn(Optional.empty())
 
@@ -244,14 +227,7 @@ class DeploymentSchedulerJobTest {
         val productId = UUID.randomUUID()
         val stageId = UUID.randomUUID()
 
-        val pending = ReleaseHistory(
-            releaseId = releaseId,
-            binaryUrl = "https://registry.example.com/app:1.0.0",
-            stageId = stageId,
-            deployedAt = null,
-            createdAt = Instant.now().minus(1, ChronoUnit.DAYS),
-            createdBy = UUID.randomUUID(),
-        )
+        val pending = persistedHistoryEntry(releaseId = releaseId, stageId = stageId, createdAt = Instant.now().minus(1, ChronoUnit.DAYS))
         given(releaseHistoryRepository.findPendingForUpdate()).willReturn(listOf(pending))
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(workloadId, productId)))

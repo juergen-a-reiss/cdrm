@@ -64,3 +64,60 @@ databaseChangeLog:
             constraintName: fk_workload_product
             referencedTableName: product
             referencedColumnNames: id
+        - createIndex:
+            tableName: workload
+            columns:
+              - column:
+                  name: product_id
+            indexName: idx_workload_product_id
+
+
+        - createTable:
+            tableName: workload_stage
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: workload_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: stage_id
+                  type: uuid
+                  constraints:
+                    nullable: false
+        - addUniqueConstraint:
+            tableName: workload_stage
+            columnNames: workload_id, stage_id
+            constraintName: uq_workload_stage
+        - addForeignKeyConstraint:
+            baseTableName: workload_stage
+            baseColumnNames: workload_id
+            constraintName: fk_workload_stage_workload
+            referencedTableName: workload
+            referencedColumnNames: id
+            onDelete: CASCADE
+        - addForeignKeyConstraint:
+            baseTableName: workload_stage
+            baseColumnNames: stage_id
+            constraintName: fk_workload_stage_stage
+            referencedTableName: stage
+            referencedColumnNames: id
+            onDelete: CASCADE
+        - createIndex:
+            tableName: workload_stage
+            columns:
+              - column:
+                  name: workload_id
+            indexName: idx_workload_stage_workload_id
+        - createIndex:
+            tableName: workload_stage
+            columns:
+              - column:
+                  name: stage_id
+            indexName: idx_workload_stage_stage_id

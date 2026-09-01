@@ -47,23 +47,30 @@ data class ReleaseHistoryEntry(
     val stage: ReleaseStageInfo,
     val timestamp: Instant,
     val deployedAt: Instant?,
+    // The SCHEDULED-policy trigger time this entry is waiting on, so the UI can render
+    // "Pending (<time>)" instead of a bare "Pending". Null once deployed, for
+    // IMMEDIATE-policy stages (retried every tick, no fixed time), or if no cron is
+    // configured for this (product, stage).
+    val scheduledAt: Instant?,
     val createdBy: UUID,
 )
 
-// Null product/workload fields mean the release (and since then, possibly the
-// workload itself) has been deleted — release_history has no FK to either so it
-// survives that, but the identity of who it belonged to can no longer be resolved.
+// productId/productName/workloadName/stage.name are a snapshot taken when the entry was
+// recorded, so they stay populated even after the product/workload/stage that produced
+// them is later deleted. workloadId stays nullable only for parity with the entity field
+// it's read from (release_history.workload_id).
 data class ReleaseHistoryOverviewEntry(
     val id: UUID,
     val releaseId: UUID,
     val binaryUrl: String,
     val action: ReleaseHistoryAction,
-    val productId: UUID?,
-    val productName: String?,
+    val productId: UUID,
+    val productName: String,
     val workloadId: UUID?,
-    val workloadName: String?,
+    val workloadName: String,
     val stage: ReleaseStageInfo,
     val timestamp: Instant,
     val deployedAt: Instant?,
+    val scheduledAt: Instant?,
     val createdBy: UUID,
 )

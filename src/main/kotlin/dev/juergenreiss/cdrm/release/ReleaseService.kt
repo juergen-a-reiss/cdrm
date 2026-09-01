@@ -16,12 +16,14 @@ import org.slf4j.LoggerFactory
 import org.springframework.data.domain.AuditorAware
 import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
+import org.springframework.scheduling.support.CronExpression
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
 import java.net.URI
 import java.net.URISyntaxException
 import java.time.Instant
+import java.time.ZoneId
 import java.util.*
 
 @Service
@@ -50,48 +52,48 @@ class ReleaseService(
     fun history(id: UUID): List<ReleaseHistoryEntry> {
         if (!repository.existsById(id)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
         val entries = releaseHistoryRepository.findByReleaseIdOrderByCreatedAtDesc(id)
+        // Only needed for the still-live stage's deploymentPolicy/order — name/id on the
+        // entry itself are read straight off the row, not joined.
         val stagesById = stageRepository.findAllById(entries.map { it.stageId }.toSet()).associateBy { it.id }
         return entries.map { entry ->
-            val stage = stagesById[entry.stageId] ?: throw IllegalStateException("Stage ${entry.stageId} not found")
+            val stage = stagesById[entry.stageId]
             ReleaseHistoryEntry(
                 id = entry.id!!,
                 binaryUrl = entry.binaryUrl,
                 action = entry.action,
-                stage = ReleaseStageInfo(id = stage.id!!, name = stage.name, order = stage.order),
+                stage = ReleaseStageInfo(id = entry.stageId, name = entry.stageName, order = stage?.order ?: 0),
                 timestamp = entry.createdAt!!,
                 deployedAt = entry.deployedAt,
+                scheduledAt = scheduledDeploymentFor(entry, stage, entry.productId),
                 createdBy = entry.createdBy,
             )
         }
     }
 
     // Every release-history entry across every release, for the history dashboard's chart
-    // and table. Batches the workload/product/stage lookups instead of resolving them
-    // per-entry, since this can return every deployment event the system has ever recorded.
+    // and table. Product/workload/stage name and id are read straight off each row (a
+    // snapshot taken when it was recorded) rather than joined live, so this stays correct
+    // even for entries whose product/workload/stage has since been deleted. The stage
+    // lookup below is only for the still-live stage's deploymentPolicy/order.
     fun historyOverview(): List<ReleaseHistoryOverviewEntry> {
         val entries = releaseHistoryRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))
-        val workloadIds = entries.mapNotNull { it.workloadId }.toSet()
-        val workloadsById = workloadRepository.findAllById(workloadIds).associateBy { it.id }
-        val productIds = workloadsById.values.map { it.productId }.toSet()
-        val productsById = productRepository.findAllById(productIds).associateBy { it.id }
         val stagesById = stageRepository.findAllById(entries.map { it.stageId }.toSet()).associateBy { it.id }
 
         return entries.map { entry ->
-            val workload = entry.workloadId?.let { workloadsById[it] }
-            val product = workload?.let { productsById[it.productId] }
-            val stage = stagesById[entry.stageId] ?: throw IllegalStateException("Stage ${entry.stageId} not found")
+            val stage = stagesById[entry.stageId]
             ReleaseHistoryOverviewEntry(
                 id = entry.id!!,
                 releaseId = entry.releaseId,
                 binaryUrl = entry.binaryUrl,
                 action = entry.action,
-                productId = product?.id,
-                productName = product?.name,
-                workloadId = workload?.id,
-                workloadName = workload?.name,
-                stage = ReleaseStageInfo(id = stage.id!!, name = stage.name, order = stage.order),
+                productId = entry.productId,
+                productName = entry.productName,
+                workloadId = entry.workloadId,
+                workloadName = entry.workloadName,
+                stage = ReleaseStageInfo(id = entry.stageId, name = entry.stageName, order = stage?.order ?: 0),
                 timestamp = entry.createdAt!!,
                 deployedAt = entry.deployedAt,
+                scheduledAt = scheduledDeploymentFor(entry, stage, entry.productId),
                 createdBy = entry.createdBy,
             )
         }
@@ -271,12 +273,18 @@ class ReleaseService(
     // The row is always created with deployedAt null first — on failure it's simply left
     // that way, and DeploymentSchedulerJob retries it (and SCHEDULED-stage rows) every tick.
     private fun recordHistory(release: Release, stage: Stage, workload: Workload, userId: UUID, action: ReleaseHistoryAction) {
+        val product = productRepository.findById(workload.productId)
+            .orElseThrow { IllegalStateException("Product ${workload.productId} not found") }
         val entry = releaseHistoryRepository.save(
             ReleaseHistory(
                 releaseId = release.id!!,
                 workloadId = workload.id!!,
+                productId = product.id!!,
+                productName = product.name,
+                workloadName = workload.name,
                 binaryUrl = release.binaryUrl,
                 stageId = stage.id!!,
+                stageName = stage.name,
                 action = action,
                 deployedAt = null,
                 createdBy = userId,
@@ -292,6 +300,21 @@ class ReleaseService(
             "Recorded history for release {} at stage {} for workload {}: {}",
             release.id, stage.id, workload.id, if (entry.deployedAt != null) "deployed" else "pending",
         )
+    }
+
+    // Next SCHEDULED-policy trigger time for a still-pending history entry — same
+    // computation DeploymentSchedulerJob uses to decide when it's due — so the UI can show
+    // "Pending (<time>)" instead of a bare "Pending". Null once deployed, for
+    // IMMEDIATE-policy stages (retried every tick, no fixed time), or if no cron is
+    // configured for this (product, stage).
+    private fun scheduledDeploymentFor(entry: ReleaseHistory, stage: Stage?, productId: UUID): Instant? {
+        if (entry.deployedAt != null || stage?.deploymentPolicy != DeploymentPolicy.SCHEDULED) return null
+        val cron = productStageRepository.findByProductIdAndStageId(productId, entry.stageId)?.deploymentCron ?: return null
+        return try {
+            CronExpression.parse(cron).next(entry.createdAt!!.atZone(ZoneId.systemDefault()))?.toInstant()
+        } catch (e: IllegalArgumentException) {
+            null
+        }
     }
 
     private fun incrementReleaseMetric(counterName: String, workload: Workload, stage: Stage) {

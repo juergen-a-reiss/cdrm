@@ -146,6 +146,36 @@ class ReleaseServiceTest {
         modifiedBy = UUID.randomUUID(),
     )
 
+    private fun persistedHistoryEntry(
+        id: UUID = UUID.randomUUID(),
+        releaseId: UUID,
+        workloadId: UUID? = null,
+        productId: UUID = UUID.randomUUID(),
+        productName: String = "product",
+        workloadName: String = "workload",
+        binaryUrl: String = "https://registry.example.com/app:1.0.0",
+        stageId: UUID,
+        stageName: String = "stage",
+        action: ReleaseHistoryAction = ReleaseHistoryAction.PROMOTED,
+        deployedAt: Instant? = null,
+        createdAt: Instant = Instant.now(),
+        createdBy: UUID = UUID.randomUUID(),
+    ) = ReleaseHistory(
+        id = id,
+        releaseId = releaseId,
+        workloadId = workloadId,
+        productId = productId,
+        productName = productName,
+        workloadName = workloadName,
+        binaryUrl = binaryUrl,
+        stageId = stageId,
+        stageName = stageName,
+        action = action,
+        deployedAt = deployedAt,
+        createdAt = createdAt,
+        createdBy = createdBy,
+    )
+
     private fun stubWorkloadStages(workloadId: UUID, stages: List<Stage>) {
         given(workloadStageRepository.findByWorkloadId(workloadId)).willReturn(
             stages.map { WorkloadStage(workloadId = workloadId, stageId = it.id!!) }
@@ -463,7 +493,7 @@ class ReleaseServiceTest {
                 prod.id!!, listOf(headReleaseId, targetReleaseId)
             )
         ).willReturn(
-            ReleaseHistory(releaseId = headReleaseId, binaryUrl = "https://registry.example.com/head", stageId = prod.id!!, createdBy = UUID.randomUUID())
+            persistedHistoryEntry(releaseId = headReleaseId, binaryUrl = "https://registry.example.com/head", stageId = prod.id!!)
         )
 
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
@@ -503,7 +533,7 @@ class ReleaseServiceTest {
         given(
             releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
         ).willReturn(
-            ReleaseHistory(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = prod.id!!, createdBy = UUID.randomUUID())
+            persistedHistoryEntry(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = prod.id!!)
         )
 
         val exception = assertThrows(ResponseStatusException::class.java) { service.rollback(releaseId) }
@@ -575,7 +605,7 @@ class ReleaseServiceTest {
         given(
             releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
         ).willReturn(
-            ReleaseHistory(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = prod.id!!, createdBy = UUID.randomUUID())
+            persistedHistoryEntry(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = prod.id!!)
         )
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
         given(deploymentExecutor.attemptDeploy(workload, prod, release.binaryUrl)).willReturn(true)
@@ -610,7 +640,7 @@ class ReleaseServiceTest {
                 prod.id!!, listOf(releaseId, headReleaseId)
             )
         ).willReturn(
-            ReleaseHistory(releaseId = headReleaseId, binaryUrl = "https://registry.example.com/head", stageId = prod.id!!, createdBy = UUID.randomUUID())
+            persistedHistoryEntry(releaseId = headReleaseId, binaryUrl = "https://registry.example.com/head", stageId = prod.id!!)
         )
 
         val exception = assertThrows(ResponseStatusException::class.java) {
@@ -678,7 +708,7 @@ class ReleaseServiceTest {
         given(
             releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(qa.id!!, listOf(releaseId))
         ).willReturn(
-            ReleaseHistory(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = qa.id!!, createdBy = UUID.randomUUID())
+            persistedHistoryEntry(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = qa.id!!)
         )
 
         val result = service.findById(releaseId)
@@ -705,7 +735,7 @@ class ReleaseServiceTest {
         given(
             releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(qa.id!!, listOf(releaseId, headReleaseId))
         ).willReturn(
-            ReleaseHistory(releaseId = headReleaseId, binaryUrl = "https://registry.example.com/head", stageId = qa.id!!, createdBy = UUID.randomUUID())
+            persistedHistoryEntry(releaseId = headReleaseId, binaryUrl = "https://registry.example.com/head", stageId = qa.id!!)
         )
 
         val result = service.findById(releaseId)
@@ -725,7 +755,7 @@ class ReleaseServiceTest {
         given(
             releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
         ).willReturn(
-            ReleaseHistory(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = prod.id!!, createdBy = UUID.randomUUID())
+            persistedHistoryEntry(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = prod.id!!)
         )
 
         val result = service.findById(releaseId)
@@ -765,7 +795,7 @@ class ReleaseServiceTest {
 
         val deployedAt = Instant.now()
         given(releaseHistoryRepository.findTopByReleaseIdAndDeployedAtIsNotNullOrderByDeployedAtDesc(releaseId)).willReturn(
-            ReleaseHistory(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = dev.id!!, deployedAt = deployedAt, createdBy = UUID.randomUUID())
+            persistedHistoryEntry(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = dev.id!!, deployedAt = deployedAt)
         )
 
         val result = service.findById(releaseId)
@@ -785,7 +815,9 @@ class ReleaseServiceTest {
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
         given(repository.save(release)).willReturn(release)
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
-        given(workloadRepository.findById(newWorkloadId)).willReturn(Optional.of(persistedWorkload(id = newWorkloadId)))
+        val product = persistedProduct()
+        given(workloadRepository.findById(newWorkloadId)).willReturn(Optional.of(persistedWorkload(id = newWorkloadId, productId = product.id!!)))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
 
         stubWorkloadStages(newWorkloadId, listOf(newStage))
         given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(newStage))
@@ -828,14 +860,12 @@ class ReleaseServiceTest {
 
         val stage = persistedStage(order = 1, name = "Dev")
         val deployedAt = Instant.now()
-        val entry = ReleaseHistory(
-            id = UUID.randomUUID(),
+        val entry = persistedHistoryEntry(
             releaseId = releaseId,
             binaryUrl = "https://registry.example.com/app:1.0.0",
             stageId = stage.id!!,
+            stageName = stage.name,
             deployedAt = deployedAt,
-            createdAt = Instant.now(),
-            createdBy = UUID.randomUUID(),
         )
         given(releaseHistoryRepository.findByReleaseIdOrderByCreatedAtDesc(releaseId)).willReturn(listOf(entry))
         given(stageRepository.findAllById(setOf(stage.id!!))).willReturn(listOf(stage))
@@ -849,23 +879,21 @@ class ReleaseServiceTest {
     }
 
     @Test
-    fun `historyOverview resolves product, workload and stage for each entry`() {
+    fun `historyOverview reads product, workload and stage directly off the row`() {
         val stage = persistedStage(order = 1, name = "Prod")
         val product = persistedProduct(name = "Platform")
         val workload = persistedWorkload(productId = product.id!!)
-        val entry = ReleaseHistory(
-            id = UUID.randomUUID(),
+        val entry = persistedHistoryEntry(
             releaseId = UUID.randomUUID(),
             workloadId = workload.id,
-            binaryUrl = "https://registry.example.com/app:1.0.0",
+            productId = product.id!!,
+            productName = product.name,
+            workloadName = workload.name,
             stageId = stage.id!!,
+            stageName = stage.name,
             action = ReleaseHistoryAction.PROMOTED,
-            createdAt = Instant.now(),
-            createdBy = UUID.randomUUID(),
         )
         given(releaseHistoryRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))).willReturn(listOf(entry))
-        given(workloadRepository.findAllById(setOf(workload.id!!))).willReturn(listOf(workload))
-        given(productRepository.findAllById(setOf(product.id!!))).willReturn(listOf(product))
         given(stageRepository.findAllById(setOf(stage.id!!))).willReturn(listOf(stage))
 
         val result = service.historyOverview()
@@ -881,17 +909,16 @@ class ReleaseServiceTest {
     }
 
     @Test
-    fun `historyOverview reports null product and workload when the workload is gone`() {
+    fun `historyOverview keeps the snapshotted product and workload names once those entities are deleted`() {
         val stage = persistedStage(order = 1, name = "Prod")
-        val entry = ReleaseHistory(
-            id = UUID.randomUUID(),
+        val entry = persistedHistoryEntry(
             releaseId = UUID.randomUUID(),
             workloadId = null,
-            binaryUrl = "https://registry.example.com/app:1.0.0",
+            productName = "Platform",
+            workloadName = "checkout",
             stageId = stage.id!!,
+            stageName = stage.name,
             action = ReleaseHistoryAction.ROLLED_BACK,
-            createdAt = Instant.now(),
-            createdBy = UUID.randomUUID(),
         )
         given(releaseHistoryRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))).willReturn(listOf(entry))
         given(stageRepository.findAllById(setOf(stage.id!!))).willReturn(listOf(stage))
@@ -901,9 +928,9 @@ class ReleaseServiceTest {
         assertEquals(1, result.size)
         assertEquals(ReleaseHistoryAction.ROLLED_BACK, result[0].action)
         assertNull(result[0].workloadId)
-        assertNull(result[0].workloadName)
-        assertNull(result[0].productId)
-        assertNull(result[0].productName)
+        assertEquals("checkout", result[0].workloadName)
+        assertEquals(entry.productId, result[0].productId)
+        assertEquals("Platform", result[0].productName)
         assertEquals(stage.name, result[0].stage.name)
     }
 

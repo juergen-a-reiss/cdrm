@@ -30,11 +30,27 @@ class ReleaseHistory(
     @Column(name = "workload_id")
     val workloadId: UUID? = null,
 
+    // Also denormalized, for the same reason as workloadId.
+    @Column(name = "product_id", nullable = false)
+    val productId: UUID,
+
+    // Snapshotted at insert time (like binaryUrl), not resolved via a live join — so the
+    // UI can always display and filter/sort on these even after the product/workload/
+    // stage that produced this row has since been deleted.
+    @Column(name = "product_name", nullable = false)
+    val productName: String,
+
+    @Column(name = "workload_name", nullable = false)
+    val workloadName: String,
+
     @Column(name = "binary_url", nullable = false)
     val binaryUrl: String,
 
     @Column(name = "stage_id", nullable = false)
     val stageId: UUID,
+
+    @Column(name = "stage_name", nullable = false)
+    val stageName: String,
 
     @Column(name = "action", nullable = false)
     @Enumerated(EnumType.STRING)
