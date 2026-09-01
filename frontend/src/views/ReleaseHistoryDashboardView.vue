@@ -10,6 +10,7 @@ import { useResourceList } from '../composables/useResourceList'
 import { useProductFilter } from '../composables/useProductFilter'
 import { useStageFilter } from '../composables/useStageFilter'
 import { useWorkloadFilter } from '../composables/useWorkloadFilter'
+import { usePersistedRef } from '../composables/usePersistedRef'
 import ProductFilterBar from '../components/ProductFilterBar.vue'
 import StageFilterBar from '../components/StageFilterBar.vue'
 import WorkloadFilterBar from '../components/WorkloadFilterBar.vue'
@@ -31,7 +32,10 @@ const { matches: matchesStage } = useStageFilter()
 const { selectedWorkloadIds, matches: matchesWorkload } = useWorkloadFilter()
 
 const actionOptions = RELEASE_HISTORY_ACTIONS.map((action) => ({ title: RELEASE_HISTORY_ACTION_LABELS[action], value: action }))
-const selectedActions = ref<ReleaseHistoryAction[]>([])
+// "Group by", "Range", and "Filter by action" are persisted (like the ID filters
+// above) so they survive a page reload instead of quietly resetting to their
+// defaults.
+const selectedActions = usePersistedRef<ReleaseHistoryAction[]>('cdrm.releaseHistory.actions', [])
 
 const rangeOptions = [
   { title: 'Last month', value: 1 },
@@ -40,7 +44,7 @@ const rangeOptions = [
   { title: 'Last 12 months', value: 12 },
   { title: 'All time', value: 0 },
 ]
-const monthsBack = ref(6)
+const monthsBack = usePersistedRef<number>('cdrm.releaseHistory.monthsBack', 6)
 
 const groupByOptions: { title: string; value: GroupBy }[] = [
   { title: 'Action', value: 'action' },
@@ -48,7 +52,7 @@ const groupByOptions: { title: string; value: GroupBy }[] = [
   { title: 'Workload', value: 'workload' },
   { title: 'Stage', value: 'stage' },
 ]
-const groupBy = ref<GroupBy>('action')
+const groupBy = usePersistedRef<GroupBy>('cdrm.releaseHistory.groupBy', 'action')
 const chartType = ref<'bar' | 'line'>('line')
 
 // Soft cap on distinct product/workload series — beyond it the tail folds into
