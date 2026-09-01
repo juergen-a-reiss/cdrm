@@ -218,3 +218,33 @@ supported:
 
 If an attribute is not set, then ReBAC does not apply for this user for this attribute.
 
+## Docker
+
+The backend and frontend ship as two separate images.
+
+- `Dockerfile` (repo root) — multi-stage build. Compiles the backend with `eclipse-temurin:26-jdk`
+  (dependency resolution and compilation are separate cached layers, so an ordinary source change
+  doesn't re-download anything), then extracts the boot jar into Spring Boot's layered-jar structure and
+  copies each layer separately into an `eclipse-temurin:26-jre` runtime image — the ~150 third-party
+  dependency jars (~90 MB) end up in one layer that stays byte-identical across code-only rebuilds,
+  separate from our own compiled classes (under 1 MB). Needs `OIDC_ISSUER_URI` and the Postgres
+  datasource settings at runtime (see `application.yaml`); listens on `8080`.
+- `frontend/Dockerfile` — builds the Vue app with `node`, then serves the static `dist/` output with
+  `nginx:alpine` (`frontend/nginx.conf`). npm dependencies live in their own cached layer during the
+  build stage (installed before the source is copied in), but the runtime image doesn't ship any of
+  them at all — only the built `dist/` assets, since the browser just needs the bundled JS. Proxies
+  `/api/` to a `backend` host on port `8080` — resolved lazily per-request via nginx's `resolver`, so
+  the container stays up even if that host isn't reachable yet. Listens on `80`.
+
+Build locally from the repo root:
+
+```bash
+docker build -t cdrm-backend .
+docker build -t cdrm-frontend -f frontend/Dockerfile frontend
+```
+
+`.github/workflows/docker.yml` builds both images on every push and pull request against `master`, and
+additionally pushes them to `ghcr.io/<owner>/cdrm-backend` and `ghcr.io/<owner>/cdrm-frontend` on pushes
+to `master` and on `vX.Y.Z` tags (pull requests only build, to validate the Dockerfiles without needing
+registry credentials).
+

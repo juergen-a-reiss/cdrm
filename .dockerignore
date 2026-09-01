@@ -1,0 +1,21 @@
+# Backend image build context (repo root) — only gradlew, gradle/, build files, and
+# src/ are actually copied into the image; everything below is excluded so it never
+# even reaches the Docker daemon.
+
+frontend/
+development/
+
+.git/
+.github/
+
+build/
+.gradle/
+.kotlin/
+.idea/
+.vscode/
+out/
+bin/
+
+.claude/
+
+*.md
