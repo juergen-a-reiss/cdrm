@@ -16,7 +16,9 @@ const props = defineProps<{
   // must stay off unless a consumer actually wants it.
   expandableRows?: boolean
   expanded?: string[]
-  // Client-side text filter matched against every column's rendered value.
+  // Client-side text filter. Matches each header's raw item value — a column rendered
+  // through a custom #item.<key> slot is searched on the underlying value, not the
+  // slot's formatted output.
   search?: string
 }>()
 

@@ -1,6 +1,6 @@
 databaseChangeLog:
   - changeSet:
-      id: 005-create-release
+      id: 004-create-release
       author: juergen
       changes:
         - createTable:
@@ -55,6 +55,12 @@ databaseChangeLog:
             baseColumnNames: workload_id
             constraintName: fk_release_workload
             referencedTableName: workload
+            referencedColumnNames: id
+        - addForeignKeyConstraint:
+            baseTableName: release
+            baseColumnNames: current_stage_id
+            constraintName: fk_release_current_stage
+            referencedTableName: stage
             referencedColumnNames: id
 
         - createTable:

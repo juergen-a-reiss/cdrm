@@ -3,6 +3,7 @@
 
 package dev.juergenreiss.cdrm.release
 
+import dev.juergenreiss.cdrm.product.Product
 import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.product.ProductStageRepository
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
@@ -55,6 +56,7 @@ class ReleaseService(
         // Only needed for the still-live stage's deploymentPolicy/order — name/id on the
         // entry itself are read straight off the row, not joined.
         val stagesById = stageRepository.findAllById(entries.map { it.stageId }.toSet()).associateBy { it.id }
+        val cronByProductAndStage = productStagesFor(entries)
         return entries.map { entry ->
             val stage = stagesById[entry.stageId]
             ReleaseHistoryEntry(
@@ -64,7 +66,7 @@ class ReleaseService(
                 stage = ReleaseStageInfo(id = entry.stageId, name = entry.stageName, order = stage?.order ?: 0),
                 timestamp = entry.createdAt!!,
                 deployedAt = entry.deployedAt,
-                scheduledAt = scheduledDeploymentFor(entry, stage, entry.productId),
+                scheduledAt = scheduledDeploymentFor(entry, stage, cronByProductAndStage[entry.productId to entry.stageId]),
                 createdBy = entry.createdBy,
             )
         }
@@ -73,11 +75,13 @@ class ReleaseService(
     // Every release-history entry across every release, for the history dashboard's chart
     // and table. Product/workload/stage name and id are read straight off each row (a
     // snapshot taken when it was recorded) rather than joined live, so this stays correct
-    // even for entries whose product/workload/stage has since been deleted. The stage
-    // lookup below is only for the still-live stage's deploymentPolicy/order.
+    // even for entries whose product/workload/stage has since been deleted. The stage and
+    // product-stage-cron lookups below are only for the still-live stage's
+    // deploymentPolicy/order and scheduledAt, batched rather than done per entry.
     fun historyOverview(): List<ReleaseHistoryOverviewEntry> {
         val entries = releaseHistoryRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))
         val stagesById = stageRepository.findAllById(entries.map { it.stageId }.toSet()).associateBy { it.id }
+        val cronByProductAndStage = productStagesFor(entries)
 
         return entries.map { entry ->
             val stage = stagesById[entry.stageId]
@@ -93,11 +97,17 @@ class ReleaseService(
                 stage = ReleaseStageInfo(id = entry.stageId, name = entry.stageName, order = stage?.order ?: 0),
                 timestamp = entry.createdAt!!,
                 deployedAt = entry.deployedAt,
-                scheduledAt = scheduledDeploymentFor(entry, stage, entry.productId),
+                scheduledAt = scheduledDeploymentFor(entry, stage, cronByProductAndStage[entry.productId to entry.stageId]),
                 createdBy = entry.createdBy,
             )
         }
     }
+
+    // Batched by stageId (product_stage rows are few per stage) rather than one
+    // findByProductIdAndStageId() call per entry.
+    private fun productStagesFor(entries: List<ReleaseHistory>): Map<Pair<UUID, UUID>, String> =
+        productStageRepository.findByStageIdIn(entries.map { it.stageId }.toSet())
+            .associate { (it.productId to it.stageId) to it.deploymentCron }
 
     @Transactional
     fun create(request: ReleaseRequest): ReleaseResponse {
@@ -107,6 +117,7 @@ class ReleaseService(
             .orElseThrow { ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown workload") }
         val initialStage = firstStageFor(request.workloadId)
         requireDeployable(workload, initialStage)
+        val product = productFor(workload)
         val saved = repository.save(
             Release(
                 binaryUrl = request.binaryUrl,
@@ -117,8 +128,8 @@ class ReleaseService(
                 modifiedBy = userId,
             )
         )
-        recordHistory(saved, initialStage, workload, userId, ReleaseHistoryAction.CREATED)
-        incrementReleaseMetric("cdrm.releases.promoted", workload, initialStage)
+        recordHistory(saved, initialStage, workload, product, userId, ReleaseHistoryAction.CREATED)
+        incrementReleaseMetric("cdrm.releases.promoted", workload, product, initialStage)
         log.info("Created release {} ('{}') by user {}, starting at stage {}", saved.id, saved.binaryUrl, userId, initialStage.name)
         return saved.toResponse()
     }
@@ -146,7 +157,7 @@ class ReleaseService(
         release.modifiedBy = userId
         val saved = repository.save(release)
         if (newStage != null) {
-            recordHistory(saved, newStage, newWorkload!!, userId, ReleaseHistoryAction.CREATED)
+            recordHistory(saved, newStage, newWorkload!!, productFor(newWorkload), userId, ReleaseHistoryAction.CREATED)
         }
         log.info("Updated release {} ('{}') by user {}", saved.id, saved.binaryUrl, saved.modifiedBy)
         return saved.toResponse()
@@ -168,12 +179,13 @@ class ReleaseService(
         }
         val nextStage = orderedStages[currentIndex + 1]
         requireDeployable(workload, nextStage)
+        val product = productFor(workload)
         val userId = currentUserId()
         release.currentStageId = nextStage.id!!
         release.modifiedBy = userId
         val saved = repository.save(release)
-        recordHistory(saved, nextStage, workload, userId, ReleaseHistoryAction.PROMOTED)
-        incrementReleaseMetric("cdrm.releases.promoted", workload, nextStage)
+        recordHistory(saved, nextStage, workload, product, userId, ReleaseHistoryAction.PROMOTED)
+        incrementReleaseMetric("cdrm.releases.promoted", workload, product, nextStage)
         log.info("Promoted release {} ('{}') to stage {} by user {}", saved.id, saved.binaryUrl, nextStage.name, saved.modifiedBy)
         return saved.toResponse()
     }
@@ -194,11 +206,12 @@ class ReleaseService(
             throw ResponseStatusException(HttpStatus.CONFLICT, "Release is already the head at stage '${stage.name}'")
         }
         requireDeployable(workload, stage)
+        val product = productFor(workload)
         val userId = currentUserId()
         release.modifiedBy = userId
         val saved = repository.save(release)
-        recordHistory(saved, stage, workload, userId, ReleaseHistoryAction.ROLLED_BACK)
-        incrementReleaseMetric("cdrm.releases.rollback", workload, stage)
+        recordHistory(saved, stage, workload, product, userId, ReleaseHistoryAction.ROLLED_BACK)
+        incrementReleaseMetric("cdrm.releases.rollback", workload, product, stage)
         log.info("Rolled back release {} ('{}') to head at stage {} by user {}", saved.id, saved.binaryUrl, stage.name, saved.modifiedBy)
         return saved.toResponse()
     }
@@ -235,9 +248,10 @@ class ReleaseService(
             )
         }
         requireDeployable(workload, targetStage)
+        val product = productFor(workload)
         val userId = currentUserId()
-        recordHistory(release, targetStage, workload, userId, ReleaseHistoryAction.REDEPLOYED)
-        incrementReleaseMetric("cdrm.releases.redeploy", workload, targetStage)
+        recordHistory(release, targetStage, workload, product, userId, ReleaseHistoryAction.REDEPLOYED)
+        incrementReleaseMetric("cdrm.releases.redeploy", workload, product, targetStage)
         log.info("Redeployed release {} ('{}') to stage {} by user {}", release.id, release.binaryUrl, targetStage.name, userId)
         return release.toResponse()
     }
@@ -272,9 +286,7 @@ class ReleaseService(
     // optimization so the common case (cluster reachable) resolves within the request.
     // The row is always created with deployedAt null first — on failure it's simply left
     // that way, and DeploymentSchedulerJob retries it (and SCHEDULED-stage rows) every tick.
-    private fun recordHistory(release: Release, stage: Stage, workload: Workload, userId: UUID, action: ReleaseHistoryAction) {
-        val product = productRepository.findById(workload.productId)
-            .orElseThrow { IllegalStateException("Product ${workload.productId} not found") }
+    private fun recordHistory(release: Release, stage: Stage, workload: Workload, product: Product, userId: UUID, action: ReleaseHistoryAction) {
         val entry = releaseHistoryRepository.save(
             ReleaseHistory(
                 releaseId = release.id!!,
@@ -307,9 +319,8 @@ class ReleaseService(
     // "Pending (<time>)" instead of a bare "Pending". Null once deployed, for
     // IMMEDIATE-policy stages (retried every tick, no fixed time), or if no cron is
     // configured for this (product, stage).
-    private fun scheduledDeploymentFor(entry: ReleaseHistory, stage: Stage?, productId: UUID): Instant? {
-        if (entry.deployedAt != null || stage?.deploymentPolicy != DeploymentPolicy.SCHEDULED) return null
-        val cron = productStageRepository.findByProductIdAndStageId(productId, entry.stageId)?.deploymentCron ?: return null
+    private fun scheduledDeploymentFor(entry: ReleaseHistory, stage: Stage?, cron: String?): Instant? {
+        if (entry.deployedAt != null || stage?.deploymentPolicy != DeploymentPolicy.SCHEDULED || cron.isNullOrBlank()) return null
         return try {
             CronExpression.parse(cron).next(entry.createdAt!!.atZone(ZoneId.systemDefault()))?.toInstant()
         } catch (e: IllegalArgumentException) {
@@ -317,9 +328,7 @@ class ReleaseService(
         }
     }
 
-    private fun incrementReleaseMetric(counterName: String, workload: Workload, stage: Stage) {
-        val product = productRepository.findById(workload.productId)
-            .orElseThrow { IllegalStateException("Product ${workload.productId} not found") }
+    private fun incrementReleaseMetric(counterName: String, workload: Workload, product: Product, stage: Stage) {
         meterRegistry.counter(
             counterName,
             "product", product.name,
@@ -327,6 +336,10 @@ class ReleaseService(
             "stage", stage.name,
         ).increment()
     }
+
+    private fun productFor(workload: Workload): Product =
+        productRepository.findById(workload.productId)
+            .orElseThrow { IllegalStateException("Product ${workload.productId} not found") }
 
     // The head of a (workload, stage) pair is whichever release currently sitting at that
     // stage has the most recent history entry there — i.e. the last one actually deployed,

@@ -9,4 +9,5 @@ import java.util.UUID
 interface ProductStageRepository : JpaRepository<ProductStage, UUID> {
     fun findByProductId(productId: UUID): List<ProductStage>
     fun findByProductIdAndStageId(productId: UUID, stageId: UUID): ProductStage?
+    fun findByStageIdIn(stageIds: Collection<UUID>): List<ProductStage>
 }
