@@ -5,6 +5,7 @@
 
 <script setup lang="ts">
 import { authenticatedUser, isAuthenticated, login, logout } from './auth/authService'
+import ToastHost from './components/ToastHost.vue'
 
 const navItems = [
   { title: 'Clusters', to: '/clusters', icon: 'mdi-server-network' },
@@ -53,5 +54,7 @@ const navItems = [
         <router-view />
       </v-container>
     </v-main>
+
+    <ToastHost />
   </v-app>
 </template>

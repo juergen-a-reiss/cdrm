@@ -117,7 +117,11 @@ to be useful and it has passed all tests in this stage, it can be promoted. Prom
   graphana dashboard.
 * Create an immutable entry in the release history used for statistics.
 
-This release is now the *head* release for this stage/workload combination. In general a head release is the release with the most recent promote or rollback release history entry.
+This release is now the *head* release for this stage/workload combination. In general a head release is the release
+with the most recent promote or rollback release history entry.
+
+In case the release is for k8s and k8s is not available at this time, the prometheus metric `cdrm.deploy.failed{workload,
+stage}` will be incremented. The deploy will be retried with the scheduled deploy job (see below).
 
 ### Release Rollback
 
@@ -147,6 +151,22 @@ any issue that happens in production. Redeploy does the following:
 * Create an immutable entry in the release history used for statistics.
 
 This redeploy does not change the *head* status.
+
+### Deployment Scheduling
+
+Each stage has a deployment policy: **immediate** or **scheduled**. An immediate-policy stage attempts to deploy the
+artifact right away as part of the promote/rollback/redeploy request. A scheduled-policy stage defers the actual
+deployment to a cron schedule configured per product and stage (e.g. only deploy to production at 02:00 on weekdays) -
+the release history entry is created immediately, but the artifact is not deployed until the configured time is reached.
+
+A background job polls every minute for release history entries that have not yet been deployed, and deploys whichever
+of them are due - either because they belong to an immediate-policy stage and the synchronous deploy attempt at
+promotion time failed (it is retried here), or because a scheduled-policy stage's cron time has passed. On every tick,
+the job re-derives everything it needs from the database: which entries are still pending, and when each one is due,
+computed fresh from the entry's creation time and the configured cron. Nothing is cached in memory between ticks, so
+scheduled deployments survive an application restart - the job simply resumes from the database state on the first tick
+after startup. If the application was down when a scheduled deployment's cron time should have fired, it is deployed
+late, on the next tick after the app comes back up, rather than being skipped.
 
 # Release History Dashboard
 

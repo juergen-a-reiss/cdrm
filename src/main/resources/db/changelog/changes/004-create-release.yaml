@@ -91,6 +91,12 @@ databaseChangeLog:
               - column:
                   name: deployed_at
                   type: timestamp with time zone
+              # Reason the most recent deploy attempt for this row failed (e.g. "cluster
+              # not reachable"); cleared once it eventually succeeds. Null while still
+              # unattempted (a SCHEDULED-policy row waiting for its cron time).
+              - column:
+                  name: deploy_error
+                  type: text
               # No FK to workload.id/product.id on purpose: denormalized so by-workload/
               # by-product statistics keep working once a workload's releases (and then the
               # workload itself, and then its product) are deleted.

@@ -7,6 +7,7 @@ import dev.juergenreiss.cdrm.stage.Stage
 import dev.juergenreiss.cdrm.stage.StageRepository
 import dev.juergenreiss.cdrm.workload.Workload
 import dev.juergenreiss.cdrm.workload.WorkloadRepository
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.BeforeEach
@@ -123,7 +124,7 @@ class DeploymentSchedulerJobTest {
         given(productStageRepository.findByProductIdAndStageId(productId, stageId)).willReturn(
             ProductStage(productId = productId, stageId = stageId, deploymentCron = "0 0 0 * * *")
         )
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.binaryUrl)).willReturn(true)
+        given(deploymentExecutor.attemptDeploy(workload, stage, pending.binaryUrl)).willReturn(null)
 
         job.processPendingDeployments()
 
@@ -168,7 +169,7 @@ class DeploymentSchedulerJobTest {
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
         val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
         given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.binaryUrl)).willReturn(true)
+        given(deploymentExecutor.attemptDeploy(workload, stage, pending.binaryUrl)).willReturn(null)
 
         job.processPendingDeployments()
 
@@ -177,7 +178,7 @@ class DeploymentSchedulerJobTest {
     }
 
     @Test
-    fun `leaves an entry pending when the deployment attempt fails`() {
+    fun `leaves an entry pending and records the failure reason when the deployment attempt fails`() {
         val releaseId = UUID.randomUUID()
         val workloadId = UUID.randomUUID()
         val productId = UUID.randomUUID()
@@ -190,12 +191,13 @@ class DeploymentSchedulerJobTest {
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
         val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
         given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.binaryUrl)).willReturn(false)
+        given(deploymentExecutor.attemptDeploy(workload, stage, pending.binaryUrl)).willReturn("cluster not reachable")
 
         job.processPendingDeployments()
 
         assertNull(pending.deployedAt)
-        verify(releaseHistoryRepository, never()).save(pending)
+        assertEquals("cluster not reachable", pending.deployError)
+        verify(releaseHistoryRepository).save(pending)
     }
 
     @Test

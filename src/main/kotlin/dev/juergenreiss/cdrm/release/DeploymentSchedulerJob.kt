@@ -49,11 +49,15 @@ class DeploymentSchedulerJob(
 
             if (!isDue(entry, workload.productId, stage.deploymentPolicy, now)) continue
 
-            if (deploymentExecutor.attemptDeploy(workload, stage, release.binaryUrl)) {
+            val error = deploymentExecutor.attemptDeploy(workload, stage, release.binaryUrl)
+            if (error == null) {
                 entry.deployedAt = now
+                entry.deployError = null
                 releaseHistoryRepository.save(entry)
                 log.info("Deployed release {} at stage {}", entry.releaseId, entry.stageId)
             } else {
+                entry.deployError = error
+                releaseHistoryRepository.save(entry)
                 log.warn("Deployment attempt failed for release {} at stage {} — will retry next tick", entry.releaseId, entry.stageId)
             }
         }

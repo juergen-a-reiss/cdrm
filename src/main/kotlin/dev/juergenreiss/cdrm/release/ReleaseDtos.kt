@@ -28,6 +28,11 @@ data class ReleaseResponse(
     // the valid targets for redeploy().
     val redeployableStages: List<ReleaseStageInfo>,
     val lastDeployedAt: Instant?,
+    // Set only when this response is the direct result of an action (create/promote/
+    // rollback/redeploy) whose synchronous IMMEDIATE-policy deploy attempt just failed —
+    // null on a plain findAll()/findById() read, and null when the deploy succeeded or
+    // the stage is SCHEDULED-policy (nothing attempted synchronously).
+    val deployError: String?,
     val createdAt: Instant,
     val modifiedAt: Instant,
     val createdBy: UUID,
@@ -52,6 +57,10 @@ data class ReleaseHistoryEntry(
     // IMMEDIATE-policy stages (retried every tick, no fixed time), or if no cron is
     // configured for this (product, stage).
     val scheduledAt: Instant?,
+    // Reason the most recent deploy attempt for this entry failed (e.g. "cluster not
+    // reachable"), so the UI can render "Pending (<reason>)". Null once deployed, or
+    // while still unattempted.
+    val deployError: String?,
     val createdBy: UUID,
 )
 
@@ -72,5 +81,6 @@ data class ReleaseHistoryOverviewEntry(
     val timestamp: Instant,
     val deployedAt: Instant?,
     val scheduledAt: Instant?,
+    val deployError: String?,
     val createdBy: UUID,
 )

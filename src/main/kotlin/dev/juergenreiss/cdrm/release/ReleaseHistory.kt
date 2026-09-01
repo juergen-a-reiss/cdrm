@@ -61,6 +61,12 @@ class ReleaseHistory(
     @Column(name = "deployed_at")
     var deployedAt: Instant? = null,
 
+    // Reason the most recent deploy attempt for this row failed; cleared once it
+    // eventually succeeds. Null while still unattempted (a SCHEDULED-policy row waiting
+    // for its cron time).
+    @Column(name = "deploy_error")
+    var deployError: String? = null,
+
     @CreatedDate
     @Column(nullable = false, updatable = false)
     var createdAt: Instant? = null,

@@ -16,6 +16,7 @@ import { useResourceList } from '../composables/useResourceList'
 import { useProductFilter } from '../composables/useProductFilter'
 import { useStageFilter } from '../composables/useStageFilter'
 import { useWorkloadFilter } from '../composables/useWorkloadFilter'
+import { useToast } from '../composables/useToast'
 import { releasesApi } from '../api/releases'
 import { workloadsApi } from '../api/workloads'
 import { ApiError } from '../api/http'
@@ -44,6 +45,7 @@ const { items: workloads } = useResourceList(workloadsApi.list)
 const { matches: matchesProduct } = useProductFilter()
 const { matches: matchesStage } = useStageFilter()
 const { matches: matchesWorkload } = useWorkloadFilter()
+const { showToast } = useToast()
 const headOnly = ref(false)
 
 const workloadNameById = computed(() => new Map(workloads.value.map((workload) => [workload.id, workload.name])))
@@ -144,7 +146,10 @@ async function removeRelease(release: ReleaseResponse) {
 async function promoteRelease(release: ReleaseResponse) {
   actionError.value = null
   try {
-    await releasesApi.promote(release.id)
+    const result = await releasesApi.promote(release.id)
+    if (result.deployError) {
+      showToast(`Deploy failed (${result.deployError}) — it will be retried automatically once the cluster is reachable again.`)
+    }
     // Stage may have changed; force the next expand to re-fetch instead of showing stale history.
     delete historyByRelease.value[release.id]
     await reload()

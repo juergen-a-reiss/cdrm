@@ -159,6 +159,11 @@ export interface ReleaseResponse {
   // the valid targets for redeploy.
   redeployableStages: ReleaseStageInfo[]
   lastDeployedAt: string | null
+  // Set only when this response is the direct result of an action (create/promote/
+  // rollback/redeploy) whose synchronous immediate deploy attempt just failed — null on
+  // a plain list/get read, and null when the deploy succeeded or the stage is
+  // SCHEDULED-policy (nothing attempted synchronously).
+  deployError: string | null
   createdAt: string
   modifiedAt: string
   createdBy: string
@@ -177,6 +182,9 @@ export interface ReleaseHistoryEntry {
   // The SCHEDULED-policy trigger time this entry is waiting on. Null once deployed, for
   // IMMEDIATE-policy stages, or if no cron is configured for this (product, stage).
   scheduledAt: string | null
+  // Reason the most recent deploy attempt for this entry failed (e.g. "cluster not
+  // reachable"). Null once deployed, or while still unattempted.
+  deployError: string | null
   createdBy: string
 }
 
@@ -197,5 +205,6 @@ export interface ReleaseHistoryOverviewEntry {
   timestamp: string
   deployedAt: string | null
   scheduledAt: string | null
+  deployError: string | null
   createdBy: string
 }

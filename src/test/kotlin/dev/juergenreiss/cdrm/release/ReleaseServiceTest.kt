@@ -207,7 +207,7 @@ class ReleaseServiceTest {
         val saved = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!)
         given(repository.save(any())).willReturn(saved)
         given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
-        given(deploymentExecutor.attemptDeploy(workload, dev, saved.binaryUrl)).willReturn(true)
+        given(deploymentExecutor.attemptDeploy(workload, dev, saved.binaryUrl)).willReturn(null)
         stubHistorySaveEchoesArgument()
 
         val result = service.create(
@@ -324,7 +324,7 @@ class ReleaseServiceTest {
     }
 
     @Test
-    fun `create leaves deployedAt null when the immediate deployment attempt fails`() {
+    fun `create leaves deployedAt null and records the failure reason when the immediate deployment attempt fails`() {
         val workloadId = UUID.randomUUID()
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
         val product = persistedProduct()
@@ -339,14 +339,20 @@ class ReleaseServiceTest {
         val saved = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!)
         given(repository.save(any())).willReturn(saved)
         given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
-        given(deploymentExecutor.attemptDeploy(workload, dev, saved.binaryUrl)).willReturn(false)
+        given(deploymentExecutor.attemptDeploy(workload, dev, saved.binaryUrl)).willReturn("cluster not reachable")
         stubHistorySaveEchoesArgument()
 
-        service.create(ReleaseRequest(binaryUrl = "https://registry.example.com/app:1.0.0", description = null, workloadId = workloadId))
+        val result = service.create(
+            ReleaseRequest(binaryUrl = "https://registry.example.com/app:1.0.0", description = null, workloadId = workloadId)
+        )
+
+        assertEquals("cluster not reachable", result.deployError)
 
         val captor = ArgumentCaptor.forClass(ReleaseHistory::class.java)
-        verify(releaseHistoryRepository).save(captor.capture())
+        // Saved twice: once to create the row, once more after the failed immediate deploy sets deployError.
+        verify(releaseHistoryRepository, org.mockito.Mockito.times(2)).save(captor.capture())
         assertNull(captor.value.deployedAt)
+        assertEquals("cluster not reachable", captor.value.deployError)
     }
 
     @Test
@@ -386,7 +392,7 @@ class ReleaseServiceTest {
         val userId = UUID.randomUUID()
         given(currentUser.currentAuditor).willReturn(Optional.of(userId))
         given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
-        given(deploymentExecutor.attemptDeploy(workload, qa, release.binaryUrl)).willReturn(true)
+        given(deploymentExecutor.attemptDeploy(workload, qa, release.binaryUrl)).willReturn(null)
         stubHistorySaveEchoesArgument()
 
         val result = service.promote(releaseId)
@@ -409,6 +415,33 @@ class ReleaseServiceTest {
                 .counter()
                 .count(),
         )
+    }
+
+    @Test
+    fun `promote surfaces the deploy error on the response when the immediate attempt fails`() {
+        val workloadId = UUID.randomUUID()
+        val dev = persistedStage(order = 1, name = "Dev")
+        val qa = persistedStage(order = 2, name = "QA", kubernetesContext = "prod-cluster")
+        stubWorkloadStages(workloadId, listOf(dev, qa))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev, qa))
+
+        val releaseId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = dev.id!!)
+        given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        given(repository.save(release)).willReturn(release)
+        val product = persistedProduct(name = "Platform")
+        val workload = persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = true)
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
+        given(deploymentExecutor.attemptDeploy(workload, qa, release.binaryUrl)).willReturn("cluster not reachable")
+        stubHistorySaveEchoesArgument()
+
+        val result = service.promote(releaseId)
+
+        assertEquals("cluster not reachable", result.deployError)
+        assertEquals(qa.id, release.currentStageId)
     }
 
     @Test
@@ -497,7 +530,7 @@ class ReleaseServiceTest {
         )
 
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
-        given(deploymentExecutor.attemptDeploy(workload, prod, target.binaryUrl)).willReturn(true)
+        given(deploymentExecutor.attemptDeploy(workload, prod, target.binaryUrl)).willReturn(null)
         stubHistorySaveEchoesArgument()
 
         val result = service.rollback(targetReleaseId)
@@ -561,7 +594,7 @@ class ReleaseServiceTest {
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
-        given(deploymentExecutor.attemptDeploy(workload, dev, release.binaryUrl)).willReturn(true)
+        given(deploymentExecutor.attemptDeploy(workload, dev, release.binaryUrl)).willReturn(null)
         stubHistorySaveEchoesArgument()
 
         val result = service.redeploy(releaseId, RedeployRequest(stageId = dev.id!!))
@@ -608,7 +641,7 @@ class ReleaseServiceTest {
             persistedHistoryEntry(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = prod.id!!)
         )
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
-        given(deploymentExecutor.attemptDeploy(workload, prod, release.binaryUrl)).willReturn(true)
+        given(deploymentExecutor.attemptDeploy(workload, prod, release.binaryUrl)).willReturn(null)
         stubHistorySaveEchoesArgument()
 
         val result = service.redeploy(releaseId, RedeployRequest(stageId = prod.id!!))
@@ -831,7 +864,9 @@ class ReleaseServiceTest {
 
         assertEquals(newStage.id, release.currentStageId)
         assertEquals(newStage.id, result.currentStage.id)
-        verify(releaseHistoryRepository).save(any())
+        // Saved twice: once to create the row, once more after the (non-kubernetes, so
+        // no-op-success) immediate deploy sets deployedAt.
+        verify(releaseHistoryRepository, org.mockito.Mockito.times(2)).save(any())
     }
 
     @Test

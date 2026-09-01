@@ -6,8 +6,10 @@ import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.Stage
 import dev.juergenreiss.cdrm.workload.KubernetesKind
 import dev.juergenreiss.cdrm.workload.Workload
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertTrue
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
@@ -25,11 +27,13 @@ class DeploymentExecutorTest {
     @Mock
     private lateinit var kubernetesDeploymentClient: KubernetesDeploymentClient
 
+    private val meterRegistry = SimpleMeterRegistry()
+
     private lateinit var executor: DeploymentExecutor
 
     @BeforeEach
     fun setUp() {
-        executor = DeploymentExecutor(kubernetesDeploymentClient)
+        executor = DeploymentExecutor(kubernetesDeploymentClient, meterRegistry)
     }
 
     private fun stage(kubernetesContext: String? = "my-context", namespacePrefix: String? = null) = Stage(
@@ -65,29 +69,30 @@ class DeploymentExecutorTest {
     )
 
     @Test
-    fun `returns true without calling the client for a non-kubernetes workload`() {
+    fun `returns null without calling the client for a non-kubernetes workload`() {
         val result = executor.attemptDeploy(workload(kubernetes = false), stage(), "image:1.0")
 
-        assertTrue(result)
+        assertNull(result)
         verifyNoInteractions(kubernetesDeploymentClient)
     }
 
     @Test
-    fun `returns false when the stage has no kubernetes context configured`() {
+    fun `returns a reason and increments the failure counter when the stage has no kubernetes context configured`() {
         val result = executor.attemptDeploy(workload(kubernetes = true), stage(kubernetesContext = null), "image:1.0")
 
-        assertFalse(result)
+        assertNotNull(result)
         verifyNoInteractions(kubernetesDeploymentClient)
+        assertEquals(1.0, meterRegistry.get("cdrm.deploy.failed").counter().count())
     }
 
     @Test
-    fun `returns true and patches the image on success`() {
+    fun `returns null and patches the image on success`() {
         val stage = stage(kubernetesContext = "my-context")
         val workload = workload(kubernetes = true)
 
         val result = executor.attemptDeploy(workload, stage, "image:1.0")
 
-        assertTrue(result)
+        assertNull(result)
         verify(kubernetesDeploymentClient).patchImage("my-context", "platform", KubernetesKind.DEPLOYMENT, "workload", "image:1.0")
     }
 
@@ -98,12 +103,12 @@ class DeploymentExecutorTest {
 
         val result = executor.attemptDeploy(workload, stage, "image:1.0")
 
-        assertTrue(result)
+        assertNull(result)
         verify(kubernetesDeploymentClient).patchImage("minikube", "dev-platform", KubernetesKind.DEPLOYMENT, "workload", "image:1.0")
     }
 
     @Test
-    fun `returns false when the client throws`() {
+    fun `returns 'cluster not reachable' and increments the failure counter when the client throws`() {
         val stage = stage(kubernetesContext = "my-context")
         val workload = workload(kubernetes = true)
         willThrow(KubernetesDeploymentException("boom")).given(kubernetesDeploymentClient)
@@ -111,6 +116,7 @@ class DeploymentExecutorTest {
 
         val result = executor.attemptDeploy(workload, stage, "image:1.0")
 
-        assertFalse(result)
+        assertEquals("cluster not reachable", result)
+        assertEquals(1.0, meterRegistry.get("cdrm.deploy.failed").counter().count())
     }
 }
