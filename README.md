@@ -28,9 +28,9 @@ This tool will make your life easier by:
 * Get an overview which product was deployed how often to production. Or rolled back.
 * Deployment metrics and stats ;).
 
-# What it does
+## What it does
 
-## Stages
+### Stages
 
 Any continuous delivery pipeline consists of stages. There might be more than one pipelines in an organization. Stages
 usually have names like "development",
@@ -46,11 +46,11 @@ machines. Or a Proxmox cluster. This tool will concentrate on the handling of ku
 
 Stages are managed by users with the `cdrm-devops` role.
 
-## Clusters
+### Clusters
 
 Clusters are managed by users with the `cdrm-devops` role.
 
-### Kubernetes Clusters
+#### Kubernetes Clusters
 
 A kubernetes cluster configuration allows automated deployment of the build artifact to the various stages. There might
 be one or more clusters configured. The supported patterns include:
@@ -70,11 +70,11 @@ development stage could define a "dev"
 prefix to the namespace name. This will help you to get organized and keep an overview. If the prefix is configured,
 then on this stage deployment would be restricted to namespaces with this prefix.
 
-### Proxmox Clusters
+#### Proxmox Clusters
 
 TODO: coming soon.
 
-## Products
+### Products
 
 Products are managed by users with the `cdrm-productowner` role.
 
@@ -83,7 +83,7 @@ organization. And very often also the driver for structuring development and run
 product is the unit that is connected to the stages. It might only be connected to the stages of one pipeline. It could
 be connected in a way that deployment starts with the first stage. Or any later stage.
 
-## Workload
+### Workload
 
 Workloads are managed by users with the `cdrm-devops` or `cdrm-developer` role.
 
@@ -91,7 +91,7 @@ The workload describes an artifact that is to be deployed. It is part of a produ
 namespace. The namespace configuration must not contain the prefixes defined in the stages. Instead, on deployment, the
 prefix is used (if any) to resolve the namespace.
 
-## Release
+### Release
 
 Releases are managed by users with the `cdrm-productowner` role.
 
@@ -105,7 +105,7 @@ Releases will be typically created via the build pipeline (GitHub actions, jenki
 promotion process is typically done via UI (either the product UI or any other UI that you build that connects to the
 API).
 
-### Release Promotion
+#### Release Promotion
 
 After a release is created (for example by a build tool), it is usually in the lowest stage. When it has proved itself
 to be useful and it has passed all tests in this stage, it can be promoted. Promotion does the following:
@@ -123,12 +123,13 @@ with the most recent promote or rollback release history entry.
 In case the release is for k8s and k8s is not available at this time, the prometheus metric `cdrm.deploy.failed{workload,
 stage}` will be incremented. The deploy will be retried with the scheduled deploy job (see below).
 
-### Release Rollback
+#### Release Rollback
 
 A rollback can be done from any non-head release - but not from a head release, obviously. It can be triggered via API
-or via GUI. Rollback does the following:Identify the next stage.
+or via GUI. Rollback does the following:
 
-* Deploy the binary artifact to the current stage.
+* Target stage is the stage of the release.
+* Deploy the binary artifact to the target stage.
 * Increment the counter `cdrm.releases.rollback` with the labels product, workload and stage. This should be used in a
   graphana dashboard.
 * Create an immutable entry in the release history used for statistics.
@@ -137,7 +138,7 @@ This release is now the *head* release for this stage/workload combination.
 
 It is not possible to rollback to a release that already was promoted to the next stage.
 
-### Release Redeploy
+#### Release Redeploy
 
 A redeploy can be done from any release. It can be done to the current and any lower stage. It can only be done to the
 current stage if the release is the head release. Redeploy cannot be done to a higher stage. It can be triggered via API
@@ -152,7 +153,7 @@ any issue that happens in production. Redeploy does the following:
 
 This redeploy does not change the *head* status.
 
-### Deployment Scheduling
+#### Deployment Scheduling
 
 Each stage has a deployment policy: **immediate** or **scheduled**. An immediate-policy stage attempts to deploy the
 artifact right away as part of the promote/rollback/redeploy request. A scheduled-policy stage defers the actual
@@ -168,9 +169,9 @@ scheduled deployments survive an application restart - the job simply resumes fr
 after startup. If the application was down when a scheduled deployment's cron time should have fired, it is deployed
 late, on the next tick after the app comes back up, rather than being skipped.
 
-# Release History Dashboard
+## Release History Dashboard
 
-## Release History Graph
+### Release History Graph
 
 The ultimate management questions will be answered here:
 
@@ -178,28 +179,29 @@ The ultimate management questions will be answered here:
 * How is the releases/rollbacks per month trend?
 * How does this look like by product or by workload?
 
-## Release History Details
+### Release History Details
 
 Here we see the release history details als a table view.
 
-# Access Control
+## Access Control
 
-Access control is secured via OpenId Connect. 
+Access control is secured via OpenId Connect.
 
-## RBAC Role Based Access Control
+### RBAC Role Based Access Control
 
-`cdrm-devops`: Can edit the views that are needed to setup the system and adapt it to the infrastructure. Namely: 
+`cdrm-devops`: Can edit the views that are needed to setup the system and adapt it to the infrastructure. Namely:
 
 - clusters
 - stages
 - workloads
 
-`cdrm-productowner`: Can manage the data inside releases view. Can view the rest of the data.
+`cdrm-productowner`: Can manage the data inside releases view. Can manage products. Can view the rest of the data.
 
-`cdrm-developer`: Can create releases and deploy them to the first stage. Can view the rest of the data.
+`cdrm-developer`: Can create releases and deploy them to the first stage. Can create and edit workloads. Can view the
+rest of the data.
 
 `cdrm-manager`: Can view the data.
 
-## Resource Based Access Control
+### ReBAC Relationship Based Access Control
 
 To be coming soon.
