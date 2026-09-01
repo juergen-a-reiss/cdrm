@@ -28,7 +28,7 @@ import { formatDeploymentStatus } from '../utils/releaseHistoryStatus'
 
 interface ReleaseRow {
   id: string
-  binaryUrl: string
+  image: string
   description: string | null
   workloadName: string
   currentStageName: string
@@ -64,7 +64,7 @@ const rows = computed<ReleaseRow[]>(() =>
     })
     .map((release) => ({
       id: release.id,
-      binaryUrl: release.binaryUrl,
+      image: release.image,
       description: release.description,
       workloadName: workloadNameById.value.get(release.workloadId) ?? release.workloadId,
       currentStageName: release.currentStage.name,
@@ -83,7 +83,7 @@ const showActions = computed(
 
 const headers = computed<DataTableHeader<ReleaseRow>[]>(() => {
   const base: DataTableHeader<ReleaseRow>[] = [
-    { title: 'Binary URL', key: 'binaryUrl' },
+    { title: 'Image', key: 'image' },
     { title: 'Workload', key: 'workloadName' },
     { title: 'Current Stage', key: 'currentStageName' },
     { title: 'Last Deployed', key: 'lastDeployedAtDisplay' },
@@ -131,7 +131,7 @@ function openEdit(release: ReleaseResponse) {
 }
 
 async function removeRelease(release: ReleaseResponse) {
-  if (!confirm(`Delete release "${release.binaryUrl}"?`)) {
+  if (!confirm(`Delete release "${release.image}"?`)) {
     return
   }
   actionError.value = null

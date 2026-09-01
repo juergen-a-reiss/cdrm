@@ -25,8 +25,10 @@ databaseChangeLog:
                   type: uuid
                   constraints:
                     nullable: false
+              # Container image reference (not a URL) — e.g. "nginx:30" or
+              # "my-registry.company.com/nginx:30" — as accepted by Kubernetes.
               - column:
-                  name: binary_url
+                  name: image
                   type: text
                   constraints:
                     nullable: false
@@ -78,8 +80,9 @@ databaseChangeLog:
                   type: uuid
                   constraints:
                     nullable: false
+              # Container image reference (not a URL) — same format as release.image.
               - column:
-                  name: binary_url
+                  name: image
                   type: text
                   constraints:
                     nullable: false
@@ -109,7 +112,7 @@ databaseChangeLog:
                   constraints:
                     nullable: false
               # product_name/workload_name/stage_name are a snapshot taken at insert time
-              # (like binary_url), not a live lookup — so the UI can always display and
+              # (like image), not a live lookup — so the UI can always display and
               # filter/sort on them even after the product/workload/stage that produced
               # this row has since been deleted.
               - column:

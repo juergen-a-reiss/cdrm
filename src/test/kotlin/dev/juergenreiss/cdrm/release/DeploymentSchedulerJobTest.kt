@@ -67,7 +67,7 @@ class DeploymentSchedulerJobTest {
 
     private fun persistedRelease(id: UUID, workloadId: UUID) = Release(
         id = id,
-        binaryUrl = "https://registry.example.com/app:1.0.0",
+        image = "registry.example.com/app:1.0.0",
         description = null,
         workloadId = workloadId,
         currentStageId = UUID.randomUUID(),
@@ -99,7 +99,7 @@ class DeploymentSchedulerJobTest {
         productId = UUID.randomUUID(),
         productName = "product",
         workloadName = "workload",
-        binaryUrl = "https://registry.example.com/app:1.0.0",
+        image = "registry.example.com/app:1.0.0",
         stageId = stageId,
         stageName = "stage",
         deployedAt = deployedAt,
@@ -124,7 +124,7 @@ class DeploymentSchedulerJobTest {
         given(productStageRepository.findByProductIdAndStageId(productId, stageId)).willReturn(
             ProductStage(productId = productId, stageId = stageId, deploymentCron = "0 0 0 * * *")
         )
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.binaryUrl)).willReturn(null)
+        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(null)
 
         job.processPendingDeployments()
 
@@ -169,7 +169,7 @@ class DeploymentSchedulerJobTest {
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
         val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
         given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.binaryUrl)).willReturn(null)
+        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(null)
 
         job.processPendingDeployments()
 
@@ -191,7 +191,7 @@ class DeploymentSchedulerJobTest {
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
         val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
         given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.binaryUrl)).willReturn("cluster not reachable")
+        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn("cluster not reachable")
 
         job.processPendingDeployments()
 

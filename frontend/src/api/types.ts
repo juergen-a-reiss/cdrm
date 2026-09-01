@@ -132,7 +132,7 @@ export interface WorkloadResponse {
 
 export interface ReleaseRequest {
   // Immutable once created — the backend rejects any attempt to change it on update.
-  binaryUrl: string
+  image: string
   description: string | null
   workloadId: string
 }
@@ -149,7 +149,7 @@ export interface ReleaseStageInfo {
 
 export interface ReleaseResponse {
   id: string
-  binaryUrl: string
+  image: string
   description: string | null
   workloadId: string
   currentStage: ReleaseStageInfo
@@ -174,7 +174,7 @@ export type ReleaseHistoryAction = 'CREATED' | 'PROMOTED' | 'ROLLED_BACK' | 'RED
 
 export interface ReleaseHistoryEntry {
   id: string
-  binaryUrl: string
+  image: string
   action: ReleaseHistoryAction
   stage: ReleaseStageInfo
   timestamp: string
@@ -195,7 +195,7 @@ export interface ReleaseHistoryEntry {
 export interface ReleaseHistoryOverviewEntry {
   id: string
   releaseId: string
-  binaryUrl: string
+  image: string
   action: ReleaseHistoryAction
   productId: string
   productName: string

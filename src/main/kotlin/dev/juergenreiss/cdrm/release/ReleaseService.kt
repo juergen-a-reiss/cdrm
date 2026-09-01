@@ -21,11 +21,19 @@ import org.springframework.scheduling.support.CronExpression
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.server.ResponseStatusException
-import java.net.URI
-import java.net.URISyntaxException
 import java.time.Instant
 import java.time.ZoneId
 import java.util.*
+
+// A Kubernetes/OCI image reference: [registry[:port]/]repository[:tag][@digest] — not a
+// URL, so no scheme. Tag and digest are both optional (an unqualified reference like
+// "nginx" or "busybox" defaults to :latest). Mirrors the grammar Docker/OCI tooling use
+// for repository names, tags, and digests.
+private val IMAGE_REFERENCE = Regex(
+    "^[a-z0-9]+(?:(?:\\.|_|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:\\.|_|__|-+)[a-z0-9]+)*)*" +
+        "(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?" +
+        "(?:@[A-Za-z][A-Za-z0-9]*(?:[-_+.][A-Za-z][A-Za-z0-9]*)*:[0-9a-fA-F]{32,})?$"
+)
 
 @Service
 @Transactional(readOnly = true)
@@ -45,7 +53,7 @@ class ReleaseService(
     private val log = LoggerFactory.getLogger(ReleaseService::class.java)
 
     fun findAll(): List<ReleaseResponse> =
-        repository.findAll(Sort.by("binaryUrl")).map { it.toResponse() }
+        repository.findAll(Sort.by("image")).map { it.toResponse() }
 
     fun findById(id: UUID): ReleaseResponse =
         repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }.toResponse()
@@ -61,7 +69,7 @@ class ReleaseService(
             val stage = stagesById[entry.stageId]
             ReleaseHistoryEntry(
                 id = entry.id!!,
-                binaryUrl = entry.binaryUrl,
+                image = entry.image,
                 action = entry.action,
                 stage = ReleaseStageInfo(id = entry.stageId, name = entry.stageName, order = stage?.order ?: 0),
                 timestamp = entry.createdAt!!,
@@ -89,7 +97,7 @@ class ReleaseService(
             ReleaseHistoryOverviewEntry(
                 id = entry.id!!,
                 releaseId = entry.releaseId,
-                binaryUrl = entry.binaryUrl,
+                image = entry.image,
                 action = entry.action,
                 productId = entry.productId,
                 productName = entry.productName,
@@ -113,16 +121,16 @@ class ReleaseService(
 
     @Transactional
     fun create(request: ReleaseRequest): ReleaseResponse {
-        validateBinaryUrl(request.binaryUrl)
         val userId = currentUserId()
         val workload = workloadRepository.findById(request.workloadId)
             .orElseThrow { ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown workload") }
+        validateImage(request.image, workload.kubernetes)
         val initialStage = firstStageFor(request.workloadId)
         requireDeployable(workload, initialStage)
         val product = productFor(workload)
         val saved = repository.save(
             Release(
-                binaryUrl = request.binaryUrl,
+                image = request.image,
                 description = request.description,
                 workloadId = request.workloadId,
                 currentStageId = initialStage.id!!,
@@ -132,15 +140,15 @@ class ReleaseService(
         )
         val entry = recordHistory(saved, initialStage, workload, product, userId, ReleaseHistoryAction.CREATED)
         incrementReleaseMetric("cdrm.releases.promoted", workload, product, initialStage)
-        log.info("Created release {} ('{}') by user {}, starting at stage {}", saved.id, saved.binaryUrl, userId, initialStage.name)
+        log.info("Created release {} ('{}') by user {}, starting at stage {}", saved.id, saved.image, userId, initialStage.name)
         return saved.toResponse(entry.deployError)
     }
 
     @Transactional
     fun update(id: UUID, request: ReleaseRequest): ReleaseResponse {
         val release = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
-        if (request.binaryUrl != release.binaryUrl) {
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "binaryUrl cannot be changed after creation")
+        if (request.image != release.image) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "image cannot be changed after creation")
         }
         val userId = currentUserId()
         release.description = request.description
@@ -163,7 +171,7 @@ class ReleaseService(
         } else {
             null
         }
-        log.info("Updated release {} ('{}') by user {}", saved.id, saved.binaryUrl, saved.modifiedBy)
+        log.info("Updated release {} ('{}') by user {}", saved.id, saved.image, saved.modifiedBy)
         return saved.toResponse(entry?.deployError)
     }
 
@@ -190,7 +198,7 @@ class ReleaseService(
         val saved = repository.save(release)
         val entry = recordHistory(saved, nextStage, workload, product, userId, ReleaseHistoryAction.PROMOTED)
         incrementReleaseMetric("cdrm.releases.promoted", workload, product, nextStage)
-        log.info("Promoted release {} ('{}') to stage {} by user {}", saved.id, saved.binaryUrl, nextStage.name, saved.modifiedBy)
+        log.info("Promoted release {} ('{}') to stage {} by user {}", saved.id, saved.image, nextStage.name, saved.modifiedBy)
         return saved.toResponse(entry.deployError)
     }
 
@@ -216,7 +224,7 @@ class ReleaseService(
         val saved = repository.save(release)
         val entry = recordHistory(saved, stage, workload, product, userId, ReleaseHistoryAction.ROLLED_BACK)
         incrementReleaseMetric("cdrm.releases.rollback", workload, product, stage)
-        log.info("Rolled back release {} ('{}') to head at stage {} by user {}", saved.id, saved.binaryUrl, stage.name, saved.modifiedBy)
+        log.info("Rolled back release {} ('{}') to head at stage {} by user {}", saved.id, saved.image, stage.name, saved.modifiedBy)
         return saved.toResponse(entry.deployError)
     }
 
@@ -256,7 +264,7 @@ class ReleaseService(
         val userId = currentUserId()
         val entry = recordHistory(release, targetStage, workload, product, userId, ReleaseHistoryAction.REDEPLOYED)
         incrementReleaseMetric("cdrm.releases.redeploy", workload, product, targetStage)
-        log.info("Redeployed release {} ('{}') to stage {} by user {}", release.id, release.binaryUrl, targetStage.name, userId)
+        log.info("Redeployed release {} ('{}') to stage {} by user {}", release.id, release.image, targetStage.name, userId)
         return release.toResponse(entry.deployError)
     }
 
@@ -301,7 +309,7 @@ class ReleaseService(
                 productId = product.id!!,
                 productName = product.name,
                 workloadName = workload.name,
-                binaryUrl = release.binaryUrl,
+                image = release.image,
                 stageId = stage.id!!,
                 stageName = stage.name,
                 action = action,
@@ -310,7 +318,7 @@ class ReleaseService(
             )
         )
         if (stage.deploymentPolicy == DeploymentPolicy.IMMEDIATE) {
-            val error = deploymentExecutor.attemptDeploy(workload, stage, release.binaryUrl)
+            val error = deploymentExecutor.attemptDeploy(workload, stage, release.image)
             if (error == null) {
                 entry.deployedAt = Instant.now()
             } else {
@@ -372,14 +380,19 @@ class ReleaseService(
         return if (isHead(release)) upToAndIncludingCurrent else upToAndIncludingCurrent.dropLast(1)
     }
 
-    private fun validateBinaryUrl(url: String) {
-        val uri = try {
-            URI(url)
-        } catch (e: URISyntaxException) {
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "binaryUrl must be a valid URL")
+    // Only Kubernetes workloads actually deploy this as a container image (see
+    // DeploymentExecutor) — a non-Kubernetes workload's release just carries an opaque
+    // reference to whatever artifact its own deployment mechanism (VMs, Proxmox, ...)
+    // consumes, so it isn't held to the image-reference grammar.
+    private fun validateImage(image: String, kubernetes: Boolean) {
+        if (image.isBlank()) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "image must not be blank")
         }
-        if (uri.scheme?.lowercase() !in setOf("http", "https")) {
-            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "binaryUrl must be an http(s) URL")
+        if (kubernetes && !IMAGE_REFERENCE.matches(image)) {
+            throw ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "image must be a valid container image reference, e.g. 'nginx:30' or 'my-registry.company.com/nginx:30'",
+            )
         }
     }
 
@@ -410,7 +423,7 @@ class ReleaseService(
         val lastDeployedAt = releaseHistoryRepository.findTopByReleaseIdAndDeployedAtIsNotNullOrderByDeployedAtDesc(id!!)?.deployedAt
         return ReleaseResponse(
             id = id!!,
-            binaryUrl = binaryUrl,
+            image = image,
             description = description,
             workloadId = workloadId,
             currentStage = ReleaseStageInfo(id = currentStage.id!!, name = currentStage.name, order = currentStage.order),

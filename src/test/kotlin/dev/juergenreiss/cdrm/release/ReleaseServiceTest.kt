@@ -131,12 +131,12 @@ class ReleaseServiceTest {
 
     private fun persistedRelease(
         id: UUID = UUID.randomUUID(),
-        binaryUrl: String = "https://registry.example.com/app:1.0.0",
+        image: String = "registry.example.com/app:1.0.0",
         workloadId: UUID = UUID.randomUUID(),
         currentStageId: UUID,
     ) = Release(
         id = id,
-        binaryUrl = binaryUrl,
+        image = image,
         description = null,
         workloadId = workloadId,
         currentStageId = currentStageId,
@@ -153,7 +153,7 @@ class ReleaseServiceTest {
         productId: UUID = UUID.randomUUID(),
         productName: String = "product",
         workloadName: String = "workload",
-        binaryUrl: String = "https://registry.example.com/app:1.0.0",
+        image: String = "registry.example.com/app:1.0.0",
         stageId: UUID,
         stageName: String = "stage",
         action: ReleaseHistoryAction = ReleaseHistoryAction.PROMOTED,
@@ -167,7 +167,7 @@ class ReleaseServiceTest {
         productId = productId,
         productName = productName,
         workloadName = workloadName,
-        binaryUrl = binaryUrl,
+        image = image,
         stageId = stageId,
         stageName = stageName,
         action = action,
@@ -207,11 +207,11 @@ class ReleaseServiceTest {
         val saved = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!)
         given(repository.save(any())).willReturn(saved)
         given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
-        given(deploymentExecutor.attemptDeploy(workload, dev, saved.binaryUrl)).willReturn(null)
+        given(deploymentExecutor.attemptDeploy(workload, dev, saved.image)).willReturn(null)
         stubHistorySaveEchoesArgument()
 
         val result = service.create(
-            ReleaseRequest(binaryUrl = "https://registry.example.com/app:1.0.0", description = null, workloadId = workloadId)
+            ReleaseRequest(image = "registry.example.com/app:1.0.0", description = null, workloadId = workloadId)
         )
 
         assertEquals(dev.id, result.currentStage.id)
@@ -223,7 +223,7 @@ class ReleaseServiceTest {
         verify(releaseHistoryRepository, org.mockito.Mockito.times(2)).save(captor.capture())
         assertEquals(saved.id, captor.value.releaseId)
         assertEquals(dev.id, captor.value.stageId)
-        assertEquals(saved.binaryUrl, captor.value.binaryUrl)
+        assertEquals(saved.image, captor.value.image)
         assertEquals(userId, captor.value.createdBy)
         assertEquals(ReleaseHistoryAction.CREATED, captor.value.action)
         assertNotNull(captor.value.deployedAt)
@@ -238,7 +238,7 @@ class ReleaseServiceTest {
 
         val exception = assertThrows(ResponseStatusException::class.java) {
             service.create(
-                ReleaseRequest(binaryUrl = "https://registry.example.com/app:1.0.0", description = null, workloadId = workloadId)
+                ReleaseRequest(image = "registry.example.com/app:1.0.0", description = null, workloadId = workloadId)
             )
         }
 
@@ -246,12 +246,79 @@ class ReleaseServiceTest {
     }
 
     @Test
-    fun `create rejects a non-http binaryUrl`() {
+    fun `create rejects an image reference that carries a URL scheme for a kubernetes workload`() {
+        val workloadId = UUID.randomUUID()
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, kubernetes = true)))
+
         val exception = assertThrows(ResponseStatusException::class.java) {
-            service.create(ReleaseRequest(binaryUrl = "not-a-url", description = null, workloadId = UUID.randomUUID()))
+            service.create(
+                ReleaseRequest(image = "https://registry.example.com/app:1.0.0", description = null, workloadId = workloadId)
+            )
         }
 
         assertEquals(400, exception.statusCode.value())
+    }
+
+    @Test
+    fun `create rejects an image reference with a space in it for a kubernetes workload`() {
+        val workloadId = UUID.randomUUID()
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, kubernetes = true)))
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.create(ReleaseRequest(image = "nginx 30", description = null, workloadId = workloadId))
+        }
+
+        assertEquals(400, exception.statusCode.value())
+    }
+
+    @Test
+    fun `create accepts a bare unqualified image reference for a kubernetes workload`() {
+        val workloadId = UUID.randomUUID()
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val product = persistedProduct()
+        val workload = persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = true)
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
+
+        val dev = persistedStage(order = 1, name = "Dev", kubernetesContext = "prod-cluster")
+        stubWorkloadStages(workloadId, listOf(dev))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev))
+
+        val saved = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!, image = "nginx:30")
+        given(repository.save(any())).willReturn(saved)
+        given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
+        given(deploymentExecutor.attemptDeploy(workload, dev, "nginx:30")).willReturn(null)
+        stubHistorySaveEchoesArgument()
+
+        val result = service.create(ReleaseRequest(image = "nginx:30", description = null, workloadId = workloadId))
+
+        assertEquals("nginx:30", result.image)
+    }
+
+    @Test
+    fun `create accepts a non-image artifact reference for a non-kubernetes workload`() {
+        val workloadId = UUID.randomUUID()
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val product = persistedProduct()
+        val workload = persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = false)
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
+
+        val dev = persistedStage(order = 1, name = "Dev")
+        stubWorkloadStages(workloadId, listOf(dev))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev))
+
+        val artifact = "https://artifacts.example.com/mobile-bff/1.0.0/mobile-bff.tar.gz"
+        val saved = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!, image = artifact)
+        given(repository.save(any())).willReturn(saved)
+        given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
+        stubHistorySaveEchoesArgument()
+
+        val result = service.create(ReleaseRequest(image = artifact, description = null, workloadId = workloadId))
+
+        assertEquals(artifact, result.image)
     }
 
     @Test
@@ -268,7 +335,7 @@ class ReleaseServiceTest {
 
         val exception = assertThrows(ResponseStatusException::class.java) {
             service.create(
-                ReleaseRequest(binaryUrl = "https://registry.example.com/app:1.0.0", description = null, workloadId = workloadId)
+                ReleaseRequest(image = "registry.example.com/app:1.0.0", description = null, workloadId = workloadId)
             )
         }
 
@@ -296,7 +363,7 @@ class ReleaseServiceTest {
         given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
         stubHistorySaveEchoesArgument()
 
-        service.create(ReleaseRequest(binaryUrl = "https://registry.example.com/app:1.0.0", description = null, workloadId = workloadId))
+        service.create(ReleaseRequest(image = "registry.example.com/app:1.0.0", description = null, workloadId = workloadId))
 
         val captor = ArgumentCaptor.forClass(ReleaseHistory::class.java)
         verify(releaseHistoryRepository).save(captor.capture())
@@ -315,7 +382,7 @@ class ReleaseServiceTest {
 
         val exception = assertThrows(ResponseStatusException::class.java) {
             service.create(
-                ReleaseRequest(binaryUrl = "https://registry.example.com/app:1.0.0", description = null, workloadId = workloadId)
+                ReleaseRequest(image = "registry.example.com/app:1.0.0", description = null, workloadId = workloadId)
             )
         }
 
@@ -339,11 +406,11 @@ class ReleaseServiceTest {
         val saved = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!)
         given(repository.save(any())).willReturn(saved)
         given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
-        given(deploymentExecutor.attemptDeploy(workload, dev, saved.binaryUrl)).willReturn("cluster not reachable")
+        given(deploymentExecutor.attemptDeploy(workload, dev, saved.image)).willReturn("cluster not reachable")
         stubHistorySaveEchoesArgument()
 
         val result = service.create(
-            ReleaseRequest(binaryUrl = "https://registry.example.com/app:1.0.0", description = null, workloadId = workloadId)
+            ReleaseRequest(image = "registry.example.com/app:1.0.0", description = null, workloadId = workloadId)
         )
 
         assertEquals("cluster not reachable", result.deployError)
@@ -356,16 +423,16 @@ class ReleaseServiceTest {
     }
 
     @Test
-    fun `update rejects changing binaryUrl`() {
+    fun `update rejects changing image`() {
         val releaseId = UUID.randomUUID()
         val stageId = UUID.randomUUID()
-        val release = persistedRelease(id = releaseId, binaryUrl = "https://registry.example.com/app:1.0.0", currentStageId = stageId)
+        val release = persistedRelease(id = releaseId, image = "registry.example.com/app:1.0.0", currentStageId = stageId)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
 
         val exception = assertThrows(ResponseStatusException::class.java) {
             service.update(
                 releaseId,
-                ReleaseRequest(binaryUrl = "https://registry.example.com/app:2.0.0", description = null, workloadId = release.workloadId)
+                ReleaseRequest(image = "registry.example.com/app:2.0.0", description = null, workloadId = release.workloadId)
             )
         }
 
@@ -392,7 +459,7 @@ class ReleaseServiceTest {
         val userId = UUID.randomUUID()
         given(currentUser.currentAuditor).willReturn(Optional.of(userId))
         given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
-        given(deploymentExecutor.attemptDeploy(workload, qa, release.binaryUrl)).willReturn(null)
+        given(deploymentExecutor.attemptDeploy(workload, qa, release.image)).willReturn(null)
         stubHistorySaveEchoesArgument()
 
         val result = service.promote(releaseId)
@@ -435,7 +502,7 @@ class ReleaseServiceTest {
         given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
         given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
-        given(deploymentExecutor.attemptDeploy(workload, qa, release.binaryUrl)).willReturn("cluster not reachable")
+        given(deploymentExecutor.attemptDeploy(workload, qa, release.image)).willReturn("cluster not reachable")
         stubHistorySaveEchoesArgument()
 
         val result = service.promote(releaseId)
@@ -526,11 +593,11 @@ class ReleaseServiceTest {
                 prod.id!!, listOf(headReleaseId, targetReleaseId)
             )
         ).willReturn(
-            persistedHistoryEntry(releaseId = headReleaseId, binaryUrl = "https://registry.example.com/head", stageId = prod.id!!)
+            persistedHistoryEntry(releaseId = headReleaseId, image = "registry.example.com/head", stageId = prod.id!!)
         )
 
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
-        given(deploymentExecutor.attemptDeploy(workload, prod, target.binaryUrl)).willReturn(null)
+        given(deploymentExecutor.attemptDeploy(workload, prod, target.image)).willReturn(null)
         stubHistorySaveEchoesArgument()
 
         val result = service.rollback(targetReleaseId)
@@ -566,7 +633,7 @@ class ReleaseServiceTest {
         given(
             releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
         ).willReturn(
-            persistedHistoryEntry(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = prod.id!!)
+            persistedHistoryEntry(releaseId = releaseId, image = release.image, stageId = prod.id!!)
         )
 
         val exception = assertThrows(ResponseStatusException::class.java) { service.rollback(releaseId) }
@@ -594,7 +661,7 @@ class ReleaseServiceTest {
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
-        given(deploymentExecutor.attemptDeploy(workload, dev, release.binaryUrl)).willReturn(null)
+        given(deploymentExecutor.attemptDeploy(workload, dev, release.image)).willReturn(null)
         stubHistorySaveEchoesArgument()
 
         val result = service.redeploy(releaseId, RedeployRequest(stageId = dev.id!!))
@@ -638,10 +705,10 @@ class ReleaseServiceTest {
         given(
             releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
         ).willReturn(
-            persistedHistoryEntry(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = prod.id!!)
+            persistedHistoryEntry(releaseId = releaseId, image = release.image, stageId = prod.id!!)
         )
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
-        given(deploymentExecutor.attemptDeploy(workload, prod, release.binaryUrl)).willReturn(null)
+        given(deploymentExecutor.attemptDeploy(workload, prod, release.image)).willReturn(null)
         stubHistorySaveEchoesArgument()
 
         val result = service.redeploy(releaseId, RedeployRequest(stageId = prod.id!!))
@@ -673,7 +740,7 @@ class ReleaseServiceTest {
                 prod.id!!, listOf(releaseId, headReleaseId)
             )
         ).willReturn(
-            persistedHistoryEntry(releaseId = headReleaseId, binaryUrl = "https://registry.example.com/head", stageId = prod.id!!)
+            persistedHistoryEntry(releaseId = headReleaseId, image = "registry.example.com/head", stageId = prod.id!!)
         )
 
         val exception = assertThrows(ResponseStatusException::class.java) {
@@ -741,7 +808,7 @@ class ReleaseServiceTest {
         given(
             releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(qa.id!!, listOf(releaseId))
         ).willReturn(
-            persistedHistoryEntry(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = qa.id!!)
+            persistedHistoryEntry(releaseId = releaseId, image = release.image, stageId = qa.id!!)
         )
 
         val result = service.findById(releaseId)
@@ -768,7 +835,7 @@ class ReleaseServiceTest {
         given(
             releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(qa.id!!, listOf(releaseId, headReleaseId))
         ).willReturn(
-            persistedHistoryEntry(releaseId = headReleaseId, binaryUrl = "https://registry.example.com/head", stageId = qa.id!!)
+            persistedHistoryEntry(releaseId = headReleaseId, image = "registry.example.com/head", stageId = qa.id!!)
         )
 
         val result = service.findById(releaseId)
@@ -788,7 +855,7 @@ class ReleaseServiceTest {
         given(
             releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
         ).willReturn(
-            persistedHistoryEntry(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = prod.id!!)
+            persistedHistoryEntry(releaseId = releaseId, image = release.image, stageId = prod.id!!)
         )
 
         val result = service.findById(releaseId)
@@ -828,7 +895,7 @@ class ReleaseServiceTest {
 
         val deployedAt = Instant.now()
         given(releaseHistoryRepository.findTopByReleaseIdAndDeployedAtIsNotNullOrderByDeployedAtDesc(releaseId)).willReturn(
-            persistedHistoryEntry(releaseId = releaseId, binaryUrl = release.binaryUrl, stageId = dev.id!!, deployedAt = deployedAt)
+            persistedHistoryEntry(releaseId = releaseId, image = release.image, stageId = dev.id!!, deployedAt = deployedAt)
         )
 
         val result = service.findById(releaseId)
@@ -859,7 +926,7 @@ class ReleaseServiceTest {
 
         val result = service.update(
             releaseId,
-            ReleaseRequest(binaryUrl = release.binaryUrl, description = null, workloadId = newWorkloadId)
+            ReleaseRequest(image = release.image, description = null, workloadId = newWorkloadId)
         )
 
         assertEquals(newStage.id, release.currentStageId)
@@ -883,7 +950,7 @@ class ReleaseServiceTest {
         given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(stage))
         given(stageRepository.findById(stage.id!!)).willReturn(Optional.of(stage))
 
-        service.update(releaseId, ReleaseRequest(binaryUrl = release.binaryUrl, description = "updated", workloadId = workloadId))
+        service.update(releaseId, ReleaseRequest(image = release.image, description = "updated", workloadId = workloadId))
 
         verify(releaseHistoryRepository, never()).save(any())
     }
@@ -897,7 +964,7 @@ class ReleaseServiceTest {
         val deployedAt = Instant.now()
         val entry = persistedHistoryEntry(
             releaseId = releaseId,
-            binaryUrl = "https://registry.example.com/app:1.0.0",
+            image = "registry.example.com/app:1.0.0",
             stageId = stage.id!!,
             stageName = stage.name,
             deployedAt = deployedAt,
@@ -909,7 +976,7 @@ class ReleaseServiceTest {
 
         assertEquals(1, result.size)
         assertEquals(stage.name, result[0].stage.name)
-        assertEquals(entry.binaryUrl, result[0].binaryUrl)
+        assertEquals(entry.image, result[0].image)
         assertEquals(deployedAt, result[0].deployedAt)
     }
 

@@ -92,20 +92,20 @@ workloads:
 
 releases:
   - workload: platform-api
-    binary_url: https://hub.docker.com/nginx:1.30-alpine
+    image: nginx:1.30-alpine
     description: Initial release
   - workload: platform-api
-    binary_url: https://hub.docker.com/nginx:1.31-alpine
+    image: nginx:1.31-alpine
     description: Adds pagination support
   - workload: platform-worker
-    binary_url: https://hub.docker.com/nginx:1.30-alpine
+    image: nginx:1.30-alpine
     description: Initial release
   - workload: payments-gateway
-    binary_url: https://hub.docker.com/nginx:1.30-alpine
+    image: nginx:1.30-alpine
     description: Initial release
   - workload: payments-ledger
-    binary_url: https://hub.docker.com/nginx:1.30-alpine
+    image: nginx:1.30-alpine
     description: Initial release
   - workload: mobile-bff
-    binary_url: https://artifacts.example.com/mobile-bff/1.0.0/mobile-bff.tar.gz
+    image: https://artifacts.example.com/mobile-bff/1.0.0/mobile-bff.tar.gz
     description: Initial release

@@ -163,7 +163,7 @@ interface HistoryRow {
   productName: string
   workloadName: string
   stageName: string
-  binaryUrl: string
+  image: string
   deployedDisplay: string
   createdBy: string
 }
@@ -183,7 +183,7 @@ const tableRows = computed<HistoryRow[]>(() =>
     productName: entry.productName,
     workloadName: entry.workloadName,
     stageName: entry.stage.name,
-    binaryUrl: entry.binaryUrl,
+    image: entry.image,
     deployedDisplay: formatDeploymentStatus(entry),
     createdBy: entry.createdBy,
   })),
@@ -195,7 +195,7 @@ const historyHeaders: DataTableHeader<HistoryRow>[] = [
   { title: 'Product', key: 'productName' },
   { title: 'Workload', key: 'workloadName' },
   { title: 'Stage', key: 'stageName' },
-  { title: 'Binary URL', key: 'binaryUrl' },
+  { title: 'Image', key: 'image' },
   { title: 'Deployed', key: 'deployedDisplay' },
   { title: 'By', key: 'createdBy' },
 ]

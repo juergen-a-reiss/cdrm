@@ -7,7 +7,7 @@ import java.time.Instant
 import java.util.*
 
 data class ReleaseRequest(
-    val binaryUrl: String,
+    val image: String,
     val description: String?,
     val workloadId: UUID,
 )
@@ -18,7 +18,7 @@ data class RedeployRequest(
 
 data class ReleaseResponse(
     val id: UUID,
-    val binaryUrl: String,
+    val image: String,
     val description: String?,
     val workloadId: UUID,
     val currentStage: ReleaseStageInfo,
@@ -47,7 +47,7 @@ data class ReleaseStageInfo(
 
 data class ReleaseHistoryEntry(
     val id: UUID,
-    val binaryUrl: String,
+    val image: String,
     val action: ReleaseHistoryAction,
     val stage: ReleaseStageInfo,
     val timestamp: Instant,
@@ -71,7 +71,7 @@ data class ReleaseHistoryEntry(
 data class ReleaseHistoryOverviewEntry(
     val id: UUID,
     val releaseId: UUID,
-    val binaryUrl: String,
+    val image: String,
     val action: ReleaseHistoryAction,
     val productId: UUID,
     val productName: String,

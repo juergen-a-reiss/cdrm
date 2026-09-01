@@ -20,7 +20,7 @@ const emit = defineEmits<{
   saved: []
 }>()
 
-const binaryUrl = ref('')
+const image = ref('')
 const description = ref('')
 const workloadId = ref<string | null>(null)
 const workloads = ref<WorkloadResponse[]>([])
@@ -32,7 +32,7 @@ watch(
   async ([open, release]) => {
     if (!open) return
     error.value = null
-    binaryUrl.value = release?.binaryUrl ?? ''
+    image.value = release?.image ?? ''
     description.value = release?.description ?? ''
     workloadId.value = release?.workloadId ?? null
     try {
@@ -56,7 +56,7 @@ async function save() {
   saving.value = true
   error.value = null
   try {
-    const request = { binaryUrl: binaryUrl.value, description: description.value || null, workloadId: workloadId.value }
+    const request = { image: image.value, description: description.value || null, workloadId: workloadId.value }
     if (props.release) {
       await releasesApi.update(props.release.id, request)
     } else {
@@ -78,9 +78,9 @@ async function save() {
       <v-card-text>
         <v-alert v-if="error" type="error" :text="error" class="mb-4" />
         <v-text-field
-          v-model="binaryUrl"
-          label="Binary URL"
-          placeholder="https://registry.example.com/app:1.0.0"
+          v-model="image"
+          label="Image"
+          placeholder="my-registry.company.com/nginx:30"
           required
           autofocus
           :disabled="!!release"

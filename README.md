@@ -44,11 +44,11 @@ production) will be deployed at a certain schedule.
 Next, a stage is usually associated with a runtime environment. For example a kubernetes cluster. Or a set of virtual
 machines. Or a Proxmox cluster. This tool will concentrate on the handling of kubernetes clusters.
 
-Stages are managed by users with the "cdrm-devops" role.
+Stages are managed by users with the `cdrm-devops` role.
 
 ## Clusters
 
-Clusters are managed by users with the "cdrm-devops" role.
+Clusters are managed by users with the `cdrm-devops` role.
 
 ### Kubernetes Clusters
 
@@ -76,7 +76,7 @@ TODO: coming soon.
 
 ## Products
 
-Products are managed by users with the "cdrm-productowner" role.
+Products are managed by users with the `cdrm-productowner` role.
 
 It is all about products. They could be sold many times with little effort. Further products are the driver of a SaaS
 organization. And very often also the driver for structuring development and runtime. So, product is a core concept. The
@@ -85,7 +85,7 @@ be connected in a way that deployment starts with the first stage. Or any later 
 
 ## Workload
 
-Workloads are managed by users with the "cdrm-devops" or "cdrm-developer" role.
+Workloads are managed by users with the `cdrm-devops` or `cdrm-developer` role.
 
 The workload describes an artifact that is to be deployed. It is part of a product. A workload is tied to a kubernetes
 namespace. The namespace configuration must not contain the prefixes defined in the stages. Instead, on deployment, the
@@ -93,7 +93,7 @@ prefix is used (if any) to resolve the namespace.
 
 ## Release
 
-Releases are managed by users with the "cdrm-productowner" role.
+Releases are managed by users with the `cdrm-productowner` role.
 
 A release keeps track of the lifecycle of an artifact: The release is created when the artifact is first deployed to the
 first stage (the first depends on the product configuration). A release can be promoted to any higher stage. This will -
@@ -113,7 +113,7 @@ to be useful and it has passed all tests in this stage, it can be promoted. Prom
 * Identify the next stage.
 * Deploy the binary artifact to the next stage.
 * Mark the Release object to be in this next stage.
-* Increment the counter "cdrm.releases.promoted" with the labels product, workload and stage. This should be used in a
+* Increment the counter `cdrm.releases.promoted` with the labels product, workload and stage. This should be used in a
   graphana dashboard.
 * Create an immutable entry in the release history used for statistics.
 
@@ -129,7 +129,7 @@ A rollback can be done from any non-head release - but not from a head release, 
 or via GUI. Rollback does the following:Identify the next stage.
 
 * Deploy the binary artifact to the current stage.
-* Increment the counter "cdrm.releases.rollback" with the labels product, workload and stage. This should be used in a
+* Increment the counter `cdrm.releases.rollback` with the labels product, workload and stage. This should be used in a
   graphana dashboard.
 * Create an immutable entry in the release history used for statistics.
 
@@ -146,7 +146,7 @@ would be necessary for any reason. Or deploy anything that is in production to a
 any issue that happens in production. Redeploy does the following:
 
 * Deploy the binary artifact to the selected stage.
-* Increment the counter "cdrm.releases.redeploy" with the labels product, workload and stage. This should be used in a
+* Increment the counter `cdrm.releases.redeploy` with the labels product, workload and stage. This should be used in a
   graphana dashboard.
 * Create an immutable entry in the release history used for statistics.
 
@@ -181,3 +181,25 @@ The ultimate management questions will be answered here:
 ## Release History Details
 
 Here we see the release history details als a table view.
+
+# Access Control
+
+Access control is secured via OpenId Connect. 
+
+## RBAC Role Based Access Control
+
+`cdrm-devops`: Can edit the views that are needed to setup the system and adapt it to the infrastructure. Namely: 
+
+- clusters
+- stages
+- workloads
+
+`cdrm-productowner`: Can manage the data inside releases view. Can view the rest of the data.
+
+`cdrm-developer`: Can create releases and deploy them to the first stage. Can view the rest of the data.
+
+`cdrm-manager`: Can view the data.
+
+## Resource Based Access Control
+
+To be coming soon.

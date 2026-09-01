@@ -156,11 +156,11 @@ def seed_releases(api_url: str, token: str, releases: list[dict], workload_ids: 
     for release in releases:
         workload_id = workload_ids.get(release["workload"])
         if workload_id is None:
-            print(f"Error: release '{release['binary_url']}' references unknown workload '{release['workload']}'", file=sys.stderr)
+            print(f"Error: release '{release['image']}' references unknown workload '{release['workload']}'", file=sys.stderr)
             sys.exit(1)
-        body = {"binaryUrl": release["binary_url"], "description": release.get("description"), "workloadId": workload_id}
+        body = {"image": release["image"], "description": release.get("description"), "workloadId": workload_id}
         post(api_url, token, "/releases", body)
-        print(f"  release: {release['binary_url']}")
+        print(f"  release: {release['image']}")
 
 
 def kubectl(*args: str, input_text: str | None = None) -> subprocess.CompletedProcess:
@@ -312,7 +312,8 @@ def main() -> None:
     workload_ids = seed_workloads(args.api_url, args.token, data["workloads"], product_ids)
     seed_releases(args.api_url, args.token, data["releases"], workload_ids)
     bootstrap_kubernetes_objects(data["clusters"], data["stages"], data["workloads"])
-
+    seed_releases(args.api_url, args.token, data["releases"], workload_ids)
+    
     print("Done.")
 
 

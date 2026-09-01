@@ -19,8 +19,10 @@ class Release(
     @GeneratedValue(strategy = GenerationType.UUID)
     val id: UUID? = null,
 
-    @Column(name = "binary_url", nullable = false)
-    val binaryUrl: String,
+    // Container image reference (not a URL) — e.g. "nginx:30" or
+    // "my-registry.company.com/nginx:30" — as accepted by Kubernetes.
+    @Column(name = "image", nullable = false)
+    val image: String,
 
     @Column
     var description: String? = null,

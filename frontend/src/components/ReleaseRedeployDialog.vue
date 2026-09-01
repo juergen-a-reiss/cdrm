@@ -64,7 +64,7 @@ async function save() {
       <v-card-text>
         <v-alert v-if="error" type="error" :text="error" class="mb-4" />
         <p v-if="release" class="text-body-2 mb-4">
-          Redeploy <strong>{{ release.binaryUrl }}</strong> to:
+          Redeploy <strong>{{ release.image }}</strong> to:
         </p>
         <v-select
           v-model="stageId"

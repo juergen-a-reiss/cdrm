@@ -49,7 +49,7 @@ class DeploymentSchedulerJob(
 
             if (!isDue(entry, workload.productId, stage.deploymentPolicy, now)) continue
 
-            val error = deploymentExecutor.attemptDeploy(workload, stage, release.binaryUrl)
+            val error = deploymentExecutor.attemptDeploy(workload, stage, release.image)
             if (error == null) {
                 entry.deployedAt = now
                 entry.deployError = null
