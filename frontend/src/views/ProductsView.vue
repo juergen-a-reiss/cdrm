@@ -85,7 +85,9 @@ async function removeProduct(product: ProductResponse) {
 
 <template>
   <v-alert v-if="deleteError" type="error" :text="deleteError" class="mb-4" />
-  <ProductFilterBar />
+  <div class="d-flex flex-wrap ga-2 align-center mb-4">
+    <ProductFilterBar />
+  </div>
   <ResourceTable :headers="headers" :items="rows" :loading="loading" :error="error">
     <template v-if="canManageProducts" #top>
       <v-toolbar flat>

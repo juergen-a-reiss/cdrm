@@ -9,8 +9,10 @@ import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js
 import ResourceTable from '../components/ResourceTable.vue'
 import WorkloadFormDialog from '../components/WorkloadFormDialog.vue'
 import ProductFilterBar from '../components/ProductFilterBar.vue'
+import PipelineFilterBar from '../components/PipelineFilterBar.vue'
 import { useResourceList } from '../composables/useResourceList'
 import { useProductFilter } from '../composables/useProductFilter'
+import { usePipelineFilter } from '../composables/usePipelineFilter'
 import { workloadsApi } from '../api/workloads'
 import { productsApi } from '../api/products'
 import { ApiError } from '../api/http'
@@ -26,6 +28,7 @@ interface WorkloadRow {
   id: string
   name: string
   description: string | null
+  pipeline: string
   productName: string
   target: string
   stageCount: number
@@ -35,16 +38,18 @@ interface WorkloadRow {
 const { items, loading, error, reload } = useResourceList(workloadsApi.list)
 const { items: products } = useResourceList(productsApi.list)
 const { matches } = useProductFilter()
+const { matches: matchesPipeline } = usePipelineFilter()
 
 const productNameById = computed(() => new Map(products.value.map((product) => [product.id, product.name])))
 
 const rows = computed<WorkloadRow[]>(() =>
   items.value
-    .filter((workload) => matches(workload.productId))
+    .filter((workload) => matches(workload.productId) && matchesPipeline(workload.pipeline))
     .map((workload) => ({
       id: workload.id,
       name: workload.name,
       description: workload.description,
+      pipeline: workload.pipeline,
       productName: productNameById.value.get(workload.productId) ?? workload.productId,
       target: workload.kubernetes
         ? `Kubernetes · ${workload.kubernetesKind ? KIND_LABELS[workload.kubernetesKind] : 'Unknown'}${workload.kubernetesNameSpace ? ` (${workload.kubernetesNameSpace})` : ''}`
@@ -57,6 +62,7 @@ const rows = computed<WorkloadRow[]>(() =>
 const headers = computed<DataTableHeader<WorkloadRow>[]>(() => {
   const base: DataTableHeader<WorkloadRow>[] = [
     { title: 'Name', key: 'name' },
+    { title: 'Pipeline', key: 'pipeline' },
     { title: 'Product', key: 'productName' },
     { title: 'Target', key: 'target' },
     { title: 'Stages', key: 'stageCount', width: 100 },
@@ -98,7 +104,10 @@ async function removeWorkload(workload: WorkloadResponse) {
 
 <template>
   <v-alert v-if="deleteError" type="error" :text="deleteError" class="mb-4" />
-  <ProductFilterBar />
+  <div class="d-flex flex-wrap ga-2 align-center mb-4">
+    <PipelineFilterBar />
+    <ProductFilterBar />
+  </div>
   <ResourceTable :headers="headers" :items="rows" :loading="loading" :error="error">
     <template v-if="canManageWorkloads" #top>
       <v-toolbar flat>

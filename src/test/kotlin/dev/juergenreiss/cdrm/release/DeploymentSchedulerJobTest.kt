@@ -59,6 +59,7 @@ class DeploymentSchedulerJobTest {
         productId = productId,
         description = null,
         kubernetes = false,
+        pipeline = "--",
         createdAt = Instant.now(),
         modifiedAt = Instant.now(),
         createdBy = UUID.randomUUID(),
@@ -79,6 +80,7 @@ class DeploymentSchedulerJobTest {
 
     private fun persistedStage(id: UUID, policy: DeploymentPolicy) = Stage(
         id = id,
+        pipeline = "pipeline",
         name = "stage-$id",
         description = null,
         order = 1,

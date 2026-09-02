@@ -25,6 +25,7 @@ const policyOptions: { title: string; value: DeploymentPolicy }[] = [
   { title: 'At configured time', value: 'SCHEDULED' },
 ]
 
+const pipeline = ref('')
 const name = ref('')
 const description = ref('')
 const order = ref(0)
@@ -41,6 +42,7 @@ watch(
   async ([open, stage]) => {
     if (!open) return
     error.value = null
+    pipeline.value = stage?.pipeline ?? ''
     name.value = stage?.name ?? ''
     description.value = stage?.description ?? ''
     order.value = stage?.order ?? 0
@@ -66,6 +68,7 @@ async function save() {
   error.value = null
   try {
     const request = {
+      pipeline: pipeline.value,
       name: name.value,
       description: description.value || null,
       order: order.value,
@@ -94,7 +97,8 @@ async function save() {
     <v-card :title="stage ? 'Edit stage' : 'Add stage'">
       <v-card-text>
         <v-alert v-if="error" type="error" :text="error" class="mb-4" />
-        <v-text-field v-model="name" label="Name" required autofocus />
+        <v-text-field v-model="pipeline" label="Pipeline" required autofocus />
+        <v-text-field v-model="name" label="Name" required />
         <v-text-field v-model.number="order" label="Order" type="number" required />
         <v-textarea v-model="description" label="Description" />
         <v-select v-model="deploymentPolicy" :items="policyOptions" label="Deployment Policy" required />

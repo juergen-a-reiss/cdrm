@@ -10,14 +10,17 @@ import { useResourceList } from '../composables/useResourceList'
 import { useProductFilter } from '../composables/useProductFilter'
 import { useStageFilter } from '../composables/useStageFilter'
 import { useWorkloadFilter } from '../composables/useWorkloadFilter'
+import { usePipelineFilter } from '../composables/usePipelineFilter'
 import { usePersistedRef } from '../composables/usePersistedRef'
 import ProductFilterBar from '../components/ProductFilterBar.vue'
 import StageFilterBar from '../components/StageFilterBar.vue'
 import WorkloadFilterBar from '../components/WorkloadFilterBar.vue'
+import PipelineFilterBar from '../components/PipelineFilterBar.vue'
 import ResourceTable from '../components/ResourceTable.vue'
 import ReleaseHistoryChart from '../components/ReleaseHistoryChart.vue'
 import type { ChartSeries } from '../components/ReleaseHistoryChart.vue'
 import { releasesApi } from '../api/releases'
+import { stagesApi } from '../api/stages'
 import type { ReleaseHistoryAction, ReleaseHistoryOverviewEntry } from '../api/types'
 import { RELEASE_HISTORY_ACTIONS, RELEASE_HISTORY_ACTION_COLORS, RELEASE_HISTORY_ACTION_LABELS } from '../utils/releaseHistoryAction'
 import { colorForKey } from '../utils/categoricalPalette'
@@ -27,9 +30,17 @@ import { formatDeploymentStatus } from '../utils/releaseHistoryStatus'
 type GroupBy = 'action' | 'product' | 'workload' | 'stage'
 
 const { items: entries, loading, error } = useResourceList(releasesApi.historyOverview)
+const { items: stages } = useResourceList(stagesApi.list)
 const { matches: matchesProduct } = useProductFilter()
 const { matches: matchesStage } = useStageFilter()
 const { selectedWorkloadIds, matches: matchesWorkload } = useWorkloadFilter()
+const { selectedPipelines, matches: matchesPipeline } = usePipelineFilter()
+
+// A history entry only carries its stage's id/name (a snapshot, so it survives that
+// stage later being deleted) — not its pipeline — so pipeline filtering joins against
+// the live stage list. An entry whose stage no longer exists there just can't match any
+// pipeline selection, the same way its stage filtering already can't.
+const pipelineByStageId = computed(() => new Map(stages.value.map((stage) => [stage.id, stage.pipeline])))
 
 const actionOptions = RELEASE_HISTORY_ACTIONS.map((action) => ({ title: RELEASE_HISTORY_ACTION_LABELS[action], value: action }))
 // "Group by", "Range", and "Filter by action" are persisted (like the ID filters
@@ -108,6 +119,8 @@ const filteredEntries = computed(() =>
     if (!matchesProduct(entry.productId)) return false
     if (entry.workloadId === null ? selectedWorkloadIds.value.length > 0 : !matchesWorkload(entry.workloadId)) return false
     if (!matchesStage(entry.stage.id)) return false
+    const pipeline = pipelineByStageId.value.get(entry.stage.id)
+    if (pipeline === undefined ? selectedPipelines.value.length > 0 : !matchesPipeline(pipeline)) return false
     if (selectedActions.value.length > 0 && !selectedActions.value.includes(entry.action)) return false
     if (cutoffMonth.value !== null && entryMonth(entry) < cutoffMonth.value) return false
     return true
@@ -249,6 +262,7 @@ const historyHeaders: DataTableHeader<HistoryRow>[] = [
   <h1 class="text-h5 mb-4">Release History Dashboard</h1>
 
   <div class="d-flex flex-wrap ga-2 align-center mb-4">
+    <PipelineFilterBar />
     <ProductFilterBar />
     <StageFilterBar />
     <WorkloadFilterBar />
@@ -261,9 +275,10 @@ const historyHeaders: DataTableHeader<HistoryRow>[] = [
       closable-chips
       clearable
       hide-details
-      width="260"
+      width="320"
+      class="flex-grow-0"
     />
-    <v-select v-model="monthsBack" :items="rangeOptions" label="Range" hide-details width="180" />
+    <v-select v-model="monthsBack" :items="rangeOptions" label="Range" hide-details width="320" class="flex-grow-0" />
   </div>
 
   <v-card class="mb-6" variant="outlined">
@@ -276,7 +291,8 @@ const historyHeaders: DataTableHeader<HistoryRow>[] = [
         label="Group by"
         density="compact"
         hide-details
-        width="200"
+        width="320"
+        class="flex-grow-0"
       />
       <v-btn-toggle v-model="chartType" mandatory density="compact" color="primary" variant="outlined">
         <v-btn value="bar" icon="mdi-chart-bar" title="Bar chart" />

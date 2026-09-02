@@ -65,8 +65,13 @@ databaseChangeLog:
                     primaryKey: true
                     nullable: false
               - column:
+                  name: pipeline
+                  type: varchar(64)
+                  constraints:
+                    nullable: falses
+              - column:
                   name: name
-                  type: varchar(255)
+                  type: varchar(64)
                   constraints:
                     nullable: false
                     unique: true
@@ -80,10 +85,10 @@ databaseChangeLog:
                     nullable: false
               - column:
                   name: kubernetes_context
-                  type: varchar(255)
+                  type: varchar(24)
               - column:
                   name: namespace_prefix
-                  type: varchar(100)
+                  type: varchar(16)
               - column:
                   name: deployment_policy
                   type: varchar(20)

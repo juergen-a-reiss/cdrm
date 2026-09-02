@@ -12,10 +12,12 @@ import ReleaseRedeployDialog from '../components/ReleaseRedeployDialog.vue'
 import ProductFilterBar from '../components/ProductFilterBar.vue'
 import StageFilterBar from '../components/StageFilterBar.vue'
 import WorkloadFilterBar from '../components/WorkloadFilterBar.vue'
+import PipelineFilterBar from '../components/PipelineFilterBar.vue'
 import { useResourceList } from '../composables/useResourceList'
 import { useProductFilter } from '../composables/useProductFilter'
 import { useStageFilter } from '../composables/useStageFilter'
 import { useWorkloadFilter } from '../composables/useWorkloadFilter'
+import { usePipelineFilter } from '../composables/usePipelineFilter'
 import { useToast } from '../composables/useToast'
 import { releasesApi } from '../api/releases'
 import { workloadsApi } from '../api/workloads'
@@ -47,20 +49,24 @@ const { items: workloads } = useResourceList(workloadsApi.list)
 const { matches: matchesProduct } = useProductFilter()
 const { matches: matchesStage } = useStageFilter()
 const { matches: matchesWorkload } = useWorkloadFilter()
+const { matches: matchesPipeline } = usePipelineFilter()
 const { showToast } = useToast()
 const headOnly = ref(false)
 
 const workloadNameById = computed(() => new Map(workloads.value.map((workload) => [workload.id, workload.name])))
 const workloadProductIdById = computed(() => new Map(workloads.value.map((workload) => [workload.id, workload.productId])))
+const workloadPipelineById = computed(() => new Map(workloads.value.map((workload) => [workload.id, workload.pipeline])))
 
 const rows = computed<ReleaseRow[]>(() =>
   items.value
     .filter((release) => {
       const productId = workloadProductIdById.value.get(release.workloadId)
+      const pipeline = workloadPipelineById.value.get(release.workloadId)
       return (
         (productId === undefined || matchesProduct(productId)) &&
         matchesStage(release.currentStage.id) &&
         matchesWorkload(release.workloadId) &&
+        (pipeline === undefined || matchesPipeline(pipeline)) &&
         (!headOnly.value || !release.canRollback)
       )
     })
@@ -217,6 +223,7 @@ async function onRedeployed() {
 <template>
   <v-alert v-if="actionError" type="error" :text="actionError" class="mb-4" />
   <div class="d-flex flex-wrap ga-2 align-center mb-4">
+    <PipelineFilterBar />
     <ProductFilterBar />
     <StageFilterBar />
     <WorkloadFilterBar />

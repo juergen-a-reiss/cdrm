@@ -8,13 +8,18 @@ import { computed, ref } from 'vue'
 import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
 import ResourceTable from '../components/ResourceTable.vue'
 import StageFormDialog from '../components/StageFormDialog.vue'
+import PipelineFilterBar from '../components/PipelineFilterBar.vue'
 import { useResourceList } from '../composables/useResourceList'
+import { usePipelineFilter } from '../composables/usePipelineFilter'
 import { stagesApi } from '../api/stages'
 import { ApiError } from '../api/http'
 import type { StageResponse } from '../api/types'
 import { isAdmin } from '../auth/roles'
 
 const { items, loading, error, reload } = useResourceList(stagesApi.list)
+const { matches: matchesPipeline } = usePipelineFilter()
+
+const rows = computed(() => items.value.filter((stage) => matchesPipeline(stage.pipeline)))
 
 const POLICY_LABELS: Record<string, string> = {
   IMMEDIATE: 'Immediate',
@@ -24,6 +29,7 @@ const POLICY_LABELS: Record<string, string> = {
 const headers = computed<DataTableHeader<StageResponse>[]>(() => {
   const base: DataTableHeader<StageResponse>[] = [
     { title: 'Order', key: 'order', width: 100 },
+    { title: 'Pipeline', key: 'pipeline'},
     { title: 'Name', key: 'name' },
     { title: 'Deployment Policy', key: 'deploymentPolicy', value: (item) => POLICY_LABELS[item.deploymentPolicy] },
     { title: 'Kubernetes Context', key: 'kubernetesContext', value: (item) => item.kubernetesContext ?? '—' },
@@ -67,7 +73,10 @@ async function removeStage(stage: StageResponse) {
 
 <template>
   <v-alert v-if="deleteError" type="error" :text="deleteError" class="mb-4" />
-  <ResourceTable :headers="headers" :items="items" :loading="loading" :error="error">
+  <div class="d-flex flex-wrap ga-2 align-center mb-4">
+    <PipelineFilterBar />
+  </div>
+  <ResourceTable :headers="headers" :items="rows" :loading="loading" :error="error">
     <template v-if="isAdmin" #top>
       <v-toolbar flat>
         <v-toolbar-title>Stages</v-toolbar-title>

@@ -8,6 +8,7 @@ import java.time.Instant
 import java.util.*
 
 data class StageRequest(
+    val pipeline: String,
     val name: String,
     val description: String?,
     val order: Int,
@@ -27,6 +28,7 @@ data class StageClusterInfo(
 
 data class StageResponse(
     val id: UUID,
+    val pipeline: String,
     val name: String,
     val description: String?,
     val order: Int,

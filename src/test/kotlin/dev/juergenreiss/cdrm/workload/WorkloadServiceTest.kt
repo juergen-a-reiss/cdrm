@@ -54,8 +54,9 @@ class WorkloadServiceTest {
         service = WorkloadService(repository, stageRepository, workloadStageRepository, productRepository, currentUser, rebac)
     }
 
-    private fun persistedStage(order: Int, name: String = "Stage-$order") = Stage(
+    private fun persistedStage(order: Int, name: String = "Stage-$order", pipeline: String = "pipeline") = Stage(
         id = UUID.randomUUID(),
+        pipeline = pipeline,
         name = name,
         description = null,
         order = order,
@@ -76,6 +77,7 @@ class WorkloadServiceTest {
         productId = productId,
         description = null,
         kubernetes = false,
+        pipeline = "pipeline",
         createdAt = Instant.now(),
         modifiedAt = Instant.now(),
         createdBy = UUID.randomUUID(),
@@ -99,7 +101,7 @@ class WorkloadServiceTest {
             listOf(dev, qa, prod).map { WorkloadStage(workloadId = saved.id!!, stageId = it.id!!) }
         )
 
-        val result = service.create(WorkloadRequest(name = "Release 1", productId = saved.productId, description = null, kubernetes = false))
+        val result = service.create(WorkloadRequest(name = "Release 1", productId = saved.productId, description = null, kubernetes = false, pipeline = "pipeline"))
 
         @Suppress("UNCHECKED_CAST")
         val captor = ArgumentCaptor.forClass(List::class.java) as ArgumentCaptor<List<WorkloadStage>>
@@ -114,29 +116,36 @@ class WorkloadServiceTest {
     }
 
     @Test
-    fun `create with no existing stages links to nothing`() {
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+    fun `create rejects when no stages exist at all`() {
         given(stageRepository.findAll()).willReturn(emptyList())
-        given(stageRepository.findAll(Sort.by("order"))).willReturn(emptyList())
 
-        val saved = persistedWorkload()
-        given(repository.save(any())).willReturn(saved)
-        given(workloadStageRepository.findByWorkloadId(saved.id!!)).willReturn(emptyList())
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.create(WorkloadRequest(name = "Release", productId = UUID.randomUUID(), description = null, kubernetes = false, pipeline = "pipeline"))
+        }
 
-        service.create(WorkloadRequest(name = saved.name, productId = saved.productId, description = null, kubernetes = false))
+        assertEquals(400, exception.statusCode.value())
+        verify(repository, never()).save(any())
+    }
 
-        @Suppress("UNCHECKED_CAST")
-        val captor = ArgumentCaptor.forClass(List::class.java) as ArgumentCaptor<List<WorkloadStage>>
-        verify(workloadStageRepository).saveAll(captor.capture())
-        assertEquals(emptyList<WorkloadStage>(), captor.value)
+    @Test
+    fun `create rejects when stages exist but none belong to the requested pipeline`() {
+        given(stageRepository.findAll()).willReturn(listOf(persistedStage(order = 1)))
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.create(WorkloadRequest(name = "Release", productId = UUID.randomUUID(), description = null, kubernetes = false, pipeline = "other-pipeline"))
+        }
+
+        assertEquals(400, exception.statusCode.value())
+        verify(repository, never()).save(any())
     }
 
     @Test
     fun `create throws when current user cannot be resolved`() {
+        given(stageRepository.findAll()).willReturn(listOf(persistedStage(order = 1)))
         given(currentUser.currentAuditor).willReturn(Optional.empty())
 
         assertThrows(IllegalStateException::class.java) {
-            service.create(WorkloadRequest(name = "Release", productId = UUID.randomUUID(), description = null, kubernetes = false))
+            service.create(WorkloadRequest(name = "Release", productId = UUID.randomUUID(), description = null, kubernetes = false, pipeline = "pipeline"))
         }
     }
 
@@ -160,12 +169,13 @@ class WorkloadServiceTest {
         )
 
         val requestedIds = listOf(qa.id!!, prod.id!!)
+        given(stageRepository.findAll()).willReturn(listOf(dev, qa, prod))
         given(stageRepository.findAllById(requestedIds.toSet())).willReturn(listOf(qa, prod))
         given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev, qa, prod))
 
         service.update(
             workloadId,
-            WorkloadRequest(name = "Release 1", productId = existing.productId, description = null, kubernetes = false, stageIds = requestedIds)
+            WorkloadRequest(name = "Release 1", productId = existing.productId, description = null, kubernetes = false, pipeline = "pipeline", stageIds = requestedIds)
         )
 
         @Suppress("UNCHECKED_CAST")
@@ -186,12 +196,13 @@ class WorkloadServiceTest {
         given(repository.findById(workloadId)).willReturn(Optional.of(existing))
         given(repository.save(existing)).willReturn(existing)
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(stageRepository.findAll()).willReturn(listOf(persistedStage(order = 1)))
         given(workloadStageRepository.findByWorkloadId(workloadId)).willReturn(emptyList())
         given(stageRepository.findAll(Sort.by("order"))).willReturn(emptyList())
 
         service.update(
             workloadId,
-            WorkloadRequest(name = "Release 1", productId = existing.productId, description = null, kubernetes = false, stageIds = null)
+            WorkloadRequest(name = "Release 1", productId = existing.productId, description = null, kubernetes = false, pipeline = "pipeline", stageIds = null)
         )
 
         verify(workloadStageRepository, never()).saveAll(any<List<WorkloadStage>>())
@@ -207,6 +218,7 @@ class WorkloadServiceTest {
         given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
 
         val dev = persistedStage(order = 1, name = "Dev")
+        given(stageRepository.findAll()).willReturn(listOf(dev))
         given(workloadStageRepository.findByWorkloadId(workloadId)).willReturn(
             listOf(WorkloadStage(workloadId = workloadId, stageId = dev.id!!))
         )
@@ -215,7 +227,7 @@ class WorkloadServiceTest {
 
         service.update(
             workloadId,
-            WorkloadRequest(name = "Release 1", productId = existing.productId, description = null, kubernetes = false, stageIds = emptyList())
+            WorkloadRequest(name = "Release 1", productId = existing.productId, description = null, kubernetes = false, pipeline = "pipeline", stageIds = emptyList())
         )
 
         @Suppress("UNCHECKED_CAST")
@@ -223,6 +235,78 @@ class WorkloadServiceTest {
         verify(workloadStageRepository).deleteAll(removeCaptor.capture())
         assertEquals(listOf(dev.id), removeCaptor.value.map { it.stageId })
         verify(workloadStageRepository, never()).saveAll(any<List<WorkloadStage>>())
+    }
+
+    @Test
+    fun `update rejects when the requested pipeline has no stages`() {
+        val workloadId = UUID.randomUUID()
+        given(stageRepository.findAll()).willReturn(listOf(persistedStage(order = 1, pipeline = "other-pipeline")))
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.update(
+                workloadId,
+                WorkloadRequest(name = "Release 1", productId = UUID.randomUUID(), description = null, kubernetes = false, pipeline = "pipeline"),
+            )
+        }
+
+        assertEquals(400, exception.statusCode.value())
+        verify(repository, never()).save(any())
+    }
+
+    @Test
+    fun `update rejects a requested stage that belongs to a different pipeline`() {
+        val workloadId = UUID.randomUUID()
+        val existing = persistedWorkload(id = workloadId, name = "Release 1")
+        given(repository.findById(workloadId)).willReturn(Optional.of(existing))
+
+        val matchingStage = persistedStage(order = 1, name = "Dev", pipeline = "pipeline")
+        val otherPipelineStage = persistedStage(order = 1, name = "Other-Dev", pipeline = "other-pipeline")
+        given(stageRepository.findAll()).willReturn(listOf(matchingStage, otherPipelineStage))
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.update(
+                workloadId,
+                WorkloadRequest(
+                    name = "Release 1",
+                    productId = existing.productId,
+                    description = null,
+                    kubernetes = false,
+                    pipeline = "pipeline",
+                    stageIds = listOf(matchingStage.id!!, otherPipelineStage.id!!),
+                ),
+            )
+        }
+
+        assertEquals(400, exception.statusCode.value())
+        verify(repository, never()).save(any())
+        verify(workloadStageRepository, never()).saveAll(any<List<WorkloadStage>>())
+        verify(workloadStageRepository, never()).deleteAll(any<List<WorkloadStage>>())
+    }
+
+    @Test
+    fun `update rejects changing pipeline while a stage link from the old pipeline stays untouched`() {
+        val workloadId = UUID.randomUUID()
+        val existing = persistedWorkload(id = workloadId, name = "Release 1")
+        given(repository.findById(workloadId)).willReturn(Optional.of(existing))
+
+        val newPipelineStage = persistedStage(order = 1, name = "Dev", pipeline = "new-pipeline")
+        val oldPipelineStage = persistedStage(order = 1, name = "Old-Dev", pipeline = "old-pipeline")
+        given(stageRepository.findAll()).willReturn(listOf(newPipelineStage, oldPipelineStage))
+        // stageIds is omitted (null) — links stay as they are, still pointing at the old
+        // pipeline's stage, which is now inconsistent with the workload's new pipeline.
+        given(workloadStageRepository.findByWorkloadId(workloadId)).willReturn(
+            listOf(WorkloadStage(workloadId = workloadId, stageId = oldPipelineStage.id!!))
+        )
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.update(
+                workloadId,
+                WorkloadRequest(name = "Release 1", productId = existing.productId, description = null, kubernetes = false, pipeline = "new-pipeline"),
+            )
+        }
+
+        assertEquals(400, exception.statusCode.value())
+        verify(repository, never()).save(any())
     }
 
     @Test
@@ -235,6 +319,7 @@ class WorkloadServiceTest {
 
         val knownStage = persistedStage(order = 1, name = "Dev")
         val unknownId = UUID.randomUUID()
+        given(stageRepository.findAll()).willReturn(listOf(knownStage))
         given(stageRepository.findAllById(setOf(knownStage.id!!, unknownId))).willReturn(listOf(knownStage))
 
         val exception = assertThrows(ResponseStatusException::class.java) {
@@ -245,6 +330,7 @@ class WorkloadServiceTest {
                     productId = existing.productId,
                     description = null,
                     kubernetes = false,
+                    pipeline = "pipeline",
                     stageIds = listOf(knownStage.id!!, unknownId),
                 )
             )
@@ -342,7 +428,7 @@ class WorkloadServiceTest {
     fun `create rejects kubernetes true without a kind`() {
         val exception = assertThrows(ResponseStatusException::class.java) {
             service.create(
-                WorkloadRequest(name = "Release", productId = UUID.randomUUID(), description = null, kubernetes = true, kubernetesKind = null)
+                WorkloadRequest(name = "Release", productId = UUID.randomUUID(), description = null, kubernetes = true, kubernetesKind = null, pipeline = "--")
             )
         }
 
@@ -360,6 +446,7 @@ class WorkloadServiceTest {
                     description = null,
                     kubernetes = false,
                     kubernetesKind = KubernetesKind.DEPLOYMENT,
+                    pipeline = "--",
                 )
             )
         }
@@ -372,7 +459,7 @@ class WorkloadServiceTest {
     fun `create accepts kubernetes true with a kind and namespace set`() {
         val userId = UUID.randomUUID()
         given(currentUser.currentAuditor).willReturn(Optional.of(userId))
-        given(stageRepository.findAll()).willReturn(emptyList())
+        given(stageRepository.findAll()).willReturn(listOf(persistedStage(order = 1)))
         given(stageRepository.findAll(Sort.by("order"))).willReturn(emptyList())
 
         val saved = persistedWorkload(name = "Release")
@@ -390,6 +477,7 @@ class WorkloadServiceTest {
                 kubernetes = true,
                 kubernetesKind = KubernetesKind.STATEFUL_SET,
                 kubernetesNameSpace = "payments",
+                pipeline = "pipeline",
             )
         )
 
@@ -409,7 +497,7 @@ class WorkloadServiceTest {
                     description = null,
                     kubernetes = true,
                     kubernetesKind = KubernetesKind.DEPLOYMENT,
-                    kubernetesNameSpace = null,
+                    kubernetesNameSpace = null, pipeline = "--",
                 )
             )
         }
@@ -427,7 +515,7 @@ class WorkloadServiceTest {
                     productId = UUID.randomUUID(),
                     description = null,
                     kubernetes = false,
-                    kubernetesNameSpace = "payments",
+                    kubernetesNameSpace = "payments", pipeline = "--",
                 )
             )
         }

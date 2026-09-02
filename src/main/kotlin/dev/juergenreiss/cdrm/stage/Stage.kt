@@ -18,6 +18,9 @@ class Stage(
     @GeneratedValue(strategy = GenerationType.UUID)
     val id: UUID? = null,
 
+    @Column(nullable = false)
+    var pipeline: String,
+
     @Column(nullable = false, unique = true)
     var name: String,
 

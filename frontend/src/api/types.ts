@@ -33,6 +33,7 @@ export interface StageClusterInfo {
 }
 
 export interface StageRequest {
+  pipeline: string
   name: string
   description: string | null
   order: number
@@ -49,6 +50,7 @@ export interface StageRequest {
 
 export interface StageResponse {
   id: string
+  pipeline: string
   name: string
   description: string | null
   order: number
@@ -110,7 +112,11 @@ export interface WorkloadRequest {
   // Required when kubernetes is true, must be omitted/null otherwise.
   kubernetesKind?: KubernetesKind | null
   kubernetesNameSpace?: string | null
-  // Only honored on update: create always links to every existing stage.
+  // Must match an existing stage's pipeline. On create, the workload links to every
+  // stage of this pipeline. On update, every id in stageIds (or, if omitted, every
+  // already-linked stage) must belong to this pipeline.
+  pipeline: string
+  // Only honored on update: create always links to every stage of the given pipeline.
   // Omit/null = leave stage links unchanged, [] = unlink from all stages.
   stageIds?: string[] | null
 }
@@ -123,6 +129,7 @@ export interface WorkloadResponse {
   kubernetes: boolean
   kubernetesKind: KubernetesKind | null
   kubernetesNameSpace: string | null
+  pipeline: string
   stages: WorkloadStageInfo[]
   createdAt: string
   modifiedAt: string

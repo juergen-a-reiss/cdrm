@@ -51,6 +51,7 @@ class ProductServiceTest {
 
     private fun persistedStage(deploymentPolicy: DeploymentPolicy, name: String = "Stage") = Stage(
         id = UUID.randomUUID(),
+        pipeline = "pipeline",
         name = name,
         description = null,
         order = 1,

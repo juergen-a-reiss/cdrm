@@ -97,6 +97,7 @@ def seed_stages(api_url: str, token: str, stages: list[dict], cluster_ids: dict[
                 sys.exit(1)
             stage_cluster_ids.append(cluster_id)
         body = {
+            "pipeline": stage["pipeline"],
             "name": stage["name"],
             "description": stage.get("description"),
             "order": stage["order"],
@@ -144,6 +145,7 @@ def seed_workloads(api_url: str, token: str, workloads: list[dict], product_ids:
             "kubernetes": workload.get("kubernetes", False),
             "kubernetesKind": workload.get("kubernetes_kind"),
             "kubernetesNameSpace": workload.get("kubernetes_namespace"),
+            "pipeline": workload.get("pipeline"),
         }
         result = post(api_url, token, "/workloads", body)
         ids[workload["name"]] = result["id"]

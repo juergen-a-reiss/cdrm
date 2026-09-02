@@ -14,48 +14,85 @@ clusters:
     description: "Local Minicube"
     cluster_type: "K8S"
     url: "http://127.0.0.1:1964/api/v1"
-    k8s_namespaces: dev-platform,qa-platform,int-platform,prod-platform,dev-website,qa-website,int-website,prod-website,
+    k8s_namespaces: f-dev-platform,f-qa-platform,f-staging-platform,f-prod-platform,f-dev-website,f-qa-website,f-staging-website,f-prod-website,p-dev-platform,p-qa-platform,p-staging-platform,p-prod-platform,p-dev-website,p-qa-website,p-staging-website,p-prod-website
 
 stages:
-  - name: development
+  - name: ffm-development
+    pipeline: frankfurt
     description: Development environment
     order: 1
     deployment_policy: IMMEDIATE
     kubernetes_context: minikube
-    namespace_prefix: dev-
+    namespace_prefix: f-dev-
     clusters: [minikube]
-  - name: qa
+  - name: ffm-qa
+    pipeline: frankfurt
     description: Quality assurance environment
     order: 2
     deployment_policy: IMMEDIATE
     kubernetes_context: minikube
-    namespace_prefix: qa-
+    namespace_prefix: f-qa-
     clusters: [minikube]
-  - name: staging
+  - name: ffm-staging
+    pipeline: frankfurt
     description: Pre-production environment
     order: 3
     deployment_policy: IMMEDIATE
     kubernetes_context: minikube
-    namespace_prefix: staging-
+    namespace_prefix: f-staging-
     clusters: [minikube]
-  - name: production
+  - name: ffm-production
+    pipeline: frankfurt
     description: Production environment
     order: 4
     deployment_policy: SCHEDULED
     kubernetes_context: minikube
-    namespace_prefix: prod-
+    namespace_prefix: f-prod-
+    clusters: [minikube]
+
+  - name: paris-dev
+    pipeline: paris
+    description: Development environment
+    order: 1
+    deployment_policy: IMMEDIATE
+    kubernetes_context: minikube
+    namespace_prefix: p-dev-
+    clusters: [minikube]
+  - name: paris-qa
+    pipeline: paris
+    description: Quality assurance environment
+    order: 2
+    deployment_policy: IMMEDIATE
+    kubernetes_context: minikube
+    namespace_prefix: p-qa-
+    clusters: [minikube]
+  - name: paris-staging
+    pipeline: paris
+    description: Pre-production environment
+    order: 3
+    deployment_policy: IMMEDIATE
+    kubernetes_context: minikube
+    namespace_prefix: p-staging-
+    clusters: [minikube]
+  - name: paris-production
+    pipeline: paris
+    description: Production environment
+    order: 4
+    deployment_policy: SCHEDULED
+    kubernetes_context: minikube
+    namespace_prefix: p-prod-
     clusters: [minikube]
 
 products:
   - name: Platform
     description: Core platform services
     stage_deployment_crons:
-      - stage: production
+      - stage: ffm-production
         cron: "0 0 2 * * *"
   - name: Payments
     description: Payment processing services
     stage_deployment_crons:
-      - stage: production
+      - stage: ffm-production
         cron: "0 0 3 * * *"
   - name: Mobile
     description: Mobile backend services
@@ -69,29 +106,44 @@ workloads:
     kubernetes: true
     kubernetes_kind: DEPLOYMENT
     kubernetes_namespace: platform
+    pipeline: frankfurt  
+  - name: platform-interface-emea
+    product: Platform
+    description: Platform interface
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: platform
+    pipeline: paris
   - name: platform-worker
     product: Platform
     description: Platform background worker workload
     kubernetes: true
     kubernetes_kind: DEPLOYMENT
     kubernetes_namespace: platform
+    pipeline: frankfurt
   - name: payments-gateway
     product: Payments
     description: Payment gateway workload
     kubernetes: true
     kubernetes_kind: STATEFUL_SET
     kubernetes_namespace: website
+    pipeline: frankfurt
   - name: payments-ledger
     product: Payments
     description: Payment ledger workload
     kubernetes: false
+    pipeline: frankfurt
   - name: mobile-bff
     product: Mobile
     description: Mobile backend-for-frontend workload
     kubernetes: false
+    pipeline: frankfurt
 
 releases:
   - workload: platform-api
+    image: nginx:1.30-alpine
+    description: Initial release
+  - workload: platform-interface-emea
     image: nginx:1.30-alpine
     description: Initial release
   - workload: platform-api

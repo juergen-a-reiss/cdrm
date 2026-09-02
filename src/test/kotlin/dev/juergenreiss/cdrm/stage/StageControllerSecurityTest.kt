@@ -45,6 +45,7 @@ class StageControllerSecurityTest {
 
     private fun sampleResponse() = StageResponse(
         id = UUID.randomUUID(),
+        pipeline = "pipeline",
         name = "Draft",
         description = null,
         order = 1,
@@ -82,13 +83,14 @@ class StageControllerSecurityTest {
     @Test
     fun `POST stages with admin role is created`() {
         given(
-            service.create(StageRequest(name = "Draft", description = null, order = 1, deploymentPolicy = DeploymentPolicy.IMMEDIATE))
+            service.create(StageRequest(pipeline = "pipeline",
+                name = "Draft", description = null, order = 1, deploymentPolicy = DeploymentPolicy.IMMEDIATE))
         ).willReturn(sampleResponse())
 
         mockMvc.perform(
             post("/stages").with(jwt().authorities(adminAuthority))
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("""{"name":"Draft","description":null,"order":1,"deploymentPolicy":"IMMEDIATE"}""")
+                .content("""{"pipeline":"pipeline", "name":"Draft","description":null,"order":1,"deploymentPolicy":"IMMEDIATE"}""")
         ).andExpect(status().isCreated)
     }
 

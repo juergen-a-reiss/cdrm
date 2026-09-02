@@ -33,8 +33,8 @@ This tool will make your life easier by:
 ### Stages
 
 Any continuous delivery pipeline consists of stages. There might be more than one pipelines in an organization. Stages
-usually have names like "development",
-"staging", "uat" and "production".
+usually have names like "development", "staging", "uat" and "production". Stages with the same value of the `pipeline`
+property form a pipeline.
 
 Essential in this context is that any pipeline has a first stage and a last stage. To be more precise: A stage might
 have a successor - if it does not have a successor, it is the last stage (usually production). Further, any stage in an
@@ -90,6 +90,9 @@ Workloads are managed by users with the `cdrm-devops` or `cdrm-developer` role.
 The workload describes an artifact that is to be deployed. It is part of a product. A workload is tied to a kubernetes
 namespace. The namespace configuration must not contain the prefixes defined in the stages. Instead, on deployment, the
 prefix is used (if any) to resolve the namespace.
+
+Additionally, a workload is tied to one of the pipelines. On creation edit, one of the pipelines must be selected. Then
+the connection to the stages can be done based on the stages pipeline name.
 
 ### Release
 
@@ -223,18 +226,17 @@ If an attribute is not set, then ReBAC does not apply for this user for this att
 The backend and frontend ship as two separate images.
 
 - `Dockerfile` (repo root) — multi-stage build. Compiles the backend with `eclipse-temurin:26-jdk`
-  (dependency resolution and compilation are separate cached layers, so an ordinary source change
-  doesn't re-download anything), then extracts the boot jar into Spring Boot's layered-jar structure and
-  copies each layer separately into an `eclipse-temurin:26-jre` runtime image — the ~150 third-party
-  dependency jars (~90 MB) end up in one layer that stays byte-identical across code-only rebuilds,
-  separate from our own compiled classes (under 1 MB). Needs `OIDC_ISSUER_URI` and the Postgres
-  datasource settings at runtime (see `application.yaml`); listens on `8080`.
+  (dependency resolution and compilation are separate cached layers, so an ordinary source change doesn't re-download
+  anything), then extracts the boot jar into Spring Boot's layered-jar structure and copies each layer separately into
+  an `eclipse-temurin:26-jre` runtime image — the ~150 third-party dependency jars (~90 MB) end up in one layer that
+  stays byte-identical across code-only rebuilds, separate from our own compiled classes (under 1 MB). Needs
+  `OIDC_ISSUER_URI` and the Postgres datasource settings at runtime (see `application.yaml`); listens on `8080`.
 - `frontend/Dockerfile` — builds the Vue app with `node`, then serves the static `dist/` output with
-  `nginx:alpine` (`frontend/nginx.conf`). npm dependencies live in their own cached layer during the
-  build stage (installed before the source is copied in), but the runtime image doesn't ship any of
-  them at all — only the built `dist/` assets, since the browser just needs the bundled JS. Proxies
-  `/api/` to a `backend` host on port `8080` — resolved lazily per-request via nginx's `resolver`, so
-  the container stays up even if that host isn't reachable yet. Listens on `80`.
+  `nginx:alpine` (`frontend/nginx.conf`). npm dependencies live in their own cached layer during the build stage
+  (installed before the source is copied in), but the runtime image doesn't ship any of them at all — only the built
+  `dist/` assets, since the browser just needs the bundled JS. Proxies
+  `/api/` to a `backend` host on port `8080` — resolved lazily per-request via nginx's `resolver`, so the container
+  stays up even if that host isn't reachable yet. Listens on `80`.
 
 Build locally from the repo root:
 
@@ -243,8 +245,7 @@ docker build -t cdrm-backend .
 docker build -t cdrm-frontend -f frontend/Dockerfile frontend
 ```
 
-`.github/workflows/docker.yml` builds both images on every push and pull request against `master`, and
-additionally pushes them to `ghcr.io/<owner>/cdrm-backend` and `ghcr.io/<owner>/cdrm-frontend` on pushes
-to `master` and on `vX.Y.Z` tags (pull requests only build, to validate the Dockerfiles without needing
-registry credentials).
+`.github/workflows/docker.yml` builds both images on every push and pull request against `master`, and additionally
+pushes them to `ghcr.io/<owner>/cdrm-backend` and `ghcr.io/<owner>/cdrm-frontend` on pushes to `master` and on `vX.Y.Z`
+tags (pull requests only build, to validate the Dockerfiles without needing registry credentials).
 

@@ -56,6 +56,7 @@ class StageServiceTest {
         modifiedBy: UUID = createdBy,
     ) = Stage(
         id = id,
+        pipeline = "pipeline",
         name = name,
         description = description,
         order = order,
@@ -121,7 +122,7 @@ class StageServiceTest {
         val saved = persistedStage(createdBy = userId, modifiedBy = userId)
         given(repository.save(captor.capture())).willReturn(saved)
 
-        val result = service.create(StageRequest(name = "Draft", description = "desc", order = 1, deploymentPolicy = DeploymentPolicy.IMMEDIATE))
+        val result = service.create(StageRequest(pipeline = "pipeline", name = "Draft", description = "desc", order = 1, deploymentPolicy = DeploymentPolicy.IMMEDIATE))
 
         assertEquals("Draft", captor.value.name)
         assertEquals(userId, captor.value.createdBy)
@@ -135,7 +136,7 @@ class StageServiceTest {
         given(currentUser.currentAuditor).willReturn(Optional.empty())
 
         assertThrows(IllegalStateException::class.java) {
-            service.create(StageRequest(name = "Draft", description = null, order = 1, deploymentPolicy = DeploymentPolicy.IMMEDIATE))
+            service.create(StageRequest(pipeline = "pipeline", name = "Draft", description = null, order = 1, deploymentPolicy = DeploymentPolicy.IMMEDIATE))
         }
 
         verify(repository, never()).save(any())
@@ -150,7 +151,7 @@ class StageServiceTest {
         given(currentUser.currentAuditor).willReturn(Optional.of(newUser))
         given(repository.save(stage)).willReturn(stage)
 
-        val result = service.update(stage.id!!, StageRequest(name = "Renamed", description = "new desc", order = 2, deploymentPolicy = DeploymentPolicy.IMMEDIATE))
+        val result = service.update(stage.id!!, StageRequest(pipeline = "pipeline", name = "Renamed", description = "new desc", order = 2, deploymentPolicy = DeploymentPolicy.IMMEDIATE))
 
         assertEquals("Renamed", stage.name)
         assertEquals("new desc", stage.description)
@@ -166,7 +167,7 @@ class StageServiceTest {
         given(repository.findById(id)).willReturn(Optional.empty())
 
         val exception = assertThrows(ResponseStatusException::class.java) {
-            service.update(id, StageRequest(name = "Renamed", description = null, order = 2, deploymentPolicy = DeploymentPolicy.IMMEDIATE))
+            service.update(id, StageRequest(pipeline = "pipeline", name = "Renamed", description = null, order = 2, deploymentPolicy = DeploymentPolicy.IMMEDIATE))
         }
 
         assertEquals(404, exception.statusCode.value())
@@ -198,6 +199,7 @@ class StageServiceTest {
         service.update(
             stageId,
             StageRequest(
+                pipeline = "pipeline",
                 name = "Draft",
                 description = null,
                 order = 1,
@@ -227,7 +229,7 @@ class StageServiceTest {
 
         service.update(
             stageId,
-            StageRequest(name = "Draft", description = null, order = 1, deploymentPolicy = DeploymentPolicy.IMMEDIATE, clusterIds = null)
+            StageRequest(pipeline = "pipeline", name = "Draft", description = null, order = 1, deploymentPolicy = DeploymentPolicy.IMMEDIATE, clusterIds = null)
         )
 
         verify(stageClusterRepository, never()).saveAll(any<List<StageCluster>>())
@@ -250,6 +252,7 @@ class StageServiceTest {
             service.update(
                 stageId,
                 StageRequest(
+                    pipeline = "pipeline",
                     name = "Draft",
                     description = null,
                     order = 1,

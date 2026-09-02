@@ -36,6 +36,7 @@ class StageService(
         val userId = currentUserId()
         val saved = repository.save(
             Stage(
+                pipeline = request.pipeline,
                 name = request.name,
                 description = request.description,
                 order = request.order,
@@ -56,6 +57,7 @@ class StageService(
     @Transactional
     fun update(id: UUID, request: StageRequest): StageResponse {
         val stage = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        stage.pipeline = request.pipeline
         stage.name = request.name
         stage.description = request.description
         stage.order = request.order
@@ -116,6 +118,7 @@ class StageService(
             .map { StageClusterInfo(id = it.id!!, name = it.name, clusterType = it.clusterType) }
         return StageResponse(
             id = id!!,
+            pipeline = pipeline,
             name = name,
             description = description,
             order = order,

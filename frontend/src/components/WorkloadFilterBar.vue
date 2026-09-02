@@ -46,6 +46,13 @@ const isActive = computed(() => selectedWorkloadIds.value.length > 0)
 </template>
 
 <style scoped>
+/* Vuetify's .v-input defaults to flex: 1 1 auto, which is inert on its own but stretches
+   the field to fill the row once a parent (e.g. a filter-bar flex container) actually is
+   a flex container — override so the explicit width above is respected either way. */
+.filter-select {
+  flex-grow: 0;
+}
+
 /* Selected chips scroll horizontally within the field instead of wrapping onto
    multiple lines, so the select never grows taller as more items are picked. */
 .filter-select :deep(.v-field__input) {

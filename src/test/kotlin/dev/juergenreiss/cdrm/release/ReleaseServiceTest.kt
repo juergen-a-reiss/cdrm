@@ -109,6 +109,7 @@ class ReleaseServiceTest {
         kubernetesContext: String? = null,
     ) = Stage(
         id = UUID.randomUUID(),
+        pipeline = "pipeline",
         name = name,
         description = null,
         order = order,
@@ -130,6 +131,7 @@ class ReleaseServiceTest {
         productId = productId,
         description = null,
         kubernetes = kubernetes,
+        pipeline = "--",
         createdAt = Instant.now(),
         modifiedAt = Instant.now(),
         createdBy = UUID.randomUUID(),

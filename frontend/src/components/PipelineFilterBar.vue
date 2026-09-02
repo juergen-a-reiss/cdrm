@@ -6,34 +6,32 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { useResourceList } from '../composables/useResourceList'
-import { useStageFilter } from '../composables/useStageFilter'
+import { usePipelineFilter } from '../composables/usePipelineFilter'
 import { stagesApi } from '../api/stages'
 
 const { items: stages } = useResourceList(stagesApi.list)
-const { selectedStageIds } = useStageFilter()
+const { selectedPipelines } = usePipelineFilter()
 
-// Selected IDs are persisted across page loads (see useIdFilter), so a stale one — e.g.
-// left over after the database was recreated and stages got new IDs — would otherwise
-// filter every row out forever with no way to tell why. Drop anything not present once
-// the live list has loaded.
+// Selected pipeline names are persisted across page loads (see useIdFilter), so a stale
+// one — e.g. a pipeline that no longer has any stages — would otherwise filter every row
+// out forever with no way to tell why. Drop anything not present once the live list has
+// loaded.
 watch(stages, (list) => {
-  const validIds = new Set(list.map((stage) => stage.id))
-  selectedStageIds.value = selectedStageIds.value.filter((id) => validIds.has(id))
+  const validPipelines = new Set(list.map((stage) => stage.pipeline))
+  selectedPipelines.value = selectedPipelines.value.filter((pipeline) => validPipelines.has(pipeline))
 })
 
-const stageOptions = computed(() =>
-  stages.value
-    .map((stage) => ({ title: stage.name, value: stage.id }))
-    .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })),
+const pipelineOptions = computed(() =>
+  [...new Set(stages.value.map((stage) => stage.pipeline))].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
 )
-const isActive = computed(() => selectedStageIds.value.length > 0)
+const isActive = computed(() => selectedPipelines.value.length > 0)
 </script>
 
 <template>
   <v-select
-    v-model="selectedStageIds"
-    :items="stageOptions"
-    label="Filter by stage"
+    v-model="selectedPipelines"
+    :items="pipelineOptions"
+    label="Filter by pipeline"
     :color="isActive ? 'primary' : undefined"
     multiple
     chips

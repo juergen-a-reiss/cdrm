@@ -38,6 +38,7 @@ class DeploymentExecutorTest {
 
     private fun stage(kubernetesContext: String? = "my-context", namespacePrefix: String? = null) = Stage(
         id = UUID.randomUUID(),
+        pipeline = "pipeline",
         name = "Prod",
         description = null,
         order = 1,
@@ -54,6 +55,7 @@ class DeploymentExecutorTest {
         kubernetes: Boolean,
         kubernetesKind: KubernetesKind? = KubernetesKind.DEPLOYMENT,
         kubernetesNameSpace: String? = "platform",
+        pipeline: String = "--",
     ) = Workload(
         id = UUID.randomUUID(),
         name = "workload",
@@ -62,6 +64,7 @@ class DeploymentExecutorTest {
         kubernetes = kubernetes,
         kubernetesKind = kubernetesKind,
         kubernetesNameSpace = kubernetesNameSpace,
+        pipeline = pipeline,
         createdAt = Instant.now(),
         modifiedAt = Instant.now(),
         createdBy = UUID.randomUUID(),

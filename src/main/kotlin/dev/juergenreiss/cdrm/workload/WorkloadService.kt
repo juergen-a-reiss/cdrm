@@ -51,6 +51,13 @@ class WorkloadService(
     @Transactional
     fun create(request: WorkloadRequest): WorkloadResponse {
         validateTarget(request.kubernetes, request.kubernetesKind, request.kubernetesNameSpace)
+        // A new workload always links to every stage of its own pipeline (see update()'s
+        // stageIds for changing that set later) — a pipeline with no stages at all can't
+        // host a workload, so reject before writing anything.
+        val stageIds = stageRepository.findAll().filter { it.pipeline == request.pipeline }.map { it.id!! }
+        if (stageIds.isEmpty()) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "No stages found for pipeline '${request.pipeline}'")
+        }
         val userId = currentUserId()
         val saved = repository.save(
             Workload(
@@ -60,11 +67,11 @@ class WorkloadService(
                 kubernetes = request.kubernetes,
                 kubernetesKind = request.kubernetesKind,
                 kubernetesNameSpace = request.kubernetesNameSpace,
+                pipeline = request.pipeline,
                 createdBy = userId,
                 modifiedBy = userId,
             )
         )
-        val stageIds = stageRepository.findAll().map { it.id!! }
         workloadStageRepository.saveAll(stageIds.map { WorkloadStage(workloadId = saved.id!!, stageId = it) })
         log.info("Created workload {} ('{}') by user {}, linked to {} stage(s)", saved.id, saved.name, userId, stageIds.size)
         return saved.toResponse()
@@ -73,13 +80,30 @@ class WorkloadService(
     @Transactional
     fun update(id: UUID, request: WorkloadRequest): WorkloadResponse {
         validateTarget(request.kubernetes, request.kubernetesKind, request.kubernetesNameSpace)
+        val stagesById = stageRepository.findAll().associateBy { it.id!! }
+        if (stagesById.values.none { it.pipeline == request.pipeline }) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "No stages found for pipeline '${request.pipeline}'")
+        }
         val workload = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        // The stages this workload will be linked to after this update — the requested
+        // set if it's changing, otherwise whatever it's already linked to — must all
+        // belong to the workload's (possibly just-changed) pipeline. Unknown ids are left
+        // for updateStageLinks()'s own check below rather than reported here.
+        val connectedStageIds = request.stageIds ?: workloadStageRepository.findByWorkloadId(id).map { it.stageId }
+        val mismatchedStageIds = connectedStageIds.filter { stagesById[it]?.let { stage -> stage.pipeline != request.pipeline } ?: false }
+        if (mismatchedStageIds.isNotEmpty()) {
+            throw ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "Stage(s) $mismatchedStageIds do not belong to pipeline '${request.pipeline}'",
+            )
+        }
         workload.name = request.name
         workload.productId = request.productId
         workload.description = request.description
         workload.kubernetes = request.kubernetes
         workload.kubernetesKind = request.kubernetesKind
         workload.kubernetesNameSpace = request.kubernetesNameSpace
+        workload.pipeline = request.pipeline
         workload.modifiedBy = currentUserId()
         val saved = repository.save(workload)
         if (request.stageIds != null) {
@@ -155,6 +179,7 @@ class WorkloadService(
             kubernetes = kubernetes,
             kubernetesKind = kubernetesKind,
             kubernetesNameSpace = kubernetesNameSpace,
+            pipeline = pipeline,
             stages = stages,
             createdAt = createdAt!!,
             modifiedAt = modifiedAt!!,

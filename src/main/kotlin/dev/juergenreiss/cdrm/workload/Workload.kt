@@ -38,6 +38,9 @@ class Workload(
     @Column(name = "name_space")
     var kubernetesNameSpace: String? = null,
 
+    @Column(name = "pipeline", nullable = false)
+    var pipeline: String,
+
     @CreatedDate
     @Column(nullable = false, updatable = false)
     var createdAt: Instant? = null,

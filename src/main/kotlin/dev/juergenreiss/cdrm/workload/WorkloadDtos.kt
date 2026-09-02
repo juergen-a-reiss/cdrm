@@ -16,6 +16,7 @@ data class WorkloadRequest(
     val kubernetesKind: KubernetesKind? = null,
     @Schema(description = "Required when kubernetes is true, must be omitted/null otherwise.")
     val kubernetesNameSpace: String? = null,
+    val pipeline: String,
     @Schema(
         description = "Stage ids this workload should be linked to. Only honored on update — " +
             "create always links to every existing stage. Omit or set to null to leave the current " +
@@ -33,6 +34,7 @@ data class WorkloadResponse(
     val kubernetes: Boolean,
     val kubernetesKind: KubernetesKind?,
     val kubernetesNameSpace: String?,
+    val pipeline: String,
     val stages: List<WorkloadStageInfo>,
     val createdAt: Instant,
     val modifiedAt: Instant,
