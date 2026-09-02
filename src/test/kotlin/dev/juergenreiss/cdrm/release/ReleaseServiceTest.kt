@@ -26,6 +26,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
 import org.mockito.ArgumentMatchers.anyString
+import org.mockito.ArgumentMatchers.eq
 import org.mockito.BDDMockito.given
 import org.mockito.Mock
 import org.mockito.Mockito.doReturn
@@ -35,7 +36,11 @@ import org.mockito.Mockito.verify
 import org.mockito.Spy
 import org.mockito.junit.jupiter.MockitoExtension
 import org.springframework.data.domain.AuditorAware
+import org.springframework.data.domain.PageImpl
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Pageable
 import org.springframework.data.domain.Sort
+import org.springframework.data.jpa.domain.Specification
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 import java.util.Optional
@@ -49,6 +54,9 @@ class ReleaseServiceTest {
 
     @Mock
     private lateinit var releaseHistoryRepository: ReleaseHistoryRepository
+
+    @Mock
+    private lateinit var releaseHistoryAggregationRepository: ReleaseHistoryAggregationRepository
 
     @Mock
     private lateinit var stageRepository: StageRepository
@@ -87,6 +95,7 @@ class ReleaseServiceTest {
         service = ReleaseService(
             repository,
             releaseHistoryRepository,
+            releaseHistoryAggregationRepository,
             stageRepository,
             workloadRepository,
             workloadStageRepository,
@@ -1048,19 +1057,20 @@ class ReleaseServiceTest {
             stageName = stage.name,
             action = ReleaseHistoryAction.PROMOTED,
         )
-        given(releaseHistoryRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))).willReturn(listOf(entry))
+        given(releaseHistoryRepository.findAll(any<Specification<ReleaseHistory>>(), any<Pageable>())).willReturn(PageImpl(listOf(entry)))
         given(stageRepository.findAllById(setOf(stage.id!!))).willReturn(listOf(stage))
 
         val result = service.historyOverview()
 
-        assertEquals(1, result.size)
-        assertEquals(entry.releaseId, result[0].releaseId)
-        assertEquals(ReleaseHistoryAction.PROMOTED, result[0].action)
-        assertEquals(workload.id, result[0].workloadId)
-        assertEquals(workload.name, result[0].workloadName)
-        assertEquals(product.id, result[0].productId)
-        assertEquals(product.name, result[0].productName)
-        assertEquals(stage.name, result[0].stage.name)
+        assertEquals(1, result.content.size)
+        assertEquals(1L, result.totalElements)
+        assertEquals(entry.releaseId, result.content[0].releaseId)
+        assertEquals(ReleaseHistoryAction.PROMOTED, result.content[0].action)
+        assertEquals(workload.id, result.content[0].workloadId)
+        assertEquals(workload.name, result.content[0].workloadName)
+        assertEquals(product.id, result.content[0].productId)
+        assertEquals(product.name, result.content[0].productName)
+        assertEquals(stage.name, result.content[0].stage.name)
     }
 
     @Test
@@ -1075,18 +1085,78 @@ class ReleaseServiceTest {
             stageName = stage.name,
             action = ReleaseHistoryAction.ROLLED_BACK,
         )
-        given(releaseHistoryRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))).willReturn(listOf(entry))
+        given(releaseHistoryRepository.findAll(any<Specification<ReleaseHistory>>(), any<Pageable>())).willReturn(PageImpl(listOf(entry)))
         given(stageRepository.findAllById(setOf(stage.id!!))).willReturn(listOf(stage))
 
         val result = service.historyOverview()
 
-        assertEquals(1, result.size)
-        assertEquals(ReleaseHistoryAction.ROLLED_BACK, result[0].action)
-        assertNull(result[0].workloadId)
-        assertEquals("checkout", result[0].workloadName)
-        assertEquals(entry.productId, result[0].productId)
-        assertEquals("Platform", result[0].productName)
-        assertEquals(stage.name, result[0].stage.name)
+        assertEquals(1, result.content.size)
+        assertEquals(ReleaseHistoryAction.ROLLED_BACK, result.content[0].action)
+        assertNull(result.content[0].workloadId)
+        assertEquals("checkout", result.content[0].workloadName)
+        assertEquals(entry.productId, result.content[0].productId)
+        assertEquals("Platform", result.content[0].productName)
+        assertEquals(stage.name, result.content[0].stage.name)
+    }
+
+    @Test
+    fun `historyOverview honors an explicit sort param mapped to its entity property`() {
+        val stage = persistedStage(order = 1, name = "Prod")
+        val entry = persistedHistoryEntry(releaseId = UUID.randomUUID(), stageId = stage.id!!, stageName = stage.name)
+        given(releaseHistoryRepository.findAll(any<Specification<ReleaseHistory>>(), eq(PageRequest.of(0, 25, Sort.by(Sort.Direction.ASC, "productName")))))
+            .willReturn(PageImpl(listOf(entry)))
+        given(stageRepository.findAllById(setOf(stage.id!!))).willReturn(listOf(stage))
+
+        val result = service.historyOverview("productName,asc")
+
+        assertEquals(1, result.content.size)
+        assertEquals(entry.releaseId, result.content[0].releaseId)
+    }
+
+    @Test
+    fun `historyOverview rejects an unknown sort key`() {
+        val exception = assertThrows(ResponseStatusException::class.java) { service.historyOverview("bogus,asc") }
+
+        assertEquals(400, exception.statusCode.value())
+    }
+
+    @Test
+    fun `findAll sorts by createdAt descending by default`() {
+        val stage = persistedStage(order = 1)
+        given(stageRepository.findById(stage.id!!)).willReturn(Optional.of(stage))
+        val workloadId = UUID.randomUUID()
+        given(workloadRepository.findAllById(setOf(workloadId))).willReturn(listOf(persistedWorkload(id = workloadId)))
+        val older = persistedRelease(workloadId = workloadId, currentStageId = stage.id!!, image = "app:1").apply { createdAt = Instant.now().minusSeconds(60) }
+        val newer = persistedRelease(workloadId = workloadId, currentStageId = stage.id!!, image = "app:2").apply { createdAt = Instant.now() }
+        given(repository.findAll()).willReturn(listOf(older, newer))
+
+        val result = service.findAll()
+
+        assertEquals(listOf("app:2", "app:1"), result.map { it.image })
+    }
+
+    @Test
+    fun `findAll honors an explicit sort param`() {
+        val stage = persistedStage(order = 1)
+        given(stageRepository.findById(stage.id!!)).willReturn(Optional.of(stage))
+        val workloadId = UUID.randomUUID()
+        given(workloadRepository.findAllById(setOf(workloadId))).willReturn(listOf(persistedWorkload(id = workloadId)))
+        val b = persistedRelease(workloadId = workloadId, currentStageId = stage.id!!, image = "b-app:1")
+        val a = persistedRelease(workloadId = workloadId, currentStageId = stage.id!!, image = "a-app:1")
+        given(repository.findAll()).willReturn(listOf(b, a))
+
+        val result = service.findAll("image,asc")
+
+        assertEquals(listOf("a-app:1", "b-app:1"), result.map { it.image })
+    }
+
+    @Test
+    fun `findAll rejects an unknown sort key`() {
+        given(repository.findAll()).willReturn(emptyList())
+
+        val exception = assertThrows(ResponseStatusException::class.java) { service.findAll("bogus,asc") }
+
+        assertEquals(400, exception.statusCode.value())
     }
 
     @Test

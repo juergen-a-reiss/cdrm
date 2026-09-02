@@ -11,7 +11,7 @@ import java.util.*
 @RequestMapping("/releases")
 class ReleaseController(private val service: ReleaseService) {
     @GetMapping
-    fun findAll(): List<ReleaseResponse> = service.findAll()
+    fun findAll(@RequestParam(required = false) sort: String?): List<ReleaseResponse> = service.findAll(sort)
 
     @GetMapping("/{id}")
     fun findById(@PathVariable id: UUID): ReleaseResponse = service.findById(id)
@@ -20,7 +20,31 @@ class ReleaseController(private val service: ReleaseService) {
     fun history(@PathVariable id: UUID): List<ReleaseHistoryEntry> = service.history(id)
 
     @GetMapping("/history")
-    fun historyOverview(): List<ReleaseHistoryOverviewEntry> = service.historyOverview()
+    fun historyOverview(
+        @RequestParam(required = false) sort: String?,
+        @RequestParam(defaultValue = "0") page: Int,
+        @RequestParam(defaultValue = "25") size: Int,
+        @RequestParam(required = false) productId: List<UUID>?,
+        @RequestParam(required = false) workloadId: List<UUID>?,
+        @RequestParam(required = false) stageId: List<UUID>?,
+        @RequestParam(required = false) pipeline: List<String>?,
+        @RequestParam(required = false) action: List<ReleaseHistoryAction>?,
+        @RequestParam(required = false) monthsBack: Int?,
+        @RequestParam(required = false) search: String?,
+    ): ReleaseHistoryPageResponse =
+        service.historyOverview(sort, page, size, productId, workloadId, stageId, pipeline, action, monthsBack, search)
+
+    @GetMapping("/history/summary")
+    fun historySummary(
+        @RequestParam groupBy: ReleaseHistoryGroupBy,
+        @RequestParam(required = false) productId: List<UUID>?,
+        @RequestParam(required = false) workloadId: List<UUID>?,
+        @RequestParam(required = false) stageId: List<UUID>?,
+        @RequestParam(required = false) pipeline: List<String>?,
+        @RequestParam(required = false) action: List<ReleaseHistoryAction>?,
+        @RequestParam(required = false) monthsBack: Int?,
+    ): List<ReleaseHistorySummaryEntry> =
+        service.historySummary(groupBy, productId, workloadId, stageId, pipeline, action, monthsBack)
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)

@@ -92,6 +92,9 @@ databaseChangeLog:
                   constraints:
                     nullable: false
               - column:
+                  name: pipeline
+                  type: varchar(64)
+              - column:
                   name: deployed_at
                   type: timestamp with time zone
               # Reason the most recent deploy attempt for this row failed (e.g. "cluster
@@ -112,7 +115,7 @@ databaseChangeLog:
                   constraints:
                     nullable: false
               # product_name/workload_name/stage_name are a snapshot taken at insert time
-              # (like image), not a live lookup — so the UI can always display and
+              # (like image). Not a live lookup — so the UI can always display and
               # filter/sort on them even after the product/workload/stage that produced
               # this row has since been deleted.
               - column:
@@ -166,15 +169,63 @@ databaseChangeLog:
               - column:
                   name: current_stage_id
             indexName: idx_release_stage_id
+
         - createIndex:
             tableName: release_history
+            indexName: idx_release_history_pipeline_created_at
+            columns:
+              - column:
+                  name: pipeline
+              - column:
+                  name: created_at
+        - createIndex:
+            tableName: release_history
+            indexName: idx_release_history_product_id_created_at
+            columns:
+              - column:
+                  name: product_id
+              - column:
+                  name: created_at
+        - createIndex:
+            tableName: release_history
+            indexName: idx_release_history_workload_id_created_at
+            columns:
+              - column:
+                  name: workload_id
+              - column:
+                  name: created_at
+        - createIndex:
+            tableName: release_history
+            indexName: idx_release_history_action_created_at
+            columns:
+              - column:
+                  name: action
+              - column:
+                  name: created_at
+
+        - createIndex:
+            tableName: release_history
+            indexName: idx_release_history_release_id_created_at
             columns:
               - column:
                   name: release_id
-            indexName: idx_release_history_release_id
+              - column:
+                  name: created_at
+
         - createIndex:
             tableName: release_history
+            indexName: idx_release_history_stage_id_created_at
             columns:
               - column:
                   name: stage_id
-            indexName: idx_release_history_stage_id
+              - column:
+                  name: created_at
+
+        # historyOverview() (the Release History dashboard) has no filter at all — every
+        # row, ordered by created_at descending.
+        - createIndex:
+            tableName: release_history
+            indexName: idx_release_history_created_at
+            columns:
+              - column:
+                  name: created_at

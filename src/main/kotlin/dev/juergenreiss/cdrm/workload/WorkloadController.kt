@@ -12,7 +12,7 @@ import java.util.*
 @RequestMapping("/workloads")
 class WorkloadController(private val service: WorkloadService) {
     @GetMapping
-    fun findAll(): List<WorkloadResponse> = service.findAll()
+    fun findAll(@RequestParam(required = false) sort: String?): List<WorkloadResponse> = service.findAll(sort)
 
     @GetMapping("/{id}")
     fun findById(@PathVariable id: UUID): WorkloadResponse = service.findById(id)

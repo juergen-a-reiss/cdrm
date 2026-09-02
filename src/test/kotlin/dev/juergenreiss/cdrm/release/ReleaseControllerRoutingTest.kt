@@ -35,7 +35,7 @@ class ReleaseControllerRoutingTest {
 
     @Test
     fun `GET releases history routes to the overview endpoint, not findById`() {
-        given(service.historyOverview()).willReturn(emptyList())
+        given(service.historyOverview()).willReturn(ReleaseHistoryPageResponse(content = emptyList(), totalElements = 0, page = 0, size = 25))
 
         mockMvc.perform(get("/releases/history").with(jwt())).andExpect(status().isOk)
     }

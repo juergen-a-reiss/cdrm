@@ -4,17 +4,22 @@
 -->
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
 import ResourceTable from '../components/ResourceTable.vue'
+import type { SortByItem } from '../components/ResourceTable.vue'
 import ClusterFormDialog from '../components/ClusterFormDialog.vue'
 import { useResourceList } from '../composables/useResourceList'
+import { usePersistedRef } from '../composables/usePersistedRef'
 import { clustersApi } from '../api/clusters'
 import { ApiError } from '../api/http'
 import type { ClusterResponse } from '../api/types'
 import { isAdmin } from '../auth/roles'
+import { sortParam } from '../utils/sortParam'
 
-const { items, loading, error, reload } = useResourceList(clustersApi.list)
+const sortBy = usePersistedRef<SortByItem[]>('cdrm.sort.clusters', [{ key: 'name', order: 'asc' }])
+const { items, loading, error, reload } = useResourceList(() => clustersApi.list(sortParam(sortBy.value)))
+watch(sortBy, reload, { deep: true })
 
 const TYPE_LABELS: Record<string, string> = {
   K8S: 'Kubernetes',
@@ -64,7 +69,7 @@ async function removeCluster(cluster: ClusterResponse) {
 
 <template>
   <v-alert v-if="deleteError" type="error" :text="deleteError" class="mb-4" />
-  <ResourceTable :headers="headers" :items="items" :loading="loading" :error="error">
+  <ResourceTable :headers="headers" :items="items" :loading="loading" :error="error" v-model:sort-by="sortBy">
     <template v-if="isAdmin" #top>
       <v-toolbar flat>
         <v-toolbar-title>Clusters</v-toolbar-title>

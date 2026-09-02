@@ -5,7 +5,7 @@ import { http } from './http'
 import type { ProductRequest, ProductResponse } from './types'
 
 export const productsApi = {
-  list: () => http.get<ProductResponse[]>('/products'),
+  list: (sort?: string) => http.get<ProductResponse[]>(`/products${sort ? `?sort=${encodeURIComponent(sort)}` : ''}`),
   get: (id: string) => http.get<ProductResponse>(`/products/${id}`),
   create: (request: ProductRequest) => http.post<ProductResponse>('/products', request),
   update: (id: string, request: ProductRequest) => http.put<ProductResponse>(`/products/${id}`, request),

@@ -4,9 +4,8 @@
 -->
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
-import { useResourceList } from '../composables/useResourceList'
 import { useProductFilter } from '../composables/useProductFilter'
 import { useStageFilter } from '../composables/useStageFilter'
 import { useWorkloadFilter } from '../composables/useWorkloadFilter'
@@ -17,35 +16,33 @@ import StageFilterBar from '../components/StageFilterBar.vue'
 import WorkloadFilterBar from '../components/WorkloadFilterBar.vue'
 import PipelineFilterBar from '../components/PipelineFilterBar.vue'
 import ResourceTable from '../components/ResourceTable.vue'
+import type { SortByItem } from '../components/ResourceTable.vue'
 import ReleaseHistoryChart from '../components/ReleaseHistoryChart.vue'
 import type { ChartSeries } from '../components/ReleaseHistoryChart.vue'
 import { releasesApi } from '../api/releases'
-import { stagesApi } from '../api/stages'
-import type { ReleaseHistoryAction, ReleaseHistoryOverviewEntry } from '../api/types'
+import { ApiError } from '../api/http'
+import type { ReleaseHistoryAction, ReleaseHistoryFilterParams, ReleaseHistoryGroupBy, ReleaseHistoryOverviewEntry, ReleaseHistorySummaryEntry } from '../api/types'
 import { RELEASE_HISTORY_ACTIONS, RELEASE_HISTORY_ACTION_COLORS, RELEASE_HISTORY_ACTION_LABELS } from '../utils/releaseHistoryAction'
 import { colorForKey } from '../utils/categoricalPalette'
 import { formatDateTime } from '../utils/formatDateTime'
 import { formatDeploymentStatus } from '../utils/releaseHistoryStatus'
+import { sortParam } from '../utils/sortParam'
 
-type GroupBy = 'action' | 'product' | 'workload' | 'stage'
+// Everything below — the table's rows, its total count, and the chart's aggregated
+// counts — comes from the backend already filtered, sorted, and (for the table)
+// paginated. Nothing here fetches the full release_history table into the browser;
+// see ReleaseService.historyOverview()/historySummary() and the Specification/
+// Criteria-API queries behind them.
 
-const { items: entries, loading, error } = useResourceList(releasesApi.historyOverview)
-const { items: stages } = useResourceList(stagesApi.list)
-const { matches: matchesProduct } = useProductFilter()
-const { matches: matchesStage } = useStageFilter()
-const { selectedWorkloadIds, matches: matchesWorkload } = useWorkloadFilter()
-const { selectedPipelines, matches: matchesPipeline } = usePipelineFilter()
-
-// A history entry only carries its stage's id/name (a snapshot, so it survives that
-// stage later being deleted) — not its pipeline — so pipeline filtering joins against
-// the live stage list. An entry whose stage no longer exists there just can't match any
-// pipeline selection, the same way its stage filtering already can't.
-const pipelineByStageId = computed(() => new Map(stages.value.map((stage) => [stage.id, stage.pipeline])))
+// Only the selected-ids state is used here — filtering itself now happens in the
+// backend (the "sort"/filter query params), and each *FilterBar component already
+// prunes its own stale selection against its own live list independently.
+const { selectedProductIds } = useProductFilter()
+const { selectedStageIds } = useStageFilter()
+const { selectedWorkloadIds } = useWorkloadFilter()
+const { selectedPipelines } = usePipelineFilter()
 
 const actionOptions = RELEASE_HISTORY_ACTIONS.map((action) => ({ title: RELEASE_HISTORY_ACTION_LABELS[action], value: action }))
-// "Group by", "Range", and "Filter by action" are persisted (like the ID filters
-// above) so they survive a page reload instead of quietly resetting to their
-// defaults.
 const selectedActions = usePersistedRef<ReleaseHistoryAction[]>('cdrm.releaseHistory.actions', [])
 
 const rangeOptions = [
@@ -57,18 +54,43 @@ const rangeOptions = [
 ]
 const monthsBack = usePersistedRef<number>('cdrm.releaseHistory.monthsBack', 6)
 
-const groupByOptions: { title: string; value: GroupBy }[] = [
-  { title: 'Action', value: 'action' },
-  { title: 'Product', value: 'product' },
-  { title: 'Workload', value: 'workload' },
-  { title: 'Stage', value: 'stage' },
+const groupByOptions: { title: string; value: ReleaseHistoryGroupBy }[] = [
+  { title: 'Action', value: 'ACTION' },
+  { title: 'Product', value: 'PRODUCT' },
+  { title: 'Workload', value: 'WORKLOAD' },
+  { title: 'Stage', value: 'STAGE' },
 ]
-const groupBy = usePersistedRef<GroupBy>('cdrm.releaseHistory.groupBy', 'action')
+const groupBy = usePersistedRef<ReleaseHistoryGroupBy>('cdrm.releaseHistory.groupBy', 'ACTION')
 const chartType = ref<'bar' | 'line'>('line')
 
-// Soft cap on distinct product/workload series — beyond it the tail folds into
-// "Other" rather than generating more hues (a 9th+ color is indistinguishable
-// from an existing one under color-vision deficiency).
+// Free-text filter over product/workload/stage/image — sent to the backend (debounced,
+// see below), not matched client-side, now that the table is paginated: a client-side
+// filter could only ever search within whatever page happened to be loaded.
+const search = ref('')
+const debouncedSearch = ref('')
+let searchDebounceTimer: ReturnType<typeof setTimeout> | undefined
+watch(search, (value) => {
+  clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(() => {
+    debouncedSearch.value = value
+  }, 300)
+})
+
+function currentFilterParams(): ReleaseHistoryFilterParams {
+  return {
+    productIds: selectedProductIds.value.length > 0 ? selectedProductIds.value : undefined,
+    workloadIds: selectedWorkloadIds.value.length > 0 ? selectedWorkloadIds.value : undefined,
+    stageIds: selectedStageIds.value.length > 0 ? selectedStageIds.value : undefined,
+    pipelines: selectedPipelines.value.length > 0 ? selectedPipelines.value : undefined,
+    actions: selectedActions.value.length > 0 ? selectedActions.value : undefined,
+    monthsBack: monthsBack.value,
+    search: debouncedSearch.value.trim() || undefined,
+  }
+}
+
+// Soft cap on distinct product/workload/stage series — beyond it the tail folds into
+// "Other" rather than generating more hues (a 9th+ color is indistinguishable from an
+// existing one under color-vision deficiency).
 const MAX_SERIES = 8
 const OTHER_KEY = '__other__'
 
@@ -108,36 +130,32 @@ function monthLabel(month: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })
 }
 
-function entryMonth(entry: ReleaseHistoryOverviewEntry): string {
-  return monthKey(new Date(entry.timestamp))
+const summaryEntries = ref<ReleaseHistorySummaryEntry[]>([])
+const chartLoading = ref(false)
+const chartError = ref<string | null>(null)
+
+async function loadSummary() {
+  chartLoading.value = true
+  chartError.value = null
+  try {
+    summaryEntries.value = await releasesApi.historySummary({ ...currentFilterParams(), groupBy: groupBy.value })
+  } catch (e) {
+    chartError.value = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to load chart data'
+  } finally {
+    chartLoading.value = false
+  }
 }
 
-const cutoffMonth = computed(() => (monthsBack.value === 0 ? null : monthsAgo(monthsBack.value - 1)))
-
-const filteredEntries = computed(() =>
-  entries.value.filter((entry) => {
-    if (!matchesProduct(entry.productId)) return false
-    if (entry.workloadId === null ? selectedWorkloadIds.value.length > 0 : !matchesWorkload(entry.workloadId)) return false
-    if (!matchesStage(entry.stage.id)) return false
-    const pipeline = pipelineByStageId.value.get(entry.stage.id)
-    if (pipeline === undefined ? selectedPipelines.value.length > 0 : !matchesPipeline(pipeline)) return false
-    if (selectedActions.value.length > 0 && !selectedActions.value.includes(entry.action)) return false
-    if (cutoffMonth.value !== null && entryMonth(entry) < cutoffMonth.value) return false
-    return true
-  }),
-)
-
-// The month axis is built from the selected range (zero-filled), not just months
-// that happen to have data — otherwise a quiet month reads as "missing" rather
-// than "zero", which misstates the trend. For "All time" there's no fixed range to
-// enumerate, so it spans the earliest to the latest month present in the filtered
-// data instead — still filling in any quiet month in between, not just the ones
-// with a match.
+// The month axis is built from the selected range (zero-filled), not just months that
+// happen to have data — otherwise a quiet month reads as "missing" rather than "zero",
+// which misstates the trend. For "All time" there's no fixed range to enumerate, so it
+// spans the earliest to the latest month present in the (already fully-filtered, just
+// not paginated) summary instead — still filling in any quiet month in between.
 const chartMonths = computed<string[]>(() => {
   if (monthsBack.value > 0) {
     return Array.from({ length: monthsBack.value }, (_, i) => monthsAgo(monthsBack.value - 1 - i))
   }
-  const months = filteredEntries.value.map(entryMonth)
+  const months = summaryEntries.value.map((entry) => entry.month)
   if (months.length === 0) return []
   const sorted = [...new Set(months)].sort()
   return monthRange(sorted[0], sorted[sorted.length - 1])
@@ -145,32 +163,10 @@ const chartMonths = computed<string[]>(() => {
 
 const chartLabels = computed(() => chartMonths.value.map(monthLabel))
 
-function entityId(entry: ReleaseHistoryOverviewEntry): string {
-  switch (groupBy.value) {
-    case 'product':
-      return entry.productId
-    case 'stage':
-      return entry.stage.id
-    default:
-      return entry.workloadId ?? 'unknown'
-  }
-}
-
-function entityName(entry: ReleaseHistoryOverviewEntry): string {
-  switch (groupBy.value) {
-    case 'product':
-      return entry.productName
-    case 'stage':
-      return entry.stage.name
-    default:
-      return entry.workloadName
-  }
-}
-
-// Ranked by volume so the entities that actually matter keep their own series;
-// the rest fold into "Other" rather than each grabbing a thinning-out hue.
+// Ranked by volume so the entities that actually matter keep their own series; the
+// rest fold into "Other" rather than each grabbing a thinning-out hue.
 const activeSeries = computed<ChartSeries[]>(() => {
-  if (groupBy.value === 'action') {
+  if (groupBy.value === 'ACTION') {
     return RELEASE_HISTORY_ACTIONS.map((action) => ({
       key: action,
       label: RELEASE_HISTORY_ACTION_LABELS[action],
@@ -178,19 +174,16 @@ const activeSeries = computed<ChartSeries[]>(() => {
     }))
   }
 
-  const totals = new Map<string, { label: string; total: number }>()
-  for (const entry of filteredEntries.value) {
-    const key = entityId(entry)
-    const existing = totals.get(key)
-    if (existing) existing.total++
-    else totals.set(key, { label: entityName(entry), total: 1 })
+  const totals = new Map<string, number>()
+  for (const entry of summaryEntries.value) {
+    totals.set(entry.key, (totals.get(entry.key) ?? 0) + entry.count)
   }
 
-  const ranked = [...totals.entries()].sort((a, b) => b[1].total - a[1].total)
+  const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1])
   const kept = ranked.slice(0, MAX_SERIES - 1)
   const overflow = ranked.slice(MAX_SERIES - 1)
 
-  const series = kept.map(([key, { label }]) => ({ key, label, color: colorForKey(key) }))
+  const series = kept.map(([key]) => ({ key, label: key, color: colorForKey(key) }))
   if (overflow.length > 0) {
     series.push({ key: OTHER_KEY, label: 'Other', color: colorForKey(OTHER_KEY) })
   }
@@ -203,12 +196,11 @@ const chartValues = computed<Record<string, number[]>>(() => {
   const values: Record<string, number[]> = {}
   for (const s of activeSeries.value) values[s.key] = chartMonths.value.map(() => 0)
 
-  for (const entry of filteredEntries.value) {
-    const idx = monthIndex.get(entryMonth(entry))
+  for (const entry of summaryEntries.value) {
+    const idx = monthIndex.get(entry.month)
     if (idx === undefined) continue
-    const key = groupBy.value === 'action' ? entry.action : entityId(entry)
-    const bucket = seriesKeys.has(key) ? key : OTHER_KEY
-    if (values[bucket]) values[bucket][idx]++
+    const bucket = seriesKeys.has(entry.key) ? entry.key : OTHER_KEY
+    if (values[bucket]) values[bucket][idx] += entry.count
   }
   return values
 })
@@ -225,15 +217,36 @@ interface HistoryRow {
   createdBy: string
 }
 
-// Free-text filter over product/workload/stage/binary-URL/etc., independent of the
-// ID-based filter bars above — this one works even for a product/workload/stage that's
-// since been deleted, since it matches against the name snapshotted onto each row.
-const search = ref('')
+const sortBy = usePersistedRef<SortByItem[]>('cdrm.releaseHistory.sortBy', [{ key: 'timestamp', order: 'desc' }])
+const page = ref(1)
+const itemsPerPage = usePersistedRef<number>('cdrm.releaseHistory.itemsPerPage', 25)
 
-// Backend already returns entries newest-first; no extra client-side sort needed unless
-// the user clicks a column header.
+const rawEntries = ref<ReleaseHistoryOverviewEntry[]>([])
+const totalElements = ref(0)
+const tableLoading = ref(false)
+const tableError = ref<string | null>(null)
+
+async function loadTable() {
+  tableLoading.value = true
+  tableError.value = null
+  try {
+    const result = await releasesApi.historyOverview({
+      ...currentFilterParams(),
+      sort: sortParam(sortBy.value),
+      page: page.value - 1,
+      size: itemsPerPage.value,
+    })
+    rawEntries.value = result.content
+    totalElements.value = result.totalElements
+  } catch (e) {
+    tableError.value = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to load history'
+  } finally {
+    tableLoading.value = false
+  }
+}
+
 const tableRows = computed<HistoryRow[]>(() =>
-  filteredEntries.value.map((entry) => ({
+  rawEntries.value.map((entry) => ({
     id: entry.id,
     timestamp: entry.timestamp,
     actionLabel: RELEASE_HISTORY_ACTION_LABELS[entry.action],
@@ -256,6 +269,30 @@ const historyHeaders: DataTableHeader<HistoryRow>[] = [
   { title: 'Deployed', key: 'deployedDisplay' },
   { title: 'By', key: 'createdBy' },
 ]
+
+// Any filter/search/range change affects both the table and the chart, and invalidates
+// whatever page of the table was showing.
+watch(
+  [selectedProductIds, selectedWorkloadIds, selectedStageIds, selectedPipelines, selectedActions, monthsBack, debouncedSearch],
+  () => {
+    page.value = 1
+    loadTable()
+    loadSummary()
+  },
+  { deep: true },
+)
+
+// Sorting and pagination only affect the table.
+watch(sortBy, loadTable, { deep: true })
+watch([page, itemsPerPage], loadTable)
+
+// Group-by only affects the chart.
+watch(groupBy, loadSummary)
+
+onMounted(() => {
+  loadTable()
+  loadSummary()
+})
 </script>
 
 <template>
@@ -300,8 +337,8 @@ const historyHeaders: DataTableHeader<HistoryRow>[] = [
       </v-btn-toggle>
     </v-card-title>
     <v-card-text>
-      <v-alert v-if="error" type="error" :text="error" class="mb-4" />
-      <v-progress-linear v-if="loading" indeterminate class="mb-4" />
+      <v-alert v-if="chartError" type="error" :text="chartError" class="mb-4" />
+      <v-progress-linear v-if="chartLoading" indeterminate class="mb-4" />
       <ReleaseHistoryChart v-else :chart-type="chartType" :labels="chartLabels" :series="activeSeries" :values="chartValues" />
     </v-card-text>
   </v-card>
@@ -321,7 +358,16 @@ const historyHeaders: DataTableHeader<HistoryRow>[] = [
         width="280"
       />
     </v-card-title>
-    <ResourceTable :headers="historyHeaders" :items="tableRows" :loading="loading" :error="null" :search="search">
+    <ResourceTable
+      :headers="historyHeaders"
+      :items="tableRows"
+      :items-length="totalElements"
+      :loading="tableLoading"
+      :error="tableError"
+      v-model:sort-by="sortBy"
+      v-model:page="page"
+      v-model:items-per-page="itemsPerPage"
+    >
       <template #item.timestamp="{ item }">{{ formatDateTime(item.timestamp) }}</template>
     </ResourceTable>
   </v-card>

@@ -4,6 +4,8 @@
 package dev.juergenreiss.cdrm.stage
 
 import dev.juergenreiss.cdrm.cluster.ClusterRepository
+import dev.juergenreiss.cdrm.common.SortSpec
+import dev.juergenreiss.cdrm.common.sortedBySpec
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.AuditorAware
@@ -25,8 +27,19 @@ class StageService(
 
     private val log = LoggerFactory.getLogger(StageService::class.java)
 
-    fun findAll(): List<StageResponse> =
-        repository.findAll(Sort.by("order")).map { it.toResponse() }
+    private val defaultSort = SortSpec("pipeline", descending = false)
+    private val sortComparators: Map<String, Comparator<StageResponse>> = mapOf(
+        "order" to compareBy { it.order },
+        "pipeline" to compareBy { it.pipeline },
+        "name" to compareBy { it.name },
+        "deploymentPolicy" to compareBy { it.deploymentPolicy },
+        "kubernetesContext" to compareBy(nullsFirst()) { it.kubernetesContext },
+        "namespacePrefix" to compareBy(nullsFirst()) { it.namespacePrefix },
+        "description" to compareBy(nullsFirst()) { it.description },
+    )
+
+    fun findAll(sort: String? = null): List<StageResponse> =
+        repository.findAll().map { it.toResponse() }.sortedBySpec(SortSpec.parse(sort, defaultSort), sortComparators)
 
     fun findById(id: UUID): StageResponse =
         repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }.toResponse()

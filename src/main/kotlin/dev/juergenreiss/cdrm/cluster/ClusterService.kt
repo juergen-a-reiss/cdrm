@@ -3,10 +3,11 @@
 
 package dev.juergenreiss.cdrm.cluster
 
+import dev.juergenreiss.cdrm.common.SortSpec
+import dev.juergenreiss.cdrm.common.sortedBySpec
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.AuditorAware
-import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -22,8 +23,16 @@ class ClusterService(
 
     private val log = LoggerFactory.getLogger(ClusterService::class.java)
 
-    fun findAll(): List<ClusterResponse> =
-        repository.findAll(Sort.by("name")).map { it.toResponse() }
+    private val defaultSort = SortSpec("name", descending = false)
+    private val sortComparators: Map<String, Comparator<ClusterResponse>> = mapOf(
+        "name" to compareBy { it.name },
+        "clusterType" to compareBy { it.clusterType },
+        "url" to compareBy { it.url.toString() },
+        "description" to compareBy(nullsFirst()) { it.description },
+    )
+
+    fun findAll(sort: String? = null): List<ClusterResponse> =
+        repository.findAll().map { it.toResponse() }.sortedBySpec(SortSpec.parse(sort, defaultSort), sortComparators)
 
     fun findById(id: UUID): ClusterResponse =
         repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }.toResponse()

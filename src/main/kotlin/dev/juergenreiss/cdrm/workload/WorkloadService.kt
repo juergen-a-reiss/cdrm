@@ -3,6 +3,8 @@
 
 package dev.juergenreiss.cdrm.workload
 
+import dev.juergenreiss.cdrm.common.SortSpec
+import dev.juergenreiss.cdrm.common.sortedBySpec
 import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.security.RebacContext
 import dev.juergenreiss.cdrm.stage.StageRepository
@@ -29,16 +31,26 @@ class WorkloadService(
 
     private val log = LoggerFactory.getLogger(WorkloadService::class.java)
 
+    private val defaultSort = SortSpec("name", descending = false)
+    private val sortComparators: Map<String, Comparator<WorkloadResponse>> = mapOf(
+        "name" to compareBy { it.name },
+        "pipeline" to compareBy { it.pipeline },
+    )
+
     // ReBAC (see README): cdrm-products restricts by the workload's product, and
     // cdrm-workloads further restricts by the workload's own name — both, when set on
     // the caller, exact-match. Batches the product lookup instead of one per workload.
-    fun findAll(): List<WorkloadResponse> {
-        val workloads = repository.findAll(Sort.by("name"))
-        val productNameById = productRepository.findAllById(workloads.map { it.productId }.toSet())
-            .associate { it.id to it.name }
+    fun findAll(sort: String? = null): List<WorkloadResponse> {
+        val workloads = repository.findAll()
+        val productsById = productRepository.findAllById(workloads.map { it.productId }.toSet()).associateBy { it.id }
+        val spec = SortSpec.parse(sort, defaultSort)
+        val comparators = sortComparators + mapOf(
+            "productName" to compareBy<WorkloadResponse> { productsById[it.productId]?.name ?: "" },
+        )
         return workloads
-            .filter { rebac.canSeeWorkload(productNameById[it.productId] ?: "", it.name) }
+            .filter { rebac.canSeeWorkload(productsById[it.productId]?.name ?: "", it.name) }
             .map { it.toResponse() }
+            .sortedBySpec(spec, comparators)
     }
 
     fun findById(id: UUID): WorkloadResponse {

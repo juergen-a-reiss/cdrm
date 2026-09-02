@@ -4,20 +4,23 @@
 -->
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
 import ResourceTable from '../components/ResourceTable.vue'
+import type { SortByItem } from '../components/ResourceTable.vue'
 import WorkloadFormDialog from '../components/WorkloadFormDialog.vue'
 import ProductFilterBar from '../components/ProductFilterBar.vue'
 import PipelineFilterBar from '../components/PipelineFilterBar.vue'
 import { useResourceList } from '../composables/useResourceList'
 import { useProductFilter } from '../composables/useProductFilter'
 import { usePipelineFilter } from '../composables/usePipelineFilter'
+import { usePersistedRef } from '../composables/usePersistedRef'
 import { workloadsApi } from '../api/workloads'
 import { productsApi } from '../api/products'
 import { ApiError } from '../api/http'
 import type { WorkloadResponse } from '../api/types'
 import { canManageWorkloads } from '../auth/roles'
+import { sortParam } from '../utils/sortParam'
 
 const KIND_LABELS: Record<string, string> = {
   DEPLOYMENT: 'Workload',
@@ -35,7 +38,9 @@ interface WorkloadRow {
   raw: WorkloadResponse
 }
 
-const { items, loading, error, reload } = useResourceList(workloadsApi.list)
+const sortBy = usePersistedRef<SortByItem[]>('cdrm.sort.workloads', [{ key: 'name', order: 'asc' }])
+const { items, loading, error, reload } = useResourceList(() => workloadsApi.list(sortParam(sortBy.value)))
+watch(sortBy, reload, { deep: true })
 const { items: products } = useResourceList(productsApi.list)
 const { matches } = useProductFilter()
 const { matches: matchesPipeline } = usePipelineFilter()
@@ -64,8 +69,8 @@ const headers = computed<DataTableHeader<WorkloadRow>[]>(() => {
     { title: 'Name', key: 'name' },
     { title: 'Pipeline', key: 'pipeline' },
     { title: 'Product', key: 'productName' },
-    { title: 'Target', key: 'target' },
-    { title: 'Stages', key: 'stageCount', width: 100 },
+    { title: 'Target', key: 'target', sortable: false },
+    { title: 'Stages', key: 'stageCount', width: 100, sortable: false },
     { title: 'Description', key: 'description' },
   ]
   if (canManageWorkloads.value) {
@@ -108,7 +113,7 @@ async function removeWorkload(workload: WorkloadResponse) {
     <PipelineFilterBar />
     <ProductFilterBar />
   </div>
-  <ResourceTable :headers="headers" :items="rows" :loading="loading" :error="error">
+  <ResourceTable :headers="headers" :items="rows" :loading="loading" :error="error" v-model:sort-by="sortBy">
     <template v-if="canManageWorkloads" #top>
       <v-toolbar flat>
         <v-toolbar-title>Workloads</v-toolbar-title>

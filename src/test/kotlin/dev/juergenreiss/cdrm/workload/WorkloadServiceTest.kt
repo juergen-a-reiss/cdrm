@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.any
+import org.mockito.ArgumentMatchers.anyString
 import org.mockito.BDDMockito.given
 import org.mockito.Mock
 import org.mockito.Mockito.never
@@ -366,7 +367,7 @@ class WorkloadServiceTest {
         val product = persistedProduct(name = "Platform")
         val visible = persistedWorkload(name = "platform-api", productId = product.id!!)
         val hidden = persistedWorkload(name = "platform-worker", productId = product.id!!)
-        given(repository.findAll(Sort.by("name"))).willReturn(listOf(visible, hidden))
+        given(repository.findAll()).willReturn(listOf(visible, hidden))
         given(productRepository.findAllById(setOf(product.id!!))).willReturn(listOf(product))
         given(workloadStageRepository.findByWorkloadId(visible.id!!)).willReturn(emptyList())
         given(rebac.canSeeWorkload("Platform", "platform-api")).willReturn(true)
@@ -375,6 +376,48 @@ class WorkloadServiceTest {
         val result = service.findAll()
 
         assertEquals(listOf("platform-api"), result.map { it.name })
+    }
+
+    @Test
+    fun `findAll sorts by name by default`() {
+        val product = persistedProduct(name = "Platform")
+        val a = persistedWorkload(name = "a-workload", productId = product.id!!)
+        val b = persistedWorkload(name = "b-workload", productId = product.id!!)
+        given(repository.findAll()).willReturn(listOf(b, a))
+        given(productRepository.findAllById(setOf(product.id!!))).willReturn(listOf(product))
+        given(workloadStageRepository.findByWorkloadId(a.id!!)).willReturn(emptyList())
+        given(workloadStageRepository.findByWorkloadId(b.id!!)).willReturn(emptyList())
+        given(rebac.canSeeWorkload(anyString(), anyString())).willReturn(true)
+
+        val result = service.findAll()
+
+        assertEquals(listOf("a-workload", "b-workload"), result.map { it.name })
+    }
+
+    @Test
+    fun `findAll sorts by productName`() {
+        val productA = persistedProduct(name = "a-product")
+        val productB = persistedProduct(name = "b-product")
+        val workloadInB = persistedWorkload(name = "workload-1", productId = productB.id!!)
+        val workloadInA = persistedWorkload(name = "workload-2", productId = productA.id!!)
+        given(repository.findAll()).willReturn(listOf(workloadInB, workloadInA))
+        given(productRepository.findAllById(setOf(productB.id!!, productA.id!!))).willReturn(listOf(productA, productB))
+        given(workloadStageRepository.findByWorkloadId(workloadInA.id!!)).willReturn(emptyList())
+        given(workloadStageRepository.findByWorkloadId(workloadInB.id!!)).willReturn(emptyList())
+        given(rebac.canSeeWorkload(anyString(), anyString())).willReturn(true)
+
+        val result = service.findAll("productName,asc")
+
+        assertEquals(listOf("workload-2", "workload-1"), result.map { it.name })
+    }
+
+    @Test
+    fun `findAll rejects an unknown sort key`() {
+        given(repository.findAll()).willReturn(emptyList())
+
+        val exception = assertThrows(ResponseStatusException::class.java) { service.findAll("bogus,asc") }
+
+        assertEquals(400, exception.statusCode.value())
     }
 
     @Test

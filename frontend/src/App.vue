@@ -49,6 +49,8 @@ const navItems = [
     <v-main>
       <v-container v-if="!isAuthenticated">
         <p>Log in to continue.</p>
+        <p>This is the cdrm (Continuous Delivery Release Management) application. It will automate and govern all your deployments to kubernetes (k8s) and proxmox. 
+          Further, it allows you to get metrics and statistics about deployments, rollbacks or redeploys for all your applications and products.</p>
       </v-container>
       <v-container v-else fluid>
         <router-view />

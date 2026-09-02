@@ -5,7 +5,7 @@ import { http } from './http'
 import type { StageRequest, StageResponse } from './types'
 
 export const stagesApi = {
-  list: () => http.get<StageResponse[]>('/stages'),
+  list: (sort?: string) => http.get<StageResponse[]>(`/stages${sort ? `?sort=${encodeURIComponent(sort)}` : ''}`),
   get: (id: string) => http.get<StageResponse>(`/stages/${id}`),
   create: (request: StageRequest) => http.post<StageResponse>('/stages', request),
   update: (id: string, request: StageRequest) => http.put<StageResponse>(`/stages/${id}`, request),

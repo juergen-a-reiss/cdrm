@@ -217,3 +217,34 @@ export interface ReleaseHistoryOverviewEntry {
   deployError: string | null
   createdBy: string
 }
+
+// One page of the release-history dashboard's details table — sorted, filtered, and
+// paginated by the backend (see releasesApi.historyOverview), not fetched in full.
+export interface ReleaseHistoryPageResponse {
+  content: ReleaseHistoryOverviewEntry[]
+  totalElements: number
+  page: number
+  size: number
+}
+
+export type ReleaseHistoryGroupBy = 'ACTION' | 'PRODUCT' | 'WORKLOAD' | 'STAGE'
+
+// One (month, key) bucket of the dashboard chart's data — counted by the database, not
+// tallied client-side from the full entry list.
+export interface ReleaseHistorySummaryEntry {
+  month: string
+  key: string
+  count: number
+}
+
+// The filter/search parameters shared by releasesApi.historyOverview and
+// historySummary — the backend applies them identically to the table and the chart.
+export interface ReleaseHistoryFilterParams {
+  productIds?: string[]
+  workloadIds?: string[]
+  stageIds?: string[]
+  pipelines?: string[]
+  actions?: ReleaseHistoryAction[]
+  monthsBack?: number
+  search?: string
+}

@@ -4,18 +4,21 @@
 -->
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
 import ResourceTable from '../components/ResourceTable.vue'
+import type { SortByItem } from '../components/ResourceTable.vue'
 import ProductFormDialog from '../components/ProductFormDialog.vue'
 import ProductFilterBar from '../components/ProductFilterBar.vue'
 import { useResourceList } from '../composables/useResourceList'
 import { useProductFilter } from '../composables/useProductFilter'
+import { usePersistedRef } from '../composables/usePersistedRef'
 import { productsApi } from '../api/products'
 import { ApiError } from '../api/http'
 import type { ProductResponse } from '../api/types'
 import { canManageProducts } from '../auth/roles'
 import { formatDateTime } from '../utils/formatDateTime'
+import { sortParam } from '../utils/sortParam'
 
 interface DeploymentTimeRow {
   stageName: string
@@ -27,7 +30,9 @@ interface ProductRow extends ProductResponse {
   deploymentTimes: DeploymentTimeRow[]
 }
 
-const { items, loading, error, reload } = useResourceList(productsApi.list)
+const sortBy = usePersistedRef<SortByItem[]>('cdrm.sort.products', [{ key: 'name', order: 'asc' }])
+const { items, loading, error, reload } = useResourceList(() => productsApi.list(sortParam(sortBy.value)))
+watch(sortBy, reload, { deep: true })
 const { matches } = useProductFilter()
 
 const rows = computed<ProductRow[]>(() =>
@@ -88,7 +93,7 @@ async function removeProduct(product: ProductResponse) {
   <div class="d-flex flex-wrap ga-2 align-center mb-4">
     <ProductFilterBar />
   </div>
-  <ResourceTable :headers="headers" :items="rows" :loading="loading" :error="error">
+  <ResourceTable :headers="headers" :items="rows" :loading="loading" :error="error" v-model:sort-by="sortBy">
     <template v-if="canManageProducts" #top>
       <v-toolbar flat>
         <v-toolbar-title>Products</v-toolbar-title>

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
 import org.mockito.ArgumentMatchers.any
+import org.mockito.ArgumentMatchers.anyString
 import org.mockito.ArgumentMatchers.argThat
 import org.mockito.BDDMockito.given
 import org.mockito.Mock
@@ -280,13 +281,35 @@ class ProductServiceTest {
     fun `findAll returns only products the caller's cdrm-products claim allows`() {
         val visible = persistedProduct().apply { name = "Platform" }
         val hidden = persistedProduct().apply { name = "Payments" }
-        given(repository.findAll(org.springframework.data.domain.Sort.by("name"))).willReturn(listOf(visible, hidden))
+        given(repository.findAll()).willReturn(listOf(visible, hidden))
         given(rebac.canSeeProduct("Platform")).willReturn(true)
         given(rebac.canSeeProduct("Payments")).willReturn(false)
 
         val result = service.findAll()
 
         assertEquals(listOf("Platform"), result.map { it.name })
+    }
+
+    @Test
+    fun `findAll sorts by name by default`() {
+        val a = persistedProduct().apply { name = "a-product" }
+        val b = persistedProduct().apply { name = "b-product" }
+        given(repository.findAll()).willReturn(listOf(b, a))
+        given(rebac.canSeeProduct(anyString())).willReturn(true)
+
+        val result = service.findAll()
+
+        assertEquals(listOf("a-product", "b-product"), result.map { it.name })
+    }
+
+    @Test
+    fun `findAll rejects an unknown sort key`() {
+        given(repository.findAll()).willReturn(listOf(persistedProduct()))
+        given(rebac.canSeeProduct(anyString())).willReturn(true)
+
+        val exception = assertThrows(ResponseStatusException::class.java) { service.findAll("bogus,asc") }
+
+        assertEquals(400, exception.statusCode.value())
     }
 
     @Test

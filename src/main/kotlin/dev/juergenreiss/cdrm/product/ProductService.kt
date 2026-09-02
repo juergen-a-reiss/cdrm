@@ -3,13 +3,14 @@
 
 package dev.juergenreiss.cdrm.product
 
+import dev.juergenreiss.cdrm.common.SortSpec
+import dev.juergenreiss.cdrm.common.sortedBySpec
 import dev.juergenreiss.cdrm.security.RebacContext
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.StageRepository
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.AuditorAware
-import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
 import org.springframework.scheduling.support.CronExpression
 import org.springframework.stereotype.Service
@@ -31,11 +32,20 @@ class ProductService(
 
     private val log = LoggerFactory.getLogger(ProductService::class.java)
 
+    private val defaultSort = SortSpec("name", descending = false)
+    private val sortComparators: Map<String, Comparator<ProductResponse>> = mapOf(
+        "name" to compareBy { it.name },
+        "description" to compareBy(nullsFirst()) { it.description },
+    )
+
     // ReBAC (see README): cdrm-products, when set on the caller, restricts visibility
     // to an exact-match subset — silently for the list, as a 404 for a specific id (so
     // a hidden product doesn't leak its existence via a 403 vs. 404 distinction).
-    fun findAll(): List<ProductResponse> =
-        repository.findAll(Sort.by("name")).filter { rebac.canSeeProduct(it.name) }.map { it.toResponse() }
+    fun findAll(sort: String? = null): List<ProductResponse> =
+        repository.findAll()
+            .filter { rebac.canSeeProduct(it.name) }
+            .map { it.toResponse() }
+            .sortedBySpec(SortSpec.parse(sort, defaultSort), sortComparators)
 
     fun findById(id: UUID): ProductResponse {
         val product = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }

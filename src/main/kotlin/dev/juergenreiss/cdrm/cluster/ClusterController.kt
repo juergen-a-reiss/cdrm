@@ -12,7 +12,7 @@ import java.util.*
 class ClusterController(private val service: ClusterService) {
 
     @GetMapping
-    fun findAll(): List<ClusterResponse> = service.findAll()
+    fun findAll(@RequestParam(required = false) sort: String?): List<ClusterResponse> = service.findAll(sort)
 
     @GetMapping("/{id}")
     fun findById(@PathVariable id: UUID): ClusterResponse = service.findById(id)

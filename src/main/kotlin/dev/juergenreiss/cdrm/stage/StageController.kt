@@ -12,7 +12,7 @@ import java.util.*
 class StageController(private val service: StageService) {
 
     @GetMapping
-    fun findAll(): List<StageResponse> = service.findAll()
+    fun findAll(@RequestParam(required = false) sort: String?): List<StageResponse> = service.findAll(sort)
 
     @GetMapping("/{id}")
     fun findById(@PathVariable id: UUID): StageResponse = service.findById(id)

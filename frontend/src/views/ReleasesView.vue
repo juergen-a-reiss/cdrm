@@ -7,6 +7,7 @@
 import { computed, ref, watch } from 'vue'
 import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
 import ResourceTable from '../components/ResourceTable.vue'
+import type { SortByItem } from '../components/ResourceTable.vue'
 import ReleaseFormDialog from '../components/ReleaseFormDialog.vue'
 import ReleaseRedeployDialog from '../components/ReleaseRedeployDialog.vue'
 import ProductFilterBar from '../components/ProductFilterBar.vue'
@@ -18,6 +19,7 @@ import { useProductFilter } from '../composables/useProductFilter'
 import { useStageFilter } from '../composables/useStageFilter'
 import { useWorkloadFilter } from '../composables/useWorkloadFilter'
 import { usePipelineFilter } from '../composables/usePipelineFilter'
+import { usePersistedRef } from '../composables/usePersistedRef'
 import { useToast } from '../composables/useToast'
 import { releasesApi } from '../api/releases'
 import { workloadsApi } from '../api/workloads'
@@ -27,6 +29,7 @@ import { canManageReleases, canPromoteReleases, canRedeployReleases, canRollback
 import { formatDateTime } from '../utils/formatDateTime'
 import { RELEASE_HISTORY_ACTION_LABELS } from '../utils/releaseHistoryAction'
 import { formatDeploymentStatus } from '../utils/releaseHistoryStatus'
+import { sortParam } from '../utils/sortParam'
 
 interface ReleaseRow {
   id: string
@@ -35,7 +38,10 @@ interface ReleaseRow {
   workloadName: string
   currentStageName: string
   isHead: boolean
-  lastDeployedAtDisplay: string
+  // Raw ISO timestamp (or null) so the "Last Deployed" column sorts chronologically —
+  // the header renders it via a `value` function (see headers below), not this field
+  // directly.
+  lastDeployedAt: string | null
   canPromote: boolean
   canRollback: boolean
   canRedeploy: boolean
@@ -44,7 +50,9 @@ interface ReleaseRow {
   raw: ReleaseResponse
 }
 
-const { items, loading, error, reload } = useResourceList(releasesApi.list)
+const sortBy = usePersistedRef<SortByItem[]>('cdrm.sort.releases', [{ key: 'createdAt', order: 'desc' }])
+const { items, loading, error, reload } = useResourceList(() => releasesApi.list(sortParam(sortBy.value)))
+watch(sortBy, reload, { deep: true })
 const { items: workloads } = useResourceList(workloadsApi.list)
 const { matches: matchesProduct } = useProductFilter()
 const { matches: matchesStage } = useStageFilter()
@@ -77,7 +85,7 @@ const rows = computed<ReleaseRow[]>(() =>
       workloadName: workloadNameById.value.get(release.workloadId) ?? release.workloadId,
       currentStageName: release.currentStage.name,
       isHead: !release.canRollback,
-      lastDeployedAtDisplay: release.lastDeployedAt ? formatDateTime(release.lastDeployedAt) : 'Pending',
+      lastDeployedAt: release.lastDeployedAt,
       canPromote: release.canPromote,
       canRollback: release.canRollback,
       canRedeploy: release.redeployableStages.length > 0,
@@ -106,7 +114,7 @@ const headers = computed<DataTableHeader<ReleaseRow>[]>(() => {
     { title: 'Image', key: 'image' },
     { title: 'Workload', key: 'workloadName' },
     { title: 'Current Stage', key: 'currentStageName' },
-    { title: 'Last Deployed', key: 'lastDeployedAtDisplay' },
+    { title: 'Last Deployed', key: 'lastDeployedAt', value: (item) => (item.lastDeployedAt ? formatDateTime(item.lastDeployedAt) : 'Pending') },
     { title: 'Description', key: 'description' },
   ]
   if (showActions.value) {
@@ -243,6 +251,7 @@ async function onRedeployed() {
     :error="error"
     expandable-rows
     v-model:expanded="expanded"
+    v-model:sort-by="sortBy"
   >
     <template #item.currentStageName="{ item }">
       <span class="d-flex align-center ga-1">

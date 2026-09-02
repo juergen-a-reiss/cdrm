@@ -11,7 +11,7 @@ import java.util.*
 @RequestMapping("/products")
 class ProductController(private val service: ProductService) {
     @GetMapping
-    fun findAll(): List<ProductResponse> = service.findAll()
+    fun findAll(@RequestParam(required = false) sort: String?): List<ProductResponse> = service.findAll(sort)
 
     @GetMapping("/{id}")
     fun findById(@PathVariable id: UUID): ProductResponse = service.findById(id)

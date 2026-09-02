@@ -5,7 +5,7 @@ import { http } from './http'
 import type { WorkloadRequest, WorkloadResponse } from './types'
 
 export const workloadsApi = {
-  list: () => http.get<WorkloadResponse[]>('/workloads'),
+  list: (sort?: string) => http.get<WorkloadResponse[]>(`/workloads${sort ? `?sort=${encodeURIComponent(sort)}` : ''}`),
   get: (id: string) => http.get<WorkloadResponse>(`/workloads/${id}`),
   create: (request: WorkloadRequest) => http.post<WorkloadResponse>('/workloads', request),
   update: (id: string, request: WorkloadRequest) => http.put<WorkloadResponse>(`/workloads/${id}`, request),

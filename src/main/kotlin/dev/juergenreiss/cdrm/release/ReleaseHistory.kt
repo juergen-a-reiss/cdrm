@@ -53,6 +53,12 @@ class ReleaseHistory(
     @Column(name = "stage_name", nullable = false)
     val stageName: String,
 
+    // Also denormalized (see productName) — a snapshot of the stage's pipeline at
+    // insert time, so it survives the stage being deleted or later reassigned to a
+    // different pipeline. Null only for rows from before this column existed.
+    @Column(name = "pipeline")
+    val pipeline: String? = null,
+
     @Column(name = "action", nullable = false)
     @Enumerated(EnumType.STRING)
     val action: ReleaseHistoryAction = ReleaseHistoryAction.PROMOTED,

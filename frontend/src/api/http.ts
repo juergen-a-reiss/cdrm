@@ -44,3 +44,21 @@ export const http = {
   put: <T>(path: string, body: unknown) => request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
   delete: (path: string) => request<void>(path, { method: 'DELETE' }),
 }
+
+// Builds a query string from a params object — an array value becomes one repeated
+// `key=` per entry (matching how Spring MVC binds a `List<T>` @RequestParam), a
+// scalar becomes one `key=value`, and undefined/null/empty-array values are omitted
+// entirely rather than sent as an empty/blank param.
+export function toQueryString(params: Record<string, string | number | string[] | undefined | null>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) continue
+    if (Array.isArray(value)) {
+      for (const item of value) search.append(key, item)
+    } else {
+      search.append(key, String(value))
+    }
+  }
+  const query = search.toString()
+  return query ? `?${query}` : ''
+}

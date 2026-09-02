@@ -87,3 +87,13 @@ data class ReleaseHistoryOverviewEntry(
     val deployError: String?,
     val createdBy: UUID,
 )
+
+// One page of the release-history dashboard's details table — the table is paginated
+// at the database level (see ReleaseService.historyOverview), not fetched in full and
+// paged in the browser.
+data class ReleaseHistoryPageResponse(
+    val content: List<ReleaseHistoryOverviewEntry>,
+    val totalElements: Long,
+    val page: Int,
+    val size: Int,
+)

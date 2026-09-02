@@ -17,7 +17,6 @@ import org.mockito.Mockito.verify
 import org.mockito.junit.jupiter.MockitoExtension
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.AuditorAware
-import org.springframework.data.domain.Sort
 import org.springframework.web.server.ResponseStatusException
 import java.net.URI
 import java.time.Instant
@@ -48,6 +47,7 @@ class StageServiceTest {
 
     private fun persistedStage(
         id: UUID = UUID.randomUUID(),
+        pipeline: String = "pipeline",
         name: String = "Draft",
         description: String? = "desc",
         order: Int = 1,
@@ -56,7 +56,7 @@ class StageServiceTest {
         modifiedBy: UUID = createdBy,
     ) = Stage(
         id = id,
-        pipeline = "pipeline",
+        pipeline = pipeline,
         name = name,
         description = description,
         order = order,
@@ -80,17 +80,34 @@ class StageServiceTest {
     )
 
     @Test
-    fun `findAll maps stages ordered by order`() {
-        val stage = persistedStage()
-        given(repository.findAll(Sort.by("order"))).willReturn(listOf(stage))
+    fun `findAll maps stages sorted by pipeline by default`() {
+        val a = persistedStage(pipeline = "a-pipeline")
+        val b = persistedStage(pipeline = "b-pipeline")
+        given(repository.findAll()).willReturn(listOf(b, a))
 
         val result = service.findAll()
 
-        assertEquals(1, result.size)
-        assertEquals(stage.id, result[0].id)
-        assertEquals(stage.name, result[0].name)
-        assertEquals(stage.createdBy, result[0].createdBy)
-        assertEquals(stage.modifiedBy, result[0].modifiedBy)
+        assertEquals(listOf("a-pipeline", "b-pipeline"), result.map { it.pipeline })
+    }
+
+    @Test
+    fun `findAll honors an explicit sort param`() {
+        val dev = persistedStage(order = 1)
+        val qa = persistedStage(order = 2)
+        given(repository.findAll()).willReturn(listOf(dev, qa))
+
+        val result = service.findAll("order,desc")
+
+        assertEquals(listOf(2, 1), result.map { it.order })
+    }
+
+    @Test
+    fun `findAll rejects an unknown sort key`() {
+        given(repository.findAll()).willReturn(listOf(persistedStage()))
+
+        val exception = assertThrows(ResponseStatusException::class.java) { service.findAll("clusters,asc") }
+
+        assertEquals(400, exception.statusCode.value())
     }
 
     @Test

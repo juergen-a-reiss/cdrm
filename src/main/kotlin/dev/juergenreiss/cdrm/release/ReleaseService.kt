@@ -3,6 +3,8 @@
 
 package dev.juergenreiss.cdrm.release
 
+import dev.juergenreiss.cdrm.common.SortSpec
+import dev.juergenreiss.cdrm.common.sortedBySpec
 import dev.juergenreiss.cdrm.product.Product
 import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.product.ProductStageRepository
@@ -17,6 +19,7 @@ import dev.juergenreiss.cdrm.workload.WorkloadStageRepository
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.AuditorAware
+import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
 import org.springframework.scheduling.support.CronExpression
@@ -42,6 +45,7 @@ private val IMAGE_REFERENCE = Regex(
 class ReleaseService(
     private val repository: ReleaseRepository,
     private val releaseHistoryRepository: ReleaseHistoryRepository,
+    private val releaseHistoryAggregationRepository: ReleaseHistoryAggregationRepository,
     private val stageRepository: StageRepository,
     private val workloadRepository: WorkloadRepository,
     private val workloadStageRepository: WorkloadStageRepository,
@@ -55,20 +59,37 @@ class ReleaseService(
 
     private val log = LoggerFactory.getLogger(ReleaseService::class.java)
 
+    private val defaultSort = SortSpec("createdAt", descending = true)
+    private val sortComparators: Map<String, Comparator<ReleaseResponse>> = mapOf(
+        "image" to compareBy { it.image },
+        "currentStageName" to compareBy { it.currentStage.name },
+        "lastDeployedAt" to compareBy(nullsFirst()) { it.lastDeployedAt },
+        "description" to compareBy(nullsFirst()) { it.description },
+        "createdAt" to compareBy { it.createdAt },
+    )
+
     // ReBAC (see README): cdrm-products/cdrm-workloads restrict visibility by the
     // release's workload and its product — batches those lookups instead of one pair
-    // per release.
-    fun findAll(): List<ReleaseResponse> {
-        val releases = repository.findAll(Sort.by("image"))
+    // per release. Also batches "last deployed" (a per-release release_history lookup)
+    // instead of the one-query-per-release toResponse() otherwise does, since sorting by
+    // it means every row needs it up front rather than lazily.
+    fun findAll(sort: String? = null): List<ReleaseResponse> {
+        val releases = repository.findAll()
         val workloadsById = workloadRepository.findAllById(releases.map { it.workloadId }.toSet()).associateBy { it.id }
         val productNameById = productRepository.findAllById(workloadsById.values.map { it.productId }.toSet())
             .associate { it.id to it.name }
-        return releases
+        val lastDeployedAtByReleaseId = releaseHistoryRepository.findLastDeployedAtByReleaseIdIn(releases.mapNotNull { it.id })
+            .associate { it.releaseId to it.lastDeployedAt }
+        val responses = releases
             .filter { release ->
                 val workload = workloadsById[release.workloadId] ?: return@filter false
                 rebac.canSeeWorkload(productNameById[workload.productId] ?: "", workload.name)
             }
-            .map { it.toResponse() }
+            .map { it.toResponse(lastDeployedAt = lastDeployedAtByReleaseId[it.id]) }
+        val comparators = sortComparators + mapOf(
+            "workloadName" to compareBy<ReleaseResponse> { workloadsById[it.workloadId]?.name ?: "" },
+        )
+        return responses.sortedBySpec(SortSpec.parse(sort, defaultSort), comparators)
     }
 
     fun findById(id: UUID): ReleaseResponse {
@@ -101,21 +122,82 @@ class ReleaseService(
         }
     }
 
-    // Every release-history entry across every release, for the history dashboard's chart
-    // and table. Product/workload/stage name and id are read straight off each row (a
-    // snapshot taken when it was recorded) rather than joined live, so this stays correct
-    // even for entries whose product/workload/stage has since been deleted — including
-    // for the ReBAC visibility check below, which can use the row's own snapshotted
-    // product/workload names directly rather than needing a live join. The stage and
+    private val historyOverviewDefaultSort = SortSpec("timestamp", descending = true)
+
+    // release_history is the one table expected to grow large (see the migrations that
+    // added its indices), so — unlike every other list in this service — this sorts,
+    // filters, and paginates at the database level, restricted to an allow-list of its
+    // own plain (denormalized) columns, mapping each frontend-facing key to the entity
+    // property it actually corresponds to.
+    private val historyOverviewSortKeys: Map<String, String> = mapOf(
+        "timestamp" to "createdAt",
+        "actionLabel" to "action",
+        "productName" to "productName",
+        "workloadName" to "workloadName",
+        "stageName" to "stageName",
+        "image" to "image",
+        "deployedDisplay" to "deployedAt",
+        "createdBy" to "createdBy",
+    )
+
+    // ReBAC (see README): cdrm-products/cdrm-workloads, folded into the same filter the
+    // caller's own product/workload/stage/pipeline/action selections use, so a
+    // restricted caller can't see more via the chart's aggregate counts than via the
+    // table — both go through this same filter.
+    private fun releaseHistoryFilter(
+        productIds: List<UUID>?,
+        workloadIds: List<UUID>?,
+        stageIds: List<UUID>?,
+        pipelines: List<String>?,
+        actions: List<ReleaseHistoryAction>?,
+        monthsBack: Int?,
+        search: String? = null,
+    ) = ReleaseHistoryFilter(
+        productIds = productIds?.toSet(),
+        workloadIds = workloadIds?.toSet(),
+        stageIds = stageIds?.toSet(),
+        pipelines = pipelines?.toSet(),
+        actions = actions?.toSet(),
+        since = monthsBack?.takeIf { it > 0 }?.let {
+            Instant.now().atZone(ZoneId.systemDefault()).minusMonths(it.toLong() - 1)
+                .withDayOfMonth(1).toLocalDate().atStartOfDay(ZoneId.systemDefault()).toInstant()
+        },
+        search = search,
+        allowedProductNames = if (rebac.isDevops) null else rebac.allowedProducts,
+        allowedWorkloadNames = if (rebac.isDevops) null else rebac.allowedWorkloads,
+    )
+
+    // One page of release-history entries for the dashboard's details table. Product/
+    // workload/stage name and id are read straight off each row (a snapshot taken when
+    // it was recorded) rather than joined live, so this stays correct even for entries
+    // whose product/workload/stage has since been deleted. The stage and
     // product-stage-cron lookups below are only for the still-live stage's
     // deploymentPolicy/order and scheduledAt, batched rather than done per entry.
-    fun historyOverview(): List<ReleaseHistoryOverviewEntry> {
-        val entries = releaseHistoryRepository.findAll(Sort.by(Sort.Direction.DESC, "createdAt"))
-            .filter { rebac.canSeeWorkload(it.productName, it.workloadName) }
+    fun historyOverview(
+        sort: String? = null,
+        page: Int = 0,
+        size: Int = 25,
+        productIds: List<UUID>? = null,
+        workloadIds: List<UUID>? = null,
+        stageIds: List<UUID>? = null,
+        pipelines: List<String>? = null,
+        actions: List<ReleaseHistoryAction>? = null,
+        monthsBack: Int? = null,
+        search: String? = null,
+    ): ReleaseHistoryPageResponse {
+        val spec = SortSpec.parse(sort, historyOverviewDefaultSort)
+        val property = historyOverviewSortKeys[spec.key]
+            ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown sort key '${spec.key}'")
+        val direction = if (spec.descending) Sort.Direction.DESC else Sort.Direction.ASC
+        val filter = releaseHistoryFilter(productIds, workloadIds, stageIds, pipelines, actions, monthsBack, search)
+        val pageable = PageRequest.of(page, size, Sort.by(direction, property))
+        val result = releaseHistoryRepository.findAll(releaseHistorySpecification(filter), pageable)
+
+        val entries = result.content
         val stagesById = stageRepository.findAllById(entries.map { it.stageId }.toSet()).associateBy { it.id }
         val cronByProductAndStage = productStagesFor(entries)
 
-        return entries.map { entry ->
+        val content = entries.map { entry ->
             val stage = stagesById[entry.stageId]
             ReleaseHistoryOverviewEntry(
                 id = entry.id!!,
@@ -134,6 +216,23 @@ class ReleaseService(
                 createdBy = entry.createdBy,
             )
         }
+        return ReleaseHistoryPageResponse(content = content, totalElements = result.totalElements, page = page, size = size)
+    }
+
+    // The dashboard's chart — counts grouped by month and the requested dimension,
+    // computed by the database (see ReleaseHistoryAggregationRepository) rather than by
+    // fetching every matching row and tallying it in the browser.
+    fun historySummary(
+        groupBy: ReleaseHistoryGroupBy,
+        productIds: List<UUID>? = null,
+        workloadIds: List<UUID>? = null,
+        stageIds: List<UUID>? = null,
+        pipelines: List<String>? = null,
+        actions: List<ReleaseHistoryAction>? = null,
+        monthsBack: Int? = null,
+    ): List<ReleaseHistorySummaryEntry> {
+        val filter = releaseHistoryFilter(productIds, workloadIds, stageIds, pipelines, actions, monthsBack)
+        return releaseHistoryAggregationRepository.summary(filter, groupBy)
     }
 
     // Batched by stageId (product_stage rows are few per stage) rather than one
@@ -352,6 +451,7 @@ class ReleaseService(
                 image = release.image,
                 stageId = stage.id!!,
                 stageName = stage.name,
+                pipeline = stage.pipeline,
                 action = action,
                 deployedAt = null,
                 createdBy = userId,
@@ -493,7 +593,10 @@ class ReleaseService(
     // create) — not a live lookup — so a caller like findAll()/findById() that isn't
     // reporting on a just-performed action leaves it null rather than resurfacing some
     // unrelated older failure.
-    private fun Release.toResponse(deployError: String? = null): ReleaseResponse {
+    private fun Release.toResponse(
+        deployError: String? = null,
+        lastDeployedAt: Instant? = releaseHistoryRepository.findTopByReleaseIdAndDeployedAtIsNotNullOrderByDeployedAtDesc(id!!)?.deployedAt,
+    ): ReleaseResponse {
         val currentStage = stageRepository.findById(currentStageId).orElseThrow()
         val orderedStages = orderedStagesFor(workloadId)
         val currentIndex = orderedStages.indexOfFirst { it.id == currentStageId }
@@ -507,7 +610,6 @@ class ReleaseService(
         val redeployableStages = redeployableStagesFor(this)
             .filter { allowsReleaseAction(ReleaseActionClaim.REDEPLOY, it.name, "cdrm-productowner") }
             .map { ReleaseStageInfo(id = it.id!!, name = it.name, order = it.order) }
-        val lastDeployedAt = releaseHistoryRepository.findTopByReleaseIdAndDeployedAtIsNotNullOrderByDeployedAtDesc(id!!)?.deployedAt
         return ReleaseResponse(
             id = id!!,
             image = image,

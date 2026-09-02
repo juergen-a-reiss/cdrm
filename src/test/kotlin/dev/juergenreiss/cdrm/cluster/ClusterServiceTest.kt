@@ -14,7 +14,6 @@ import org.mockito.Mockito.verify
 import org.mockito.junit.jupiter.MockitoExtension
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.AuditorAware
-import org.springframework.data.domain.Sort
 import org.springframework.web.server.ResponseStatusException
 import java.net.URI
 import java.time.Instant
@@ -56,15 +55,34 @@ class ClusterServiceTest {
     )
 
     @Test
-    fun `findAll maps clusters ordered by name`() {
-        val cluster = persistedCluster()
-        given(repository.findAll(Sort.by("name"))).willReturn(listOf(cluster))
+    fun `findAll maps clusters sorted by name by default`() {
+        val a = persistedCluster().apply { name = "a-cluster" }
+        val b = persistedCluster().apply { name = "b-cluster" }
+        given(repository.findAll()).willReturn(listOf(b, a))
 
         val result = service.findAll()
 
-        assertEquals(1, result.size)
-        assertEquals(cluster.id, result[0].id)
-        assertEquals(cluster.name, result[0].name)
+        assertEquals(listOf("a-cluster", "b-cluster"), result.map { it.name })
+    }
+
+    @Test
+    fun `findAll honors an explicit sort param`() {
+        val a = persistedCluster().apply { name = "a-cluster" }
+        val b = persistedCluster().apply { name = "b-cluster" }
+        given(repository.findAll()).willReturn(listOf(a, b))
+
+        val result = service.findAll("name,desc")
+
+        assertEquals(listOf("b-cluster", "a-cluster"), result.map { it.name })
+    }
+
+    @Test
+    fun `findAll rejects an unknown sort key`() {
+        given(repository.findAll()).willReturn(listOf(persistedCluster()))
+
+        val exception = assertThrows(ResponseStatusException::class.java) { service.findAll("bogus,asc") }
+
+        assertEquals(400, exception.statusCode.value())
     }
 
     @Test
