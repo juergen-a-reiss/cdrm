@@ -5,12 +5,9 @@
 
 <script setup lang="ts">
 import { computed, watch } from 'vue'
-import { useResourceList } from '../composables/useResourceList'
 import { useProductFilter } from '../composables/useProductFilter'
-import { productsApi } from '../api/products'
 
-const { items: products } = useResourceList(productsApi.list)
-const { selectedProductIds } = useProductFilter()
+const { selectedProductIds, products } = useProductFilter()
 
 // Selected IDs are persisted across page loads (see useIdFilter), so a stale one — e.g.
 // left over after the database was recreated and products got new IDs — would
@@ -23,7 +20,7 @@ watch(products, (list) => {
 
 const productOptions = computed(() =>
   products.value
-    .map((product) => ({ title: product.name, value: product.id }))
+    .map((product) => ({ title: product.isGroup ? `${product.name} (group)` : product.name, value: product.id }))
     .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })),
 )
 const isActive = computed(() => selectedProductIds.value.length > 0)

@@ -16,6 +16,7 @@ import org.mockito.ArgumentMatchers.any
 import org.mockito.ArgumentMatchers.anyString
 import org.mockito.BDDMockito.given
 import org.mockito.Mock
+import org.mockito.Mockito.lenient
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.junit.jupiter.MockitoExtension
@@ -53,6 +54,10 @@ class WorkloadServiceTest {
     @BeforeEach
     fun setUp() {
         service = WorkloadService(repository, stageRepository, workloadStageRepository, productRepository, currentUser, rebac)
+        // Default: any productId passed to create/update resolves to a plain, non-group
+        // product — lenient so tests that never reach validateProduct() (e.g. the
+        // validateTarget checks, which run first) aren't flagged for an unused stub.
+        lenient().`when`(productRepository.findById(any())).thenReturn(Optional.of(persistedProduct()))
     }
 
     private fun persistedStage(order: Int, name: String = "Stage-$order", pipeline: String = "pipeline") = Stage(
@@ -352,10 +357,11 @@ class WorkloadServiceTest {
         assertEquals(404, exception.statusCode.value())
     }
 
-    private fun persistedProduct(id: UUID = UUID.randomUUID(), name: String = "Product") = Product(
+    private fun persistedProduct(id: UUID = UUID.randomUUID(), name: String = "Product", isGroup: Boolean = false) = Product(
         id = id,
         name = name,
         description = null,
+        isGroup = isGroup,
         createdAt = Instant.now(),
         modifiedAt = Instant.now(),
         createdBy = UUID.randomUUID(),
@@ -542,6 +548,36 @@ class WorkloadServiceTest {
                     kubernetesKind = KubernetesKind.DEPLOYMENT,
                     kubernetesNameSpace = null, pipeline = "--",
                 )
+            )
+        }
+
+        assertEquals(400, exception.statusCode.value())
+        verify(repository, never()).save(any())
+    }
+
+    @Test
+    fun `create rejects a product group as productId`() {
+        val group = persistedProduct(name = "Core Products", isGroup = true)
+        given(productRepository.findById(group.id!!)).willReturn(Optional.of(group))
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.create(WorkloadRequest(name = "Release", productId = group.id!!, description = null, kubernetes = false, pipeline = "pipeline"))
+        }
+
+        assertEquals(400, exception.statusCode.value())
+        verify(repository, never()).save(any())
+    }
+
+    @Test
+    fun `update rejects a product group as productId`() {
+        val workloadId = UUID.randomUUID()
+        val group = persistedProduct(name = "Core Products", isGroup = true)
+        given(productRepository.findById(group.id!!)).willReturn(Optional.of(group))
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.update(
+                workloadId,
+                WorkloadRequest(name = "Release", productId = group.id!!, description = null, kubernetes = false, pipeline = "pipeline"),
             )
         }
 

@@ -123,7 +123,23 @@ def seed_products(api_url: str, token: str, products: list[dict], stage_ids: dic
                 print(f"Error: product '{product['name']}' references unknown stage '{entry['stage']}'", file=sys.stderr)
                 sys.exit(1)
             crons.append({"stageId": stage_id, "deploymentCron": entry["cron"]})
-        body = {"name": product["name"], "description": product.get("description"), "stageDeploymentCrons": crons}
+        product_group_id = None
+        if product.get("product_group"):
+            product_group_id = ids.get(product["product_group"])
+            if product_group_id is None:
+                print(
+                    f"Error: product '{product['name']}' references unknown/not-yet-seeded product group "
+                    f"'{product['product_group']}' — groups must be listed before their members",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+        body = {
+            "name": product["name"],
+            "description": product.get("description"),
+            "isGroup": product.get("is_group", False),
+            "productGroupId": product_group_id,
+            "stageDeploymentCrons": crons,
+        }
         result = post(api_url, token, "/products", body)
         ids[product["name"]] = result["id"]
         print(f"  product: {product['name']} ({result['id']})")

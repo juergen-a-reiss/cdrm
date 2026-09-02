@@ -43,6 +43,10 @@ const error = ref<string | null>(null)
 
 const pipelineOptions = computed(() => [...new Set(stages.value.map((stage) => stage.pipeline))].sort((a, b) => a.localeCompare(b)))
 
+// A product group is only an organizational aid — never a real deployment target — so it
+// can't be picked here (the backend rejects it too).
+const productOptions = computed(() => products.value.filter((product) => !product.isGroup))
+
 // The only stages a workload can link to — every possible stage-linking UI below is
 // scoped to this, not to the full stage list, since a workload belongs to one pipeline.
 const stagesInPipeline = computed(() => stages.value.filter((stage) => stage.pipeline === pipeline.value))
@@ -181,7 +185,7 @@ async function save() {
       <v-card-text>
         <v-alert v-if="error" type="error" :text="error" class="mb-4" />
         <v-text-field v-model="name" label="Name" required autofocus />
-        <v-select v-model="productId" :items="products" item-title="name" item-value="id" label="Product" required />
+        <v-select v-model="productId" :items="productOptions" item-title="name" item-value="id" label="Product" required />
         <v-textarea v-model="description" label="Description" />
         <v-select
           v-model="pipeline"

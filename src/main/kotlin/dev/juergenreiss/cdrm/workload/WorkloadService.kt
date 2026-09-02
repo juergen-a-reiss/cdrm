@@ -63,6 +63,7 @@ class WorkloadService(
     @Transactional
     fun create(request: WorkloadRequest): WorkloadResponse {
         validateTarget(request.kubernetes, request.kubernetesKind, request.kubernetesNameSpace)
+        validateProduct(request.productId)
         // A new workload always links to every stage of its own pipeline (see update()'s
         // stageIds for changing that set later) — a pipeline with no stages at all can't
         // host a workload, so reject before writing anything.
@@ -92,6 +93,7 @@ class WorkloadService(
     @Transactional
     fun update(id: UUID, request: WorkloadRequest): WorkloadResponse {
         validateTarget(request.kubernetes, request.kubernetesKind, request.kubernetesNameSpace)
+        validateProduct(request.productId)
         val stagesById = stageRepository.findAll().associateBy { it.id!! }
         if (stagesById.values.none { it.pipeline == request.pipeline }) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "No stages found for pipeline '${request.pipeline}'")
@@ -123,6 +125,19 @@ class WorkloadService(
         }
         log.info("Updated workload {} ('{}') by user {}", saved.id, saved.name, saved.modifiedBy)
         return saved.toResponse()
+    }
+
+    // A product group is only an organizational aid for humans, never a deployment target —
+    // a workload must always point at a real product.
+    private fun validateProduct(productId: UUID) {
+        val product = productRepository.findById(productId)
+            .orElseThrow { ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown product id: $productId") }
+        if (product.isGroup) {
+            throw ResponseStatusException(
+                HttpStatus.BAD_REQUEST,
+                "'${product.name}' is a product group and cannot be assigned to a workload",
+            )
+        }
     }
 
     private fun validateTarget(kubernetes: Boolean, kubernetesKind: KubernetesKind?, kubernetesNameSpace: String?) {

@@ -72,6 +72,9 @@ export interface ProductStageCronRequest {
 export interface ProductRequest {
   name: string
   description: string | null
+  isGroup: boolean
+  // Must reference an existing product whose isGroup is true. Null clears grouping.
+  productGroupId?: string | null
   // Only valid for stages whose deploymentPolicy is SCHEDULED.
   // Omit/null = leave existing configuration unchanged; provide the full desired
   // list to replace it (an empty list clears all configured times).
@@ -89,6 +92,8 @@ export interface ProductResponse {
   id: string
   name: string
   description: string | null
+  isGroup: boolean
+  productGroupId: string | null
   stageDeploymentCrons: ProductStageCronInfo[]
   createdAt: string
   modifiedAt: string

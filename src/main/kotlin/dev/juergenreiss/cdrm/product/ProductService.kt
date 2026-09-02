@@ -55,9 +55,17 @@ class ProductService(
 
     @Transactional
     fun create(request: ProductRequest): ProductResponse {
+        validateGroupInvariants(id = null, request = request)
         val userId = currentUserId()
         val saved = repository.save(
-            Product(name = request.name, description = request.description, createdBy = userId, modifiedBy = userId)
+            Product(
+                name = request.name,
+                description = request.description,
+                isGroup = request.isGroup,
+                productGroupId = request.productGroupId,
+                createdBy = userId,
+                modifiedBy = userId,
+            )
         )
         if (request.stageDeploymentCrons != null) {
             updateStageCrons(saved.id!!, request.stageDeploymentCrons)
@@ -69,8 +77,17 @@ class ProductService(
     @Transactional
     fun update(id: UUID, request: ProductRequest): ProductResponse {
         val product = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        validateGroupInvariants(id = id, request = request)
+        if (product.isGroup && !request.isGroup && repository.existsByProductGroupId(id)) {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Product group '${product.name}' still has member products — move or delete them first",
+            )
+        }
         product.name = request.name
         product.description = request.description
+        product.isGroup = request.isGroup
+        product.productGroupId = request.productGroupId
         product.modifiedBy = currentUserId()
         val saved = repository.save(product)
         if (request.stageDeploymentCrons != null) {
@@ -78,6 +95,35 @@ class ProductService(
         }
         log.info("Updated product {} ('{}') by user {}", saved.id, saved.name, saved.modifiedBy)
         return saved.toResponse()
+    }
+
+    // A product group only organizes the product catalog for humans — it can never be a
+    // deployment target, so it can't carry deployment-time cron config (that's what would
+    // let it acquire ProductStage rows), and its parent link (if any) must point at another
+    // actual group, never at itself and never through a cycle back to itself.
+    private fun validateGroupInvariants(id: UUID?, request: ProductRequest) {
+        if (request.isGroup && !request.stageDeploymentCrons.isNullOrEmpty()) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "A product group cannot have deployment times configured")
+        }
+        val parentId = request.productGroupId ?: return
+        if (parentId == id) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "A product cannot be its own group")
+        }
+        val parent = repository.findById(parentId)
+            .orElseThrow { ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown product group id: $parentId") }
+        if (!parent.isGroup) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "'${parent.name}' is not a product group")
+        }
+        if (id == null) return
+        val visited = mutableSetOf<UUID>()
+        var cursor: Product? = parent
+        while (cursor != null) {
+            if (cursor.id == id) {
+                throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Assigning '${parent.name}' as the group would create a cycle")
+            }
+            if (!visited.add(cursor.id!!)) break
+            cursor = cursor.productGroupId?.let { repository.findById(it).orElse(null) }
+        }
     }
 
     private fun updateStageCrons(productId: UUID, entries: List<ProductStageCronRequest>) {
@@ -159,6 +205,8 @@ class ProductService(
             id = id!!,
             name = name,
             description = description,
+            isGroup = isGroup,
+            productGroupId = productGroupId,
             stageDeploymentCrons = crons.mapNotNull { c ->
                 stagesById[c.stageId]?.let { stage ->
                     ProductStageCronInfo(

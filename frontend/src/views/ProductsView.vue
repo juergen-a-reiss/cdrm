@@ -10,6 +10,7 @@ import ResourceTable from '../components/ResourceTable.vue'
 import type { SortByItem } from '../components/ResourceTable.vue'
 import ProductFormDialog from '../components/ProductFormDialog.vue'
 import ProductFilterBar from '../components/ProductFilterBar.vue'
+import ProductTree from '../components/ProductTree.vue'
 import { useResourceList } from '../composables/useResourceList'
 import { useProductFilter } from '../composables/useProductFilter'
 import { usePersistedRef } from '../composables/usePersistedRef'
@@ -34,6 +35,12 @@ const sortBy = usePersistedRef<SortByItem[]>('cdrm.sort.products', [{ key: 'name
 const { items, loading, error, reload } = useResourceList(() => productsApi.list(sortParam(sortBy.value)))
 watch(sortBy, reload, { deep: true })
 const { matches } = useProductFilter()
+const activeTab = usePersistedRef('cdrm.productsView.tab', 'table')
+
+function groupName(product: ProductResponse): string | null {
+  if (!product.productGroupId) return null
+  return items.value.find((p) => p.id === product.productGroupId)?.name ?? null
+}
 
 const rows = computed<ProductRow[]>(() =>
   items.value
@@ -51,6 +58,8 @@ const rows = computed<ProductRow[]>(() =>
 const headers = computed<DataTableHeader<ProductRow>[]>(() => {
   const base: DataTableHeader<ProductRow>[] = [
     { title: 'Name', key: 'name' },
+    { title: 'Type', key: 'isGroup', sortable: false },
+    { title: 'Group', key: 'productGroupId', sortable: false },
     { title: 'Deployment Times', key: 'deploymentTimes', sortable: false },
     { title: 'Description', key: 'description' },
   ]
@@ -93,25 +102,52 @@ async function removeProduct(product: ProductResponse) {
   <div class="d-flex flex-wrap ga-2 align-center mb-4">
     <ProductFilterBar />
   </div>
-  <ResourceTable :headers="headers" :items="rows" :loading="loading" :error="error" v-model:sort-by="sortBy">
-    <template v-if="canManageProducts" #top>
-      <v-toolbar flat>
+
+  <v-tabs v-model="activeTab" class="mb-4">
+    <v-tab value="table">Table</v-tab>
+    <v-tab value="tree">Tree</v-tab>
+  </v-tabs>
+
+  <v-window v-model="activeTab">
+    <v-window-item value="table">
+      <ResourceTable :headers="headers" :items="rows" :loading="loading" :error="error" v-model:sort-by="sortBy">
+        <template v-if="canManageProducts" #top>
+          <v-toolbar flat>
+            <v-toolbar-title>Products</v-toolbar-title>
+            <v-spacer />
+            <v-btn color="primary" prepend-icon="mdi-plus" @click="openCreate">Add product</v-btn>
+          </v-toolbar>
+        </template>
+        <template #item.isGroup="{ item }">
+          <v-chip size="small" :prepend-icon="item.isGroup ? 'mdi-folder-outline' : 'mdi-package-variant-closed'">
+            {{ item.isGroup ? 'Group' : 'Product' }}
+          </v-chip>
+        </template>
+        <template #item.productGroupId="{ item }">
+          {{ groupName(item) ?? '—' }}
+        </template>
+        <template #item.deploymentTimes="{ item }">
+          <div v-if="item.deploymentTimes.length === 0">—</div>
+          <div v-for="entry in item.deploymentTimes" :key="entry.stageName" class="text-caption">
+            <strong>{{ entry.stageName }}</strong>: <code>{{ entry.cron }}</code> — next: {{ entry.nextDeploymentDisplay }}
+          </div>
+        </template>
+        <template v-if="canManageProducts" #item.actions="{ item }">
+          <v-icon icon="mdi-pencil" size="small" class="mr-2" @click="openEdit(item)" />
+          <v-icon icon="mdi-delete" size="small" @click="removeProduct(item)" />
+        </template>
+      </ResourceTable>
+    </v-window-item>
+
+    <v-window-item value="tree">
+      <v-toolbar v-if="canManageProducts" flat>
         <v-toolbar-title>Products</v-toolbar-title>
         <v-spacer />
         <v-btn color="primary" prepend-icon="mdi-plus" @click="openCreate">Add product</v-btn>
       </v-toolbar>
-    </template>
-    <template #item.deploymentTimes="{ item }">
-      <div v-if="item.deploymentTimes.length === 0">—</div>
-      <div v-for="entry in item.deploymentTimes" :key="entry.stageName" class="text-caption">
-        <strong>{{ entry.stageName }}</strong>: <code>{{ entry.cron }}</code> — next: {{ entry.nextDeploymentDisplay }}
-      </div>
-    </template>
-    <template v-if="canManageProducts" #item.actions="{ item }">
-      <v-icon icon="mdi-pencil" size="small" class="mr-2" @click="openEdit(item)" />
-      <v-icon icon="mdi-delete" size="small" @click="removeProduct(item)" />
-    </template>
-  </ResourceTable>
+      <ProductTree :items="items" :can-manage="canManageProducts" @edit="openEdit" @delete="removeProduct" />
+    </v-window-item>
+  </v-window>
 
   <ProductFormDialog v-model="dialogOpen" :product="editingProduct" @saved="reload" />
 </template>

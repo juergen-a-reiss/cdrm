@@ -6,4 +6,6 @@ package dev.juergenreiss.cdrm.product
 import org.springframework.data.jpa.repository.JpaRepository
 import java.util.*
 
-interface ProductRepository : JpaRepository<Product, UUID>
+interface ProductRepository : JpaRepository<Product, UUID> {
+    fun existsByProductGroupId(productGroupId: UUID): Boolean
+}

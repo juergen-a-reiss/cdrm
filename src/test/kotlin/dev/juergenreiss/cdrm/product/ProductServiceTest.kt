@@ -63,10 +63,17 @@ class ProductServiceTest {
         modifiedBy = UUID.randomUUID(),
     )
 
-    private fun persistedProduct(id: UUID = UUID.randomUUID()) = Product(
+    private fun persistedProduct(
+        id: UUID = UUID.randomUUID(),
+        name: String = "Product",
+        isGroup: Boolean = false,
+        productGroupId: UUID? = null,
+    ) = Product(
         id = id,
-        name = "Product",
+        name = name,
         description = null,
+        isGroup = isGroup,
+        productGroupId = productGroupId,
         createdAt = Instant.now(),
         modifiedAt = Instant.now(),
         createdBy = UUID.randomUUID(),
@@ -321,5 +328,150 @@ class ProductServiceTest {
         val exception = assertThrows(ResponseStatusException::class.java) { service.findById(product.id!!) }
 
         assertEquals(404, exception.statusCode.value())
+    }
+
+    @Test
+    fun `create allows a product group with no crons`() {
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val saved = persistedProduct(isGroup = true)
+        given(repository.save(any())).willReturn(saved)
+
+        val result = service.create(ProductRequest(name = "Core Products", description = null, isGroup = true))
+
+        assertTrue(result.isGroup)
+        verify(productStageRepository, never()).save(any())
+    }
+
+    @Test
+    fun `create rejects deployment crons on a product group`() {
+        val stage = persistedStage(DeploymentPolicy.SCHEDULED, name = "Prod")
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.create(
+                ProductRequest(
+                    name = "Core Products",
+                    description = null,
+                    isGroup = true,
+                    stageDeploymentCrons = listOf(ProductStageCronRequest(stageId = stage.id!!, deploymentCron = "0 0 2 * * *")),
+                )
+            )
+        }
+
+        assertEquals(400, exception.statusCode.value())
+        verify(repository, never()).save(any())
+    }
+
+    @Test
+    fun `create rejects a productGroupId that is not a group`() {
+        val notAGroup = persistedProduct(name = "Platform", isGroup = false)
+        given(repository.findById(notAGroup.id!!)).willReturn(Optional.of(notAGroup))
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.create(ProductRequest(name = "Product", description = null, productGroupId = notAGroup.id))
+        }
+
+        assertEquals(400, exception.statusCode.value())
+        verify(repository, never()).save(any())
+    }
+
+    @Test
+    fun `create rejects an unknown productGroupId`() {
+        val unknownId = UUID.randomUUID()
+        given(repository.findById(unknownId)).willReturn(Optional.empty())
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.create(ProductRequest(name = "Product", description = null, productGroupId = unknownId))
+        }
+
+        assertEquals(400, exception.statusCode.value())
+    }
+
+    @Test
+    fun `create with a valid productGroupId saves the group link`() {
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val group = persistedProduct(name = "Core Products", isGroup = true)
+        given(repository.findById(group.id!!)).willReturn(Optional.of(group))
+        val saved = persistedProduct(productGroupId = group.id)
+        given(repository.save(any())).willReturn(saved)
+
+        val result = service.create(ProductRequest(name = "Product", description = null, productGroupId = group.id))
+
+        assertEquals(group.id, result.productGroupId)
+    }
+
+    @Test
+    fun `update rejects a product being its own group`() {
+        val productId = UUID.randomUUID()
+        val product = persistedProduct(id = productId)
+        given(repository.findById(productId)).willReturn(Optional.of(product))
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.update(productId, ProductRequest(name = "Product", description = null, productGroupId = productId))
+        }
+
+        assertEquals(400, exception.statusCode.value())
+        verify(repository, never()).save(any())
+    }
+
+    @Test
+    fun `update rejects a productGroupId that would create a cycle`() {
+        val aId = UUID.randomUUID()
+        val bId = UUID.randomUUID()
+        val a = persistedProduct(id = aId, name = "A", isGroup = true)
+        val b = persistedProduct(id = bId, name = "B", isGroup = true, productGroupId = aId)
+        given(repository.findById(aId)).willReturn(Optional.of(a))
+        given(repository.findById(bId)).willReturn(Optional.of(b))
+
+        // A is currently B's parent; trying to also make B A's parent would close the loop.
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.update(aId, ProductRequest(name = "A", description = null, isGroup = true, productGroupId = bId))
+        }
+
+        assertEquals(400, exception.statusCode.value())
+        verify(repository, never()).save(any())
+    }
+
+    @Test
+    fun `update rejects demoting a group that still has member products`() {
+        val groupId = UUID.randomUUID()
+        val group = persistedProduct(id = groupId, name = "Core Products", isGroup = true)
+        given(repository.findById(groupId)).willReturn(Optional.of(group))
+        given(repository.existsByProductGroupId(groupId)).willReturn(true)
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.update(groupId, ProductRequest(name = "Core Products", description = null, isGroup = false))
+        }
+
+        assertEquals(409, exception.statusCode.value())
+        verify(repository, never()).save(any())
+    }
+
+    @Test
+    fun `update allows demoting an empty group to a regular product`() {
+        val groupId = UUID.randomUUID()
+        val group = persistedProduct(id = groupId, name = "Core Products", isGroup = true)
+        given(repository.findById(groupId)).willReturn(Optional.of(group))
+        given(repository.existsByProductGroupId(groupId)).willReturn(false)
+        given(repository.save(group)).willReturn(group)
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+
+        val result = service.update(groupId, ProductRequest(name = "Core Products", description = null, isGroup = false))
+
+        assertEquals(false, result.isGroup)
+    }
+
+    @Test
+    fun `update allows reparenting a product to a valid group`() {
+        val productId = UUID.randomUUID()
+        val product = persistedProduct(id = productId)
+        given(repository.findById(productId)).willReturn(Optional.of(product))
+        val group = persistedProduct(name = "Core Products", isGroup = true)
+        given(repository.findById(group.id!!)).willReturn(Optional.of(group))
+        given(repository.save(product)).willReturn(product)
+        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+
+        val result = service.update(productId, ProductRequest(name = "Product", description = null, productGroupId = group.id))
+
+        assertEquals(group.id, result.productGroupId)
     }
 }

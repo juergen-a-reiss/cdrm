@@ -15,6 +15,9 @@ data class ProductStageCronRequest(
 data class ProductRequest(
     val name: String,
     val description: String?,
+    val isGroup: Boolean = false,
+    @Schema(description = "Must reference an existing product whose isGroup is true. Null clears grouping.")
+    val productGroupId: UUID? = null,
     @Schema(
         description = "Deployment cron per stage — only valid for stages whose deploymentPolicy is SCHEDULED. " +
             "Omit/null to leave the existing configuration unchanged; provide the full desired list to replace " +
@@ -35,6 +38,8 @@ data class ProductResponse(
     val id: UUID,
     val name: String,
     val description: String?,
+    val isGroup: Boolean,
+    val productGroupId: UUID?,
     val stageDeploymentCrons: List<ProductStageCronInfo>,
     val createdAt: Instant,
     val modifiedAt: Instant,

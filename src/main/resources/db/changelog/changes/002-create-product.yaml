@@ -22,6 +22,18 @@ databaseChangeLog:
                   name: description
                   type: text
               - column:
+                  name: is_group
+                  type: boolean
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              # Self-reference to the parent product group. A product group is just an
+              # organizational aid for humans (see is_group) — never a deployment target —
+              # so deleting a group ungroups its members rather than cascading the delete.
+              - column:
+                  name: product_group_id
+                  type: uuid
+              - column:
                   name: created_at
                   type: timestamp with time zone
                   constraints:
@@ -41,6 +53,20 @@ databaseChangeLog:
                   type: uuid
                   constraints:
                     nullable: false
+
+        - addForeignKeyConstraint:
+            baseTableName: product
+            baseColumnNames: product_group_id
+            constraintName: fk_product_product_group
+            referencedTableName: product
+            referencedColumnNames: id
+            onDelete: SET NULL
+        - createIndex:
+            tableName: product
+            columns:
+              - column:
+                  name: product_group_id
+            indexName: idx_product_product_group_id
 
         - createTable:
             tableName: product_stage

@@ -4,7 +4,7 @@
 -->
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ApiError } from '../api/http'
 import { productsApi } from '../api/products'
 import { stagesApi } from '../api/stages'
@@ -22,11 +22,27 @@ const emit = defineEmits<{
 
 const name = ref('')
 const description = ref('')
+const isGroup = ref(false)
+const productGroupId = ref<string | null>(null)
 // stageId -> cron text as typed; '' means "not configured for this stage".
 const stageCrons = ref<Record<string, string>>({})
 const scheduledStages = ref<StageResponse[]>([])
+const allProducts = ref<ProductResponse[]>([])
 const saving = ref(false)
 const error = ref<string | null>(null)
+
+const dialogTitle = computed(() => {
+  if (props.product) return isGroup.value ? 'Edit product group' : 'Edit product'
+  return isGroup.value ? 'Add product group' : 'Add product'
+})
+
+// A group can belong to another group (nesting is allowed) but never to itself.
+const groupOptions = computed(() =>
+  allProducts.value
+    .filter((p) => p.isGroup && p.id !== props.product?.id)
+    .map((p) => ({ title: p.name, value: p.id }))
+    .sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })),
+)
 
 watch(
   () => [props.modelValue, props.product] as const,
@@ -35,9 +51,12 @@ watch(
     error.value = null
     name.value = product?.name ?? ''
     description.value = product?.description ?? ''
+    isGroup.value = product?.isGroup ?? false
+    productGroupId.value = product?.productGroupId ?? null
     try {
-      const stages = await stagesApi.list()
+      const [stages, products] = await Promise.all([stagesApi.list(), productsApi.list()])
       scheduledStages.value = stages.filter((stage) => stage.deploymentPolicy === 'SCHEDULED')
+      allProducts.value = products
       const crons: Record<string, string> = {}
       for (const entry of product?.stageDeploymentCrons ?? []) {
         crons[entry.stageId] = entry.deploymentCron
@@ -58,10 +77,18 @@ async function save() {
   saving.value = true
   error.value = null
   try {
-    const stageDeploymentCrons = scheduledStages.value
-      .map((stage) => ({ stageId: stage.id, deploymentCron: (stageCrons.value[stage.id] ?? '').trim() }))
-      .filter((entry) => entry.deploymentCron.length > 0)
-    const request = { name: name.value, description: description.value || null, stageDeploymentCrons }
+    const stageDeploymentCrons = isGroup.value
+      ? []
+      : scheduledStages.value
+          .map((stage) => ({ stageId: stage.id, deploymentCron: (stageCrons.value[stage.id] ?? '').trim() }))
+          .filter((entry) => entry.deploymentCron.length > 0)
+    const request = {
+      name: name.value,
+      description: description.value || null,
+      isGroup: isGroup.value,
+      productGroupId: productGroupId.value,
+      stageDeploymentCrons,
+    }
     if (props.product) {
       await productsApi.update(props.product.id, request)
     } else {
@@ -79,12 +106,21 @@ async function save() {
 
 <template>
   <v-dialog :model-value="modelValue" max-width="480" @update:model-value="emit('update:modelValue', $event)">
-    <v-card :title="product ? 'Edit product' : 'Add product'">
+    <v-card :title="dialogTitle">
       <v-card-text>
         <v-alert v-if="error" type="error" :text="error" class="mb-4" />
+        <v-switch v-model="isGroup" label="This is a product group" color="primary" hide-details class="mb-2" />
         <v-text-field v-model="name" label="Name" required autofocus />
         <v-textarea v-model="description" label="Description" />
-        <template v-if="scheduledStages.length > 0">
+        <v-select
+          v-model="productGroupId"
+          :items="groupOptions"
+          label="Parent group"
+          clearable
+          hide-details
+          class="mb-4"
+        />
+        <template v-if="!isGroup && scheduledStages.length > 0">
           <p class="text-subtitle-2 mb-2">Deployment times</p>
           <p class="text-caption mb-2">
             Cron expression per stage — only stages using the "At configured time" policy. Leave blank to leave

@@ -84,13 +84,20 @@ stages:
     clusters: [minikube]
 
 products:
+  # Purely organizational — groups a product listed later in this file must be listed
+  # after their group (seed_products resolves product_group by name as it goes).
+  - name: Core Products
+    description: Top-level grouping for core platform and payment services
+    is_group: true
   - name: Platform
     description: Core platform services
+    product_group: Core Products
     stage_deployment_crons:
       - stage: ffm-production
         cron: "0 0 2 * * *"
   - name: Payments
     description: Payment processing services
+    product_group: Core Products
     stage_deployment_crons:
       - stage: ffm-production
         cron: "0 0 3 * * *"
