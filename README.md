@@ -96,6 +96,12 @@ the connection to the stages can be done based on the stages pipeline name.
 
 ### Release
 
+Typically, releases will be created by the CI/CD build tool of development (for example jenkins or github actions). The
+build tool will POST a new release when a build is successful and the rules decide that a new release candidate is to be
+created. This release candidate will then be automatically be deployed to the first stage (usually something with
+development in the name). The POSTed release contains the reference to the binary artifact (for example a docker image
+in a registry) and the initial stage that should be used.
+
 Releases are managed by users with the `cdrm-productowner` role.
 
 A release keeps track of the lifecycle of an artifact: The release is created when the artifact is first deployed to the
@@ -104,9 +110,9 @@ depending on the config of the stage - result in either immediate deployment or 
 
 Any release action will be audited in the release history. The release history will be used for stats and metrics.
 
-Releases will be typically created via the build pipeline (GitHub actions, jenkins or anything else). However, the
-promotion process is typically done via UI (either the product UI or any other UI that you build that connects to the
-API).
+As said, releases will be typically created via the build pipeline (GitHub actions, jenkins or anything else). However,
+the promotion process is typically done via UI (either the product UI or any other UI that you build that connects to
+the API).
 
 #### Release Promotion
 
@@ -174,6 +180,12 @@ late, on the next tick after the app comes back up, rather than being skipped.
 
 ## Release History Dashboard
 
+The release history is what it is all about! In case you ever built a CI/CD pipeline with jenkins or github actions, you
+know how difficult it is to find out which version of the software was deployed to which stage when. Especially if there
+have been rollbacks or redeployes. cdrm stores a release history entry for everything that will change the state of any
+cluster. Even better: if you want to use your favourite reporting tool, the release history can be downloaded or
+integrated via API.
+
 ### Release History Graph
 
 The ultimate management questions will be answered here:
@@ -181,6 +193,8 @@ The ultimate management questions will be answered here:
 * How many releases/rollbacks did we do last month to production?
 * How is the releases/rollbacks per month trend?
 * How does this look like by product or by workload?
+* How does the development productivity looks like in terms of release candidates? Which product or workload has how
+  many release candidates?
 
 ### Release History Details
 
@@ -221,7 +235,9 @@ supported:
 
 If an attribute is not set, then ReBAC does not apply for this user for this attribute.
 
-## Docker
+## How to run the cdrm: Docker
+
+This section is mostly for the DevOps team:
 
 The backend and frontend ship as two separate images.
 
