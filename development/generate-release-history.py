@@ -159,7 +159,7 @@ def stages_reached(
         if random.random() >= rate:
             break
         stage_id, stage_name = stages[i]
-        if stage_name == "production" and month in exclude_months:
+        if stage_name.endswith("production") and month in exclude_months:
             break
         reached.append(stages[i])
     return reached
