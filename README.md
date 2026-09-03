@@ -23,6 +23,8 @@ In SaaS organizations, there are usually additional requirements:
 
 This tool will make your life easier by:
 
+* Separation of responsibility: Product owners are responsible for promotion and deployment, DevOps are responsible for
+  the configuration of a workload. Development will provide new release candidates.
 * Full automation of deployment and rollback.
 * Full visibility what artifact was deployed to which stage when, why and by whom.
 * Get an overview which product was deployed how often to production. Or rolled back.
@@ -69,6 +71,10 @@ In case a cluster is used by more than one stages, it would be a good practice t
 development stage could define a "dev"
 prefix to the namespace name. This will help you to get organized and keep an overview. If the prefix is configured,
 then on this stage deployment would be restricted to namespaces with this prefix.
+
+Any deploy to k8s might fail to start. For example because the namespace does not have enough resources, an environment
+variable that would have been needed was forgotten to configure for a stage or maybe because no host is available to
+start the pod. These cases are monitored after deploy and reported in the Releases View.
 
 #### Proxmox Clusters
 
