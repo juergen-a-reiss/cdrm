@@ -33,6 +33,9 @@ class Release(
     @Column(name = "current_stage_id", nullable = false)
     var currentStageId: UUID,
 
+    @Column(name = "commit_id")
+    var commitId: String?,
+
     @CreatedDate
     @Column(nullable = false, updatable = false)
     var createdAt: Instant? = null,

@@ -48,6 +48,38 @@ interface ReleaseHistoryRepository : JpaRepository<ReleaseHistory, UUID>, JpaSpe
 
     fun findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(stageId: UUID, releaseIds: Collection<UUID>): ReleaseHistory?
 
+    // The latest history row for a specific (release, stage) pair — not the same as "the
+    // release's latest row overall": redeploying to an earlier stage doesn't move the
+    // release's currentStageId, so its most recent row can belong to an earlier stage
+    // than its current one. Used to gate promotion on the current stage's own deployment
+    // having actually finished (see ReleaseService.promote()).
+    fun findFirstByReleaseIdAndStageIdOrderByCreatedAtDesc(releaseId: UUID, stageId: UUID): ReleaseHistory?
+
+    // Any other still-unresolved deployment (whether it hasn't been attempted yet or a
+    // Kubernetes rollout is still being verified) for a (workload, stage) pair, across
+    // every release of that workload. Used to stop two different releases of the same
+    // workload from racing to patch the same Kubernetes resource before the first one's
+    // fate is known (see ReleaseService.requireNoConcurrentDeployment()).
+    fun findFirstByWorkloadIdAndStageIdAndDeploymentFinishedIsNullOrderByCreatedAtDesc(workloadId: UUID, stageId: UUID): ReleaseHistory?
+
+    // Batched equivalent of the above for findAll() — release_history is the one table
+    // expected to grow large, so this avoids one query per release. DISTINCT ON is
+    // Postgres-specific (this project only targets Postgres, see CLAUDE.md).
+    @Query(
+        value = "select distinct on (rh.release_id) rh.* from release_history rh " +
+            "join release r on r.id = rh.release_id and r.current_stage_id = rh.stage_id " +
+            "where rh.release_id in (:releaseIds) " +
+            "order by rh.release_id, rh.created_at desc",
+        nativeQuery = true,
+    )
+    fun findLatestAtCurrentStageByReleaseIdIn(releaseIds: Collection<UUID>): List<ReleaseHistory>
+
+    // Locked so a second app instance (or a slow-running overlapping tick) can't verify
+    // the same row twice.
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select h from ReleaseHistory h where h.deployedAt is not null and h.deploymentFinished is null")
+    fun findAwaitingVerification(): List<ReleaseHistory>
+
     // One query for every release in the list, instead of one per release — used to
     // sort ReleaseService.findAll() by "last deployed" without an N+1.
     @Query(

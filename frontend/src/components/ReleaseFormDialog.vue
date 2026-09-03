@@ -21,6 +21,7 @@ const emit = defineEmits<{
 }>()
 
 const image = ref('')
+const commitId = ref('')
 const description = ref('')
 const workloadId = ref<string | null>(null)
 const workloads = ref<WorkloadResponse[]>([])
@@ -33,6 +34,7 @@ watch(
     if (!open) return
     error.value = null
     image.value = release?.image ?? ''
+    commitId.value = release?.commitId ?? ''
     description.value = release?.description ?? ''
     workloadId.value = release?.workloadId ?? null
     try {
@@ -56,7 +58,12 @@ async function save() {
   saving.value = true
   error.value = null
   try {
-    const request = { image: image.value, description: description.value || null, workloadId: workloadId.value }
+    const request = {
+      image: image.value,
+      commitId: commitId.value || null,
+      description: description.value || null,
+      workloadId: workloadId.value,
+    }
     if (props.release) {
       await releasesApi.update(props.release.id, request)
     } else {
@@ -83,6 +90,14 @@ async function save() {
           placeholder="my-registry.company.com/nginx:30"
           required
           autofocus
+          :disabled="!!release"
+          :hint="release ? 'Cannot be changed after creation' : undefined"
+          persistent-hint
+        />
+        <v-text-field
+          v-model="commitId"
+          label="Commit ID"
+          placeholder="git commit sha this image was built from"
           :disabled="!!release"
           :hint="release ? 'Cannot be changed after creation' : undefined"
           persistent-hint

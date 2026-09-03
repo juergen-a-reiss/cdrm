@@ -241,6 +241,12 @@ def cluster_namespaces(clusters: list[dict]) -> list[str]:
     return list(seen)
 
 
+def workload_stages(stages: list[dict], workload: dict) -> list[dict]:
+    """The stages a workload is actually linked to — every stage of its own pipeline,
+    matching WorkloadService.create()/update()'s linking rule on the backend."""
+    return [stage for stage in stages if stage["pipeline"] == workload.get("pipeline")]
+
+
 def bootstrap_kubernetes_objects(clusters: list[dict], stages: list[dict], workloads: list[dict]) -> None:
     print("Bootstrapping Kubernetes objects in minikube...")
     for namespace in cluster_namespaces(clusters):
@@ -252,7 +258,10 @@ def bootstrap_kubernetes_objects(clusters: list[dict], stages: list[dict], workl
         name = workload["name"]
         kind = workload["kubernetes_kind"]
         base_namespace = workload["kubernetes_namespace"]
-        for stage in stages:
+        # A workload is only ever linked to the stages of its own pipeline (see
+        # WorkloadService.create()/update(), which links every stage sharing the
+        # workload's `pipeline` value) — cdrm never deploys it anywhere else.
+        for stage in workload_stages(stages, workload):
             namespace = f"{stage.get('namespace_prefix') or ''}{base_namespace}"
             if kind == "DEPLOYMENT":
                 manifest = deployment_manifest(name, namespace)
@@ -289,7 +298,7 @@ def reset_kubernetes_objects(clusters: list[dict], stages: list[dict], workloads
         name = workload["name"]
         resource = kinds[workload["kubernetes_kind"]]
         base_namespace = workload["kubernetes_namespace"]
-        for stage in stages:
+        for stage in workload_stages(stages, workload):
             namespace = f"{stage.get('namespace_prefix') or ''}{base_namespace}"
             result = kubectl("delete", resource, name, "-n", namespace, "--ignore-not-found")
             if result.returncode != 0:

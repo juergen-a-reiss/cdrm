@@ -53,6 +53,9 @@ class DeploymentSchedulerJob(
             if (error == null) {
                 entry.deployedAt = now
                 entry.deployError = null
+                // Nothing to verify for a non-Kubernetes workload — DeploymentVerificationJob
+                // only ever looks at Kubernetes-backed deploys.
+                if (!workload.kubernetes) entry.deploymentFinished = now
                 releaseHistoryRepository.save(entry)
                 log.info("Deployed release {} at stage {}", entry.releaseId, entry.stageId)
             } else {

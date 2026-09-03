@@ -33,51 +33,27 @@ stages:
     kubernetes_context: minikube
     namespace_prefix: f-qa-
     clusters: [minikube]
-  - name: ffm-staging
-    pipeline: frankfurt
-    description: Pre-production environment
-    order: 3
-    deployment_policy: IMMEDIATE
-    kubernetes_context: minikube
-    namespace_prefix: f-staging-
-    clusters: [minikube]
   - name: ffm-production
     pipeline: frankfurt
     description: Production environment
-    order: 4
+    order: 3
     deployment_policy: SCHEDULED
     kubernetes_context: minikube
     namespace_prefix: f-prod-
     clusters: [minikube]
 
-  - name: paris-dev
-    pipeline: paris
-    description: Development environment
-    order: 1
-    deployment_policy: IMMEDIATE
-    kubernetes_context: minikube
-    namespace_prefix: p-dev-
-    clusters: [minikube]
   - name: paris-qa
     pipeline: paris
     description: Quality assurance environment
-    order: 2
+    order: 1
     deployment_policy: IMMEDIATE
     kubernetes_context: minikube
     namespace_prefix: p-qa-
     clusters: [minikube]
-  - name: paris-staging
-    pipeline: paris
-    description: Pre-production environment
-    order: 3
-    deployment_policy: IMMEDIATE
-    kubernetes_context: minikube
-    namespace_prefix: p-staging-
-    clusters: [minikube]
   - name: paris-production
     pipeline: paris
     description: Production environment
-    order: 4
+    order: 2
     deployment_policy: SCHEDULED
     kubernetes_context: minikube
     namespace_prefix: p-prod-
@@ -152,10 +128,7 @@ releases:
     description: Initial release
   - workload: platform-interface-emea
     image: nginx:1.30-alpine
-    description: Initial release
-  - workload: platform-api
-    image: nginx:1.31-alpine
-    description: Adds pagination support
+    description: Initial release 
   - workload: platform-worker
     image: nginx:1.30-alpine
     description: Initial release

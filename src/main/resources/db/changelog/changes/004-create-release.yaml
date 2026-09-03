@@ -33,6 +33,9 @@ databaseChangeLog:
                   constraints:
                     nullable: false
               - column:
+                  name: commit_id
+                  type: varchar(64)
+              - column:
                   name: created_at
                   type: timestamp with time zone
                   constraints:
@@ -103,6 +106,22 @@ databaseChangeLog:
               - column:
                   name: deploy_error
                   type: text
+              # When the async rollout-verification check concluded, success or failure.
+              # Set immediately (= deployed_at) for non-Kubernetes workloads, since there's
+              # nothing to verify; left null for a Kubernetes workload until the check
+              # either confirms the rollout or the 5-minute grace period elapses.
+              - column:
+                  name: deployment_finished
+                  type: timestamp with time zone
+              # True once verification concludes the rollout did not succeed within the
+              # grace period. A release can't be promoted while its current stage's latest
+              # deployment is unfinished or failed — it can still be redeployed there.
+              - column:
+                  name: deployment_failed
+                  type: boolean
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
               # No FK to workload.id/product.id on purpose: denormalized so by-workload/
               # by-product statistics keep working once a workload's releases (and then the
               # workload itself, and then its product) are deleted.

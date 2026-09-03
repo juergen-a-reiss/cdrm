@@ -10,6 +10,7 @@ data class ReleaseRequest(
     val image: String,
     val description: String?,
     val workloadId: UUID,
+    val commitId: String?,
 )
 
 data class RedeployRequest(
@@ -22,6 +23,7 @@ data class ReleaseResponse(
     val description: String?,
     val workloadId: UUID,
     val currentStage: ReleaseStageInfo,
+    val commitId: String?,
     val canPromote: Boolean,
     val canRollback: Boolean,
     val canEdit: Boolean,
@@ -36,6 +38,16 @@ data class ReleaseResponse(
     // null on a plain findAll()/findById() read, and null when the deploy succeeded or
     // the stage is SCHEDULED-policy (nothing attempted synchronously).
     val deployError: String?,
+    // Of the latest deployment to this release's current stage (regardless of which
+    // action produced this response, unlike deployError above — a live/persisted value,
+    // not scoped to the request that produced this response). Null while the deploy
+    // hasn't succeeded yet, or a Kubernetes rollout is still within its verification
+    // window; canPromote is false whenever this is null or deploymentFailed is true.
+    val deploymentFinished: Instant?,
+    val deploymentFailed: Boolean,
+    // Reason deploymentFailed is true (e.g. "1 pod(s) restarting (restart count > 0)"),
+    // so the frontend can show why without a separate history fetch. Null otherwise.
+    val deploymentError: String?,
     val createdAt: Instant,
     val modifiedAt: Instant,
     val createdBy: UUID,
@@ -64,6 +76,11 @@ data class ReleaseHistoryEntry(
     // reachable"), so the UI can render "Pending (<reason>)". Null once deployed, or
     // while still unattempted.
     val deployError: String?,
+    // When the async rollout-verification check concluded, success or failure — set
+    // eagerly (= deployedAt) for a non-Kubernetes workload. Null while deployedAt itself
+    // is null, or while a Kubernetes rollout is still within its verification window.
+    val deploymentFinished: Instant?,
+    val deploymentFailed: Boolean,
     val createdBy: UUID,
 )
 
@@ -85,6 +102,8 @@ data class ReleaseHistoryOverviewEntry(
     val deployedAt: Instant?,
     val scheduledAt: Instant?,
     val deployError: String?,
+    val deploymentFinished: Instant?,
+    val deploymentFailed: Boolean,
     val createdBy: UUID,
 )
 

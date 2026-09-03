@@ -13,7 +13,9 @@ import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
 import com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo
 import dev.juergenreiss.cdrm.workload.KubernetesKind
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.BDDMockito.given
@@ -114,5 +116,83 @@ class KubernetesDeploymentClientTest {
         assertThrows(KubernetesDeploymentException::class.java) {
             client.patchImage("my-context", "platform", KubernetesKind.DEPLOYMENT, "platform-api", "new:2.0")
         }
+    }
+
+    private fun stubDeployment(replicas: Int = 2) {
+        server.stubFor(
+            get(urlPathEqualTo("/apis/apps/v1/namespaces/platform/deployments/platform-api"))
+                .willReturn(
+                    okJson(
+                        """{"spec":{"replicas":$replicas,"selector":{"matchLabels":{"app":"platform-api"}},
+                            |"template":{"spec":{"containers":[{"name":"app","image":"old:1.0"}]}}}}""".trimMargin()
+                    )
+                )
+        )
+    }
+
+    private fun stubPods(vararg pods: String) {
+        server.stubFor(
+            get(urlPathEqualTo("/api/v1/namespaces/platform/pods"))
+                .withQueryParam("labelSelector", equalTo("app=platform-api"))
+                .willReturn(okJson("""{"items":[${pods.joinToString(",")}]}"""))
+        )
+    }
+
+    private fun pod(image: String, ready: Boolean = true, restartCount: Int = 0) =
+        """{"spec":{"containers":[{"name":"app","image":"$image"}]},
+            |"status":{"containerStatuses":[{"name":"app","ready":$ready,"restartCount":$restartCount}]}}""".trimMargin()
+
+    @Test
+    fun `checkRollout reports ready once every pod matches replicas, image, readiness and no restarts`() {
+        stubDeployment(replicas = 2)
+        stubPods(pod("new:2.0"), pod("new:2.0"))
+
+        val result = client.checkRollout("my-context", "platform", KubernetesKind.DEPLOYMENT, "platform-api", "new:2.0")
+
+        assertTrue(result.ready)
+    }
+
+    @Test
+    fun `checkRollout reports not ready when fewer pods than replicas exist`() {
+        stubDeployment(replicas = 2)
+        stubPods(pod("new:2.0"))
+
+        val result = client.checkRollout("my-context", "platform", KubernetesKind.DEPLOYMENT, "platform-api", "new:2.0")
+
+        assertFalse(result.ready)
+        assertTrue(result.detail.contains("1/2 pods present"))
+    }
+
+    @Test
+    fun `checkRollout reports not ready when a pod still runs the previous image`() {
+        stubDeployment(replicas = 2)
+        stubPods(pod("new:2.0"), pod("old:1.0"))
+
+        val result = client.checkRollout("my-context", "platform", KubernetesKind.DEPLOYMENT, "platform-api", "new:2.0")
+
+        assertFalse(result.ready)
+        assertTrue(result.detail.contains("1 pod(s) still running the previous image"))
+    }
+
+    @Test
+    fun `checkRollout reports not ready when a pod is not ready`() {
+        stubDeployment(replicas = 1)
+        stubPods(pod("new:2.0", ready = false))
+
+        val result = client.checkRollout("my-context", "platform", KubernetesKind.DEPLOYMENT, "platform-api", "new:2.0")
+
+        assertFalse(result.ready)
+        assertTrue(result.detail.contains("1 pod(s) not ready"))
+    }
+
+    @Test
+    fun `checkRollout reports not ready when a pod has restarted`() {
+        stubDeployment(replicas = 1)
+        stubPods(pod("new:2.0", restartCount = 3))
+
+        val result = client.checkRollout("my-context", "platform", KubernetesKind.DEPLOYMENT, "platform-api", "new:2.0")
+
+        assertFalse(result.ready)
+        assertTrue(result.detail.contains("1 pod(s) restarting (restart count > 0)"))
     }
 }

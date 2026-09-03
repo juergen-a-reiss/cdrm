@@ -209,6 +209,13 @@ async function rollbackRelease(release: ReleaseResponse) {
   }
 }
 
+function promoteTitle(row: ReleaseRow): string {
+  if (row.canPromote) return 'Promote to next stage'
+  if (row.raw.deploymentFailed) return `Deployment to this stage failed${row.raw.deploymentError ? ` (${row.raw.deploymentError})` : ''}`
+  if (!row.raw.deploymentFinished) return "Deployment to this stage hasn't finished yet"
+  return 'Not allowed, or already at the final stage'
+}
+
 function redeployTitle(row: ReleaseRow): string {
   if (!row.canRedeploy) return 'No eligible target stage'
   return row.isHead ? 'Redeploy to the current or an earlier stage' : 'Redeploy to an earlier stage'
@@ -253,6 +260,9 @@ async function onRedeployed() {
     v-model:expanded="expanded"
     v-model:sort-by="sortBy"
   >
+    <template #item.image="{ item }">
+      <span :title="item.raw.commitId ? `Commit: ${item.raw.commitId}` : undefined">{{ item.image }}</span>
+    </template>
     <template #item.currentStageName="{ item }">
       <span class="d-flex align-center ga-1">
         {{ item.currentStageName }}
@@ -262,6 +272,13 @@ async function onRedeployed() {
           size="small"
           color="amber-darken-2"
           title="Head release for this stage"
+        />
+        <v-icon
+          v-if="item.raw.deploymentFailed"
+          icon="mdi-alert-circle"
+          size="small"
+          color="error"
+          :title="`Deployment to this stage failed${item.raw.deploymentError ? `: ${item.raw.deploymentError}` : ''}`"
         />
       </span>
     </template>
@@ -280,7 +297,7 @@ async function onRedeployed() {
         variant="text"
         class="mr-2"
         :disabled="!item.canPromote"
-        :title="item.canPromote ? 'Promote to next stage' : 'Not allowed, or already at the final stage'"
+        :title="promoteTitle(item)"
         @click.stop="promoteRelease(item.raw)"
       />
       <v-btn

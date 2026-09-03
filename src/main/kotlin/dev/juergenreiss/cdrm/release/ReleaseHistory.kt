@@ -74,6 +74,20 @@ class ReleaseHistory(
     @Column(name = "deploy_error")
     var deployError: String? = null,
 
+    // When the async rollout-verification check (DeploymentVerificationJob) concluded,
+    // success or failure. Set immediately (= deployedAt) for non-Kubernetes workloads,
+    // since there's nothing to verify. Null while the deploy itself hasn't succeeded yet,
+    // or while a Kubernetes rollout is still within its 5-minute verification window.
+    @Column(name = "deployment_finished")
+    var deploymentFinished: Instant? = null,
+
+    // True once verification concludes the rollout did not succeed within the grace
+    // period (see deployError for why). A release can't be promoted while its current
+    // stage's latest deployment is unfinished or failed — it can still be redeployed
+    // there.
+    @Column(name = "deployment_failed", nullable = false)
+    var deploymentFailed: Boolean = false,
+
     @CreatedDate
     @Column(nullable = false, updatable = false)
     var createdAt: Instant? = null,

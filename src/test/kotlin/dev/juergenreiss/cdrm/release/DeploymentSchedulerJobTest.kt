@@ -72,6 +72,7 @@ class DeploymentSchedulerJobTest {
         description = null,
         workloadId = workloadId,
         currentStageId = UUID.randomUUID(),
+        commitId = "no-id",
         createdAt = Instant.now(),
         modifiedAt = Instant.now(),
         createdBy = UUID.randomUUID(),

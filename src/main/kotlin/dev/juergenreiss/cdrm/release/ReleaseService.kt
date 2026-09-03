@@ -80,12 +80,19 @@ class ReleaseService(
             .associate { it.id to it.name }
         val lastDeployedAtByReleaseId = releaseHistoryRepository.findLastDeployedAtByReleaseIdIn(releases.mapNotNull { it.id })
             .associate { it.releaseId to it.lastDeployedAt }
+        val currentStageLatestEntryByReleaseId = releaseHistoryRepository.findLatestAtCurrentStageByReleaseIdIn(releases.mapNotNull { it.id })
+            .associateBy { it.releaseId }
         val responses = releases
             .filter { release ->
                 val workload = workloadsById[release.workloadId] ?: return@filter false
                 rebac.canSeeWorkload(productNameById[workload.productId] ?: "", workload.name)
             }
-            .map { it.toResponse(lastDeployedAt = lastDeployedAtByReleaseId[it.id]) }
+            .map {
+                it.toResponse(
+                    lastDeployedAt = lastDeployedAtByReleaseId[it.id],
+                    currentStageLatestEntry = currentStageLatestEntryByReleaseId[it.id],
+                )
+            }
         val comparators = sortComparators + mapOf(
             "workloadName" to compareBy<ReleaseResponse> { workloadsById[it.workloadId]?.name ?: "" },
         )
@@ -117,6 +124,8 @@ class ReleaseService(
                 deployedAt = entry.deployedAt,
                 scheduledAt = scheduledDeploymentFor(entry, stage, cronByProductAndStage[entry.productId to entry.stageId]),
                 deployError = entry.deployError,
+                deploymentFinished = entry.deploymentFinished,
+                deploymentFailed = entry.deploymentFailed,
                 createdBy = entry.createdBy,
             )
         }
@@ -213,6 +222,8 @@ class ReleaseService(
                 deployedAt = entry.deployedAt,
                 scheduledAt = scheduledDeploymentFor(entry, stage, cronByProductAndStage[entry.productId to entry.stageId]),
                 deployError = entry.deployError,
+                deploymentFinished = entry.deploymentFinished,
+                deploymentFailed = entry.deploymentFailed,
                 createdBy = entry.createdBy,
             )
         }
@@ -252,12 +263,14 @@ class ReleaseService(
         val initialStage = firstStageFor(request.workloadId)
         requireReleaseAction(ReleaseActionClaim.PROMOTE, initialStage.name, "cdrm-devops", "cdrm-productowner", "cdrm-developer")
         requireDeployable(workload, initialStage)
+        requireNoConcurrentDeployment(request.workloadId, initialStage)
         val saved = repository.save(
             Release(
                 image = request.image,
                 description = request.description,
                 workloadId = request.workloadId,
                 currentStageId = initialStage.id!!,
+                commitId = request.commitId,
                 createdBy = userId,
                 modifiedBy = userId,
             )
@@ -265,7 +278,7 @@ class ReleaseService(
         val entry = recordHistory(saved, initialStage, workload, product, userId, ReleaseHistoryAction.CREATED)
         incrementReleaseMetric("cdrm.releases.promoted", workload, product, initialStage)
         log.info("Created release {} ('{}') by user {}, starting at stage {}", saved.id, saved.image, userId, initialStage.name)
-        return saved.toResponse(entry.deployError)
+        return saved.toResponse(deployError = entry.deployError, currentStageLatestEntry = entry)
     }
 
     @Transactional
@@ -274,6 +287,9 @@ class ReleaseService(
         requireVisible(release)
         if (request.image != release.image) {
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "image cannot be changed after creation")
+        }
+        if (request.commitId != release.commitId) {
+            throw ResponseStatusException(HttpStatus.BAD_REQUEST, "commitId cannot be changed after creation")
         }
         val currentStage = stageRepository.findById(release.currentStageId)
             .orElseThrow { IllegalStateException("Stage ${release.currentStageId} not found") }
@@ -301,7 +317,13 @@ class ReleaseService(
             null
         }
         log.info("Updated release {} ('{}') by user {}", saved.id, saved.image, saved.modifiedBy)
-        return saved.toResponse(entry?.deployError)
+        // entry is only set (and only then matches saved.currentStageId) when the
+        // workload changed; otherwise fall back to a live lookup for the unchanged stage.
+        return if (entry != null) {
+            saved.toResponse(deployError = entry.deployError, currentStageLatestEntry = entry)
+        } else {
+            saved.toResponse()
+        }
     }
 
     @Transactional
@@ -319,9 +341,11 @@ class ReleaseService(
         if (currentIndex == orderedStages.lastIndex) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "Release is already at the final stage")
         }
+        requireStageDeploymentComplete(release, orderedStages[currentIndex])
         val nextStage = orderedStages[currentIndex + 1]
         requireReleaseAction(ReleaseActionClaim.PROMOTE, nextStage.name, "cdrm-productowner")
         requireDeployable(workload, nextStage)
+        requireNoConcurrentDeployment(release.workloadId, nextStage)
         val product = productFor(workload)
         val userId = currentUserId()
         release.currentStageId = nextStage.id!!
@@ -330,7 +354,41 @@ class ReleaseService(
         val entry = recordHistory(saved, nextStage, workload, product, userId, ReleaseHistoryAction.PROMOTED)
         incrementReleaseMetric("cdrm.releases.promoted", workload, product, nextStage)
         log.info("Promoted release {} ('{}') to stage {} by user {}", saved.id, saved.image, nextStage.name, saved.modifiedBy)
-        return saved.toResponse(entry.deployError)
+        return saved.toResponse(deployError = entry.deployError, currentStageLatestEntry = entry)
+    }
+
+    // A release can't be promoted onward while its current stage's own latest deployment
+    // is still unfinished (patch not yet accepted, or a Kubernetes rollout still within
+    // its verification window) or has failed verification — redeploying to that same
+    // stage (the recovery path) is unaffected, see redeploy().
+    private fun requireStageDeploymentComplete(release: Release, stage: Stage) {
+        val latest = releaseHistoryRepository.findFirstByReleaseIdAndStageIdOrderByCreatedAtDesc(release.id!!, stage.id!!) ?: return
+        if (latest.deploymentFailed) {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Cannot promote: the deployment to stage '${stage.name}' failed (${latest.deployError ?: "unknown reason"})",
+            )
+        }
+        if (latest.deploymentFinished == null) {
+            throw ResponseStatusException(HttpStatus.CONFLICT, "Cannot promote: the deployment to stage '${stage.name}' has not finished yet")
+        }
+    }
+
+    // Two different releases of the same workload landing on the same stage before the
+    // first one's deployment is confirmed (or failed) would race to patch the same
+    // Kubernetes resource — whichever patch lands last wins, and the other's
+    // verification can never see its own image and eventually times out and fails.
+    // Blocks a new deploy (create()'s initial stage, promote()'s next stage) to a
+    // (workload, stage) pair that already has one in flight; redeploy()/rollback() are
+    // intentionally exempt since they target the acting release's own current stage.
+    private fun requireNoConcurrentDeployment(workloadId: UUID, stage: Stage) {
+        val inFlight = releaseHistoryRepository
+            .findFirstByWorkloadIdAndStageIdAndDeploymentFinishedIsNullOrderByCreatedAtDesc(workloadId, stage.id!!)
+            ?: return
+        throw ResponseStatusException(
+            HttpStatus.CONFLICT,
+            "Cannot deploy: another deployment ('${inFlight.image}') to stage '${stage.name}' is still in progress",
+        )
     }
 
     // Restores a release that was superseded as head (by a newer release deployed to the
@@ -358,7 +416,7 @@ class ReleaseService(
         val entry = recordHistory(saved, stage, workload, product, userId, ReleaseHistoryAction.ROLLED_BACK)
         incrementReleaseMetric("cdrm.releases.rollback", workload, product, stage)
         log.info("Rolled back release {} ('{}') to head at stage {} by user {}", saved.id, saved.image, stage.name, saved.modifiedBy)
-        return saved.toResponse(entry.deployError)
+        return saved.toResponse(deployError = entry.deployError, currentStageLatestEntry = entry)
     }
 
     // Re-deploys the release's already-recorded binary to its own current stage (only if
@@ -400,7 +458,14 @@ class ReleaseService(
         val entry = recordHistory(release, targetStage, workload, product, userId, ReleaseHistoryAction.REDEPLOYED)
         incrementReleaseMetric("cdrm.releases.redeploy", workload, product, targetStage)
         log.info("Redeployed release {} ('{}') to stage {} by user {}", release.id, release.image, targetStage.name, userId)
-        return release.toResponse(entry.deployError)
+        // entry only reflects the release's own currentStageId when redeploying there —
+        // a redeploy to an earlier stage doesn't move currentStageId, so that stage's
+        // status isn't what canPromote et al. should reflect; fall back to a live lookup.
+        return if (targetStage.id == release.currentStageId) {
+            release.toResponse(deployError = entry.deployError, currentStageLatestEntry = entry)
+        } else {
+            release.toResponse(deployError = entry.deployError)
+        }
     }
 
     @Transactional
@@ -461,6 +526,9 @@ class ReleaseService(
             val error = deploymentExecutor.attemptDeploy(workload, stage, release.image)
             if (error == null) {
                 entry.deployedAt = Instant.now()
+                // Nothing to verify for a non-Kubernetes workload — DeploymentVerificationJob
+                // only ever looks at Kubernetes-backed deploys.
+                if (!workload.kubernetes) entry.deploymentFinished = entry.deployedAt
             } else {
                 entry.deployError = error
             }
@@ -593,15 +661,22 @@ class ReleaseService(
     // create) — not a live lookup — so a caller like findAll()/findById() that isn't
     // reporting on a just-performed action leaves it null rather than resurfacing some
     // unrelated older failure.
+    // currentStageLatestEntry: the latest history row for (this release, its current
+    // stage) — not the release's latest row overall, see findFirstByReleaseIdAndStageId
+    // OrderByCreatedAtDesc. Drives canPromote (see requireStageDeploymentComplete) and the
+    // deploymentFinished/deploymentFailed fields below, so the frontend can explain why
+    // promote is disabled.
     private fun Release.toResponse(
         deployError: String? = null,
         lastDeployedAt: Instant? = releaseHistoryRepository.findTopByReleaseIdAndDeployedAtIsNotNullOrderByDeployedAtDesc(id!!)?.deployedAt,
+        currentStageLatestEntry: ReleaseHistory? = releaseHistoryRepository.findFirstByReleaseIdAndStageIdOrderByCreatedAtDesc(id!!, currentStageId),
     ): ReleaseResponse {
         val currentStage = stageRepository.findById(currentStageId).orElseThrow()
         val orderedStages = orderedStagesFor(workloadId)
         val currentIndex = orderedStages.indexOfFirst { it.id == currentStageId }
         val hasNextStage = currentIndex != -1 && currentIndex != orderedStages.lastIndex
-        val canPromote = hasNextStage &&
+        val deploymentComplete = currentStageLatestEntry?.deploymentFinished != null && currentStageLatestEntry.deploymentFailed != true
+        val canPromote = hasNextStage && deploymentComplete &&
             allowsReleaseAction(ReleaseActionClaim.PROMOTE, orderedStages[currentIndex + 1].name, "cdrm-productowner")
         val head = isHead(this)
         val canRollback = !head && allowsReleaseAction(ReleaseActionClaim.ROLLBACK, currentStage.name, "cdrm-productowner")
@@ -616,6 +691,7 @@ class ReleaseService(
             description = description,
             workloadId = workloadId,
             currentStage = ReleaseStageInfo(id = currentStage.id!!, name = currentStage.name, order = currentStage.order),
+            commitId = commitId,
             canPromote = canPromote,
             canRollback = canRollback,
             canEdit = canEdit,
@@ -623,6 +699,9 @@ class ReleaseService(
             redeployableStages = redeployableStages,
             lastDeployedAt = lastDeployedAt,
             deployError = deployError,
+            deploymentFinished = currentStageLatestEntry?.deploymentFinished,
+            deploymentFailed = currentStageLatestEntry?.deploymentFailed ?: false,
+            deploymentError = currentStageLatestEntry?.deployError,
             createdAt = createdAt!!,
             modifiedAt = modifiedAt!!,
             createdBy = createdBy,

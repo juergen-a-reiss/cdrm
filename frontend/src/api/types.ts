@@ -147,6 +147,9 @@ export interface ReleaseRequest {
   image: string
   description: string | null
   workloadId: string
+  // The git commit (or other VCS revision) this image was built from. Also immutable
+  // once created, same as image.
+  commitId: string | null
 }
 
 export interface RedeployRequest {
@@ -165,6 +168,7 @@ export interface ReleaseResponse {
   description: string | null
   workloadId: string
   currentStage: ReleaseStageInfo
+  commitId: string | null
   canPromote: boolean
   canRollback: boolean
   canEdit: boolean
@@ -178,6 +182,14 @@ export interface ReleaseResponse {
   // a plain list/get read, and null when the deploy succeeded or the stage is
   // SCHEDULED-policy (nothing attempted synchronously).
   deployError: string | null
+  // Of the latest deployment to this release's current stage — a live/persisted value,
+  // not scoped to this request (unlike deployError above). Null while the deploy hasn't
+  // succeeded yet, or a Kubernetes rollout is still within its verification window;
+  // canPromote is false whenever this is null or deploymentFailed is true.
+  deploymentFinished: string | null
+  deploymentFailed: boolean
+  // Reason deploymentFailed is true. Null otherwise.
+  deploymentError: string | null
   createdAt: string
   modifiedAt: string
   createdBy: string
@@ -199,6 +211,11 @@ export interface ReleaseHistoryEntry {
   // Reason the most recent deploy attempt for this entry failed (e.g. "cluster not
   // reachable"). Null once deployed, or while still unattempted.
   deployError: string | null
+  // When the async rollout-verification check concluded, success or failure — set
+  // eagerly (= deployedAt) for a non-Kubernetes workload. Null while deployedAt itself
+  // is null, or while a Kubernetes rollout is still within its verification window.
+  deploymentFinished: string | null
+  deploymentFailed: boolean
   createdBy: string
 }
 
@@ -220,6 +237,8 @@ export interface ReleaseHistoryOverviewEntry {
   deployedAt: string | null
   scheduledAt: string | null
   deployError: string | null
+  deploymentFinished: string | null
+  deploymentFailed: boolean
   createdBy: string
 }
 
