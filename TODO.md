@@ -8,3 +8,4 @@
 8. white label: customization to corporate design
 9. mobile view
 10. notifications
+11. Instead of k8s deploy, deploy to a gitops repo. Support for argocd

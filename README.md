@@ -98,7 +98,7 @@ the connection to the stages can be done based on the stages pipeline name.
 
 Typically, releases will be created by the CI/CD build tool of development (for example jenkins or github actions). The
 build tool will POST a new release when a build is successful and the rules decide that a new release candidate is to be
-created. This release candidate will then be automatically be deployed to the first stage (usually something with
+created. This release candidate will then automatically be deployed to the first stage (usually something with
 development in the name). The POSTed release contains the reference to the binary artifact (for example a docker image
 in a registry) and the initial stage that should be used.
 
