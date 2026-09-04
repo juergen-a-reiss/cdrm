@@ -47,6 +47,7 @@ class ClusterService(
                 clusterType = request.clusterType,
                 url = request.url,
                 k8sNamespaces = request.k8sNamespaces,
+                k8sGitOpsConfig = request.k8sGitOpsConfig,
                 createdBy = userId,
                 modifiedBy = userId,
             )
@@ -63,6 +64,7 @@ class ClusterService(
         cluster.clusterType = request.clusterType
         cluster.url = request.url
         cluster.k8sNamespaces = request.k8sNamespaces
+        cluster.k8sGitOpsConfig = request.k8sGitOpsConfig
         cluster.modifiedBy = currentUserId()
         val saved = repository.save(cluster)
         log.info("Updated cluster {} ('{}') by user {}", saved.id, saved.name, saved.modifiedBy)
@@ -92,6 +94,7 @@ class ClusterService(
         clusterType = clusterType,
         url = url,
         k8sNamespaces = k8sNamespaces,
+        k8sGitOpsConfig = k8sGitOpsConfig,
         createdAt = createdAt!!,
         modifiedAt = modifiedAt!!,
         createdBy = createdBy,

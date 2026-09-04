@@ -4,17 +4,77 @@
 #
 # All four stages share that single minikube cluster, so namespace_prefix keeps them
 # from colliding: a workload with kubernetesNameSpace "platform" ends up as
-# "dev-platform" in the development stage, "qa-platform" in qa, etc. The cluster's
-# k8s_namespaces below lists every resulting stage-prefixed namespace — seed.py
-# creates them from this list (and deletes them on --reset), so it must stay in sync
-# with the stages' namespace_prefix values and workloads' kubernetes_namespace values.
+# "dev-platform" in the development stage, "qa-platform" in qa, etc. Each cluster's
+# k8s_namespaces below lists every resulting stage-prefixed namespace, one entry per
+# namespace — seed.py creates them from this list (and deletes them on --reset), so it
+# must stay in sync with the stages' namespace_prefix values and workloads'
+# kubernetes_namespace values.
+#
+# Each k8s_namespaces entry controls its own GitOps management: use_git_ops: true (plus
+# its own file_expression/yaml_expression — see the README's GitOps section for the
+# placeholder/YAML-key-path grammar) makes seed.py add that namespace to the cluster's
+# k8sGitOpsConfig.namespaces map (see seed.py's build_gitops_config()); an entry with no
+# use_git_ops (or false) is left out of that map, so it keeps deploying via cdrm's direct
+# Kubernetes patch instead of a git commit. gitops.use_git_ops/git_repo/git_branch below
+# are the cluster-wide GitOps settings — git_branch is the default branch commits go to;
+# an entry's own git_branch (see p-prod-platform/p-prod-website below) overrides it for
+# just that namespace.
 
 clusters:
+  # Only the paris pipeline's namespaces (the "p-" prefixed ones) are GitOps-managed;
+  # frankfurt's "f-" namespaces are not. Production commits to its own "release" branch;
+  # every other paris namespace uses the cluster-wide "main".
   - name: minikube
     description: "Local Minicube"
     cluster_type: "K8S"
     url: "http://127.0.0.1:1964/api/v1"
-    k8s_namespaces: f-dev-platform,f-qa-platform,f-staging-platform,f-prod-platform,f-dev-website,f-qa-website,f-staging-website,f-prod-website,p-dev-platform,p-qa-platform,p-staging-platform,p-prod-platform,p-dev-website,p-qa-website,p-staging-website,p-prod-website
+    gitops:
+      use_git_ops: true
+      git_repo: "git@github.com:example/cdrm-gitops-demo.git"
+      git_branch: "main"
+    k8s_namespaces:
+      - namespace: f-dev-platform
+      - namespace: f-qa-platform
+      - namespace: f-staging-platform
+      - namespace: f-prod-platform
+      - namespace: f-dev-website
+      - namespace: f-qa-website
+      - namespace: f-staging-website
+      - namespace: f-prod-website
+      - namespace: p-dev-platform
+        use_git_ops: true
+        file_expression: "environments/{namespace}/{workload}.yaml"
+        yaml_expression: "spec.template.spec.containers[0].image"
+      - namespace: p-qa-platform
+        use_git_ops: true
+        file_expression: "environments/{namespace}/{workload}.yaml"
+        yaml_expression: "spec.template.spec.containers[0].image"
+      - namespace: p-staging-platform
+        use_git_ops: true
+        file_expression: "environments/{namespace}/{workload}.yaml"
+        yaml_expression: "spec.template.spec.containers[0].image"
+      - namespace: p-prod-platform
+        use_git_ops: true
+        file_expression: "environments/{namespace}/{workload}.yaml"
+        yaml_expression: "spec.template.spec.containers[0].image"
+        git_branch: "release"
+      - namespace: p-dev-website
+        use_git_ops: true
+        file_expression: "environments/{namespace}/{workload}.yaml"
+        yaml_expression: "spec.template.spec.containers[0].image"
+      - namespace: p-qa-website
+        use_git_ops: true
+        file_expression: "environments/{namespace}/{workload}.yaml"
+        yaml_expression: "spec.template.spec.containers[0].image"
+      - namespace: p-staging-website
+        use_git_ops: true
+        file_expression: "environments/{namespace}/{workload}.yaml"
+        yaml_expression: "spec.template.spec.containers[0].image"
+      - namespace: p-prod-website
+        use_git_ops: true
+        file_expression: "environments/{namespace}/{workload}.yaml"
+        yaml_expression: "spec.template.spec.containers[0].image"
+        git_branch: "release"
 
 stages:
   - name: ffm-development

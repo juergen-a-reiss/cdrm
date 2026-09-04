@@ -13,6 +13,7 @@ data class ClusterRequests(
     val clusterType: ClusterType,
     val url: URL,
     val k8sNamespaces: String? = null,
+    val k8sGitOpsConfig: K8sGitopsConfig? = null,
 )
 
 data class ClusterResponse (
@@ -22,6 +23,7 @@ data class ClusterResponse (
     val clusterType: ClusterType,
     val url: URL,
     val k8sNamespaces: String? = null,
+    val k8sGitOpsConfig: K8sGitopsConfig? = null,
     val createdAt: Instant,
     val modifiedAt: Instant,
     val createdBy: UUID,

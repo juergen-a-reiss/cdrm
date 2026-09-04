@@ -67,17 +67,54 @@ def post(api_url: str, token: str, path: str, body: dict) -> dict:
         print(f"Failed POST {path} (HTTP {e.code}): {e.read().decode()}", file=sys.stderr)
         sys.exit(1)
 
+def cluster_namespace_names(cluster: dict) -> list[str]:
+    """Every namespace name configured for one cluster's k8s_namespaces, in file order."""
+    return [entry["namespace"] for entry in (cluster.get("k8s_namespaces") or [])]
+
+
+def build_gitops_config(cluster: dict) -> dict | None:
+    """cdrm's K8sGitopsConfig for a cluster — one K8sNamespaceGitopsConfig entry per
+    k8s_namespaces entry with use_git_ops: true, carrying that namespace's own
+    file_expression/yaml_expression and (optionally) its own git_branch override. A
+    namespace without use_git_ops (or with it false) is left out of the map entirely, so
+    it keeps deploying via cdrm's direct Kubernetes patch instead of a git commit.
+    gitops.git_branch is the cluster-wide default branch; an entry's own git_branch
+    overrides it for just that namespace (left null here otherwise)."""
+    gitops = cluster.get("gitops")
+    if not gitops:
+        return None
+    namespaces = {
+        entry["namespace"]: {
+            "namespace": entry["namespace"],
+            "useGitOps": True,
+            "fileExpression": entry.get("file_expression"),
+            "yamlExpression": entry.get("yaml_expression"),
+            "gitBranch": entry.get("git_branch"),
+        }
+        for entry in (cluster.get("k8s_namespaces") or [])
+        if entry.get("use_git_ops")
+    }
+    return {
+        "useGitOps": gitops.get("use_git_ops", True),
+        "gitRepo": gitops.get("git_repo"),
+        "gitBranch": gitops.get("git_branch", "main"),
+        "namespaces": namespaces,
+    }
+
+
 def seed_clusters(api_url: str, token: str, clusters: list[dict]) -> dict[str, str]:
     print("Seeding clusters...")
     print(clusters)
     ids = {}
     for cluster in clusters:
+        namespace_names = cluster_namespace_names(cluster)
         body = {
             "name": cluster["name"],
             "description": cluster.get("description"),
             "clusterType": cluster.get("cluster_type"),
             "url": cluster.get("url"),
-            "k8sNamespaces": cluster.get("k8s_namespaces"),
+            "k8sNamespaces": ",".join(namespace_names) if namespace_names else None,
+            "k8sGitOpsConfig": build_gitops_config(cluster),
         }
         result = post(api_url, token, "/clusters", body)
         ids[cluster["name"]] = result["id"]
@@ -234,10 +271,8 @@ def cluster_namespaces(clusters: list[dict]) -> list[str]:
     """Every distinct namespace configured across all clusters' k8s_namespaces."""
     seen: dict[str, None] = {}
     for cluster in clusters:
-        for namespace in (cluster.get("k8s_namespaces") or "").split(","):
-            namespace = namespace.strip()
-            if namespace:
-                seen.setdefault(namespace)
+        for namespace in cluster_namespace_names(cluster):
+            seen.setdefault(namespace)
     return list(seen)
 
 

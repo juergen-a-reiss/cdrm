@@ -76,6 +76,17 @@ Any deploy to k8s might fail to start. For example because the namespace does no
 variable that would have been needed was forgotten to configure for a stage or maybe because no host is available to
 start the pod. These cases are monitored after deploy and reported in the Releases View.
 
+Many companies already use GitOps to manage the deployment to their k8s clusters. For example with argocd. This scenario
+is explicitly supported by the application. In the Cluster View:
+
+- There is a configuration per namespace if this namespace is managed by GitOps (for example argocd).
+- There are configuration options per cluster, overwrites per namespace and per workload, even per workload and stage to
+  locate the place in the git repo where the image is configured in your environment. The configuration syntax is a
+  template code that returns a list of files with instructions what to change.
+
+A **deploy** in a GitOps scenario is a commit into the git repository. The deployment in such a case is always
+"immediate". The GitOps tool's config must be used to deploy to k8s either immediate or scheduled.
+
 #### Proxmox Clusters
 
 TODO: coming soon.

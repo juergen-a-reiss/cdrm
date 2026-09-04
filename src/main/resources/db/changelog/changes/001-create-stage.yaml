@@ -36,6 +36,9 @@ databaseChangeLog:
                   name: k8s_namespaces
                   type: text
               - column:
+                  name: k8s_gitops_config
+                  type: jsonb
+              - column:
                   name: created_at
                   type: timestamp with time zone
                   constraints:
@@ -68,7 +71,7 @@ databaseChangeLog:
                   name: pipeline
                   type: varchar(64)
                   constraints:
-                    nullable: falses
+                    nullable: false
               - column:
                   name: name
                   type: varchar(64)

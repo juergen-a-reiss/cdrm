@@ -5,12 +5,30 @@ export type DeploymentPolicy = 'IMMEDIATE' | 'SCHEDULED'
 
 export type ClusterType = 'K8S' | 'PROXMOX'
 
+export interface K8sNamespaceGitopsConfig {
+  namespace: string
+  useGitOps: boolean
+  fileExpression: string | null
+  yamlExpression: string | null
+  // Null means "use the cluster-wide K8sGitopsConfig.gitBranch".
+  gitBranch: string | null
+}
+
+export interface K8sGitopsConfig {
+  useGitOps: boolean
+  gitRepo: string
+  gitBranch: string
+  // Keyed by namespace name (matching an entry in k8sNamespaces).
+  namespaces: Record<string, K8sNamespaceGitopsConfig>
+}
+
 export interface ClusterRequest {
   name: string
   description: string | null
   clusterType: ClusterType
   url: string
   k8sNamespaces?: string | null
+  k8sGitOpsConfig?: K8sGitopsConfig | null
 }
 
 export interface ClusterResponse {
@@ -20,6 +38,7 @@ export interface ClusterResponse {
   clusterType: ClusterType
   url: string
   k8sNamespaces: string | null
+  k8sGitOpsConfig: K8sGitopsConfig | null
   createdAt: string
   modifiedAt: string
   createdBy: string
