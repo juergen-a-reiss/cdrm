@@ -7,8 +7,13 @@ already-seeded data will fail on unique-name constraints.
 Also bootstraps the underlying Kubernetes Deployment/StatefulSet objects in
 minikube for every kubernetes-managed workload, in each stage's namespace
 (stage namespace_prefix + workload kubernetes_namespace) — cdrm only patches
-an existing object's image on promotion, it doesn't create one. That step is
-idempotent (kubectl apply) and safe to re-run on its own.
+an existing object's image on promotion, it doesn't create one. For a
+GitOps-managed namespace (data.yaml's k8s_namespaces entries with
+use_git_ops: true — currently the paris pipeline's "p-*" namespaces), the
+manifest is instead pushed to the GitOps demo repo (see
+development/argocd/README.md); ArgoCD creates the actual objects by syncing
+from there, so this script never kubectl-applies anything into those
+namespaces. Both steps are idempotent and safe to re-run on their own.
 
 Pass --reset to instead wipe the database tables and delete those Kubernetes
 objects, including their namespaces, so you can re-run a normal seed from a
@@ -21,6 +26,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -35,6 +41,11 @@ DB_CONTAINER = "postgres"
 DB_USER = "dockers"
 DB_NAME = "cdrm"
 DB_TABLES = ["release_history", "release", "workload_stage", "workload", "product_stage", "product", "stage"]
+
+# Matches development/argocd/setup-gitops-repo.sh.
+GITEA_USER = "cdrm"
+GITEA_PASSWORD = "cdrm"
+GITEA_REPO_URL = f"http://{GITEA_USER}:{GITEA_PASSWORD}@localhost:3000/{GITEA_USER}/gitops-demo.git"
 
 
 def parse_args() -> argparse.Namespace:
@@ -276,36 +287,125 @@ def cluster_namespaces(clusters: list[dict]) -> list[str]:
     return list(seen)
 
 
+def gitops_namespace_map(clusters: list[dict]) -> dict[str, dict]:
+    """namespace name -> its k8s_namespaces entry (plus the owning cluster's gitops
+    block, under "_cluster_gitops"), for every namespace with use_git_ops: true across
+    all clusters. Assumes namespace names are unique across clusters, true for this seed
+    data. cdrm never kubectl-applies into one of these — see push_gitops_manifests()."""
+    result: dict[str, dict] = {}
+    for cluster in clusters:
+        gitops = cluster.get("gitops")
+        if not gitops:
+            continue
+        for entry in cluster.get("k8s_namespaces") or []:
+            if entry.get("use_git_ops"):
+                result[entry["namespace"]] = {**entry, "_cluster_gitops": gitops}
+    return result
+
+
 def workload_stages(stages: list[dict], workload: dict) -> list[dict]:
     """The stages a workload is actually linked to — every stage of its own pipeline,
     matching WorkloadService.create()/update()'s linking rule on the backend."""
     return [stage for stage in stages if stage["pipeline"] == workload.get("pipeline")]
 
 
+def workload_manifest(workload: dict, namespace: str) -> str:
+    name = workload["name"]
+    kind = workload["kubernetes_kind"]
+    if kind == "DEPLOYMENT":
+        return deployment_manifest(name, namespace)
+    if kind == "STATEFUL_SET":
+        return statefulset_manifest(name, namespace)
+    print(f"Error: unknown kubernetes_kind '{kind}' for workload '{name}'", file=sys.stderr)
+    sys.exit(1)
+
+
 def bootstrap_kubernetes_objects(clusters: list[dict], stages: list[dict], workloads: list[dict]) -> None:
     print("Bootstrapping Kubernetes objects in minikube...")
+    gitops_namespaces = gitops_namespace_map(clusters)
+
     for namespace in cluster_namespaces(clusters):
+        if namespace in gitops_namespaces:
+            continue  # ArgoCD creates it (syncPolicy.syncOptions: CreateNamespace=true)
         kubectl_apply(namespace_manifest(namespace), f"namespace {namespace}")
 
     for workload in workloads:
         if not workload.get("kubernetes"):
             continue
-        name = workload["name"]
-        kind = workload["kubernetes_kind"]
         base_namespace = workload["kubernetes_namespace"]
         # A workload is only ever linked to the stages of its own pipeline (see
         # WorkloadService.create()/update(), which links every stage sharing the
         # workload's `pipeline` value) — cdrm never deploys it anywhere else.
         for stage in workload_stages(stages, workload):
             namespace = f"{stage.get('namespace_prefix') or ''}{base_namespace}"
-            if kind == "DEPLOYMENT":
-                manifest = deployment_manifest(name, namespace)
-            elif kind == "STATEFUL_SET":
-                manifest = statefulset_manifest(name, namespace)
-            else:
-                print(f"Error: unknown kubernetes_kind '{kind}' for workload '{name}'", file=sys.stderr)
+            if namespace in gitops_namespaces:
+                continue  # pushed to the GitOps repo instead — see push_gitops_manifests()
+            manifest = workload_manifest(workload, namespace)
+            kind = workload["kubernetes_kind"]
+            kubectl_apply(manifest, f"{kind.lower()} {workload['name']} in {namespace}")
+
+    push_gitops_manifests(gitops_namespaces, stages, workloads)
+
+
+def git_run(*args: str, cwd: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+
+
+def push_gitops_manifests(gitops_namespaces: dict[str, dict], stages: list[dict], workloads: list[dict]) -> None:
+    """Pushes the bootstrap Deployment/StatefulSet manifest for every Kubernetes
+    workload landing in a GitOps-managed namespace to the demo repo (see
+    development/argocd/setup-gitops-repo.sh), instead of kubectl-applying it directly —
+    ArgoCD then creates the actual objects by syncing from there (see setup-argocd.sh)."""
+    if not gitops_namespaces:
+        return
+
+    # One clone, but files land on whichever branch their own namespace resolves to
+    # (K8sNamespaceGitopsConfig.gitBranch override, else the cluster-wide default).
+    files_by_branch: dict[str, dict[str, str]] = {}
+    for workload in workloads:
+        if not workload.get("kubernetes"):
+            continue
+        base_namespace = workload["kubernetes_namespace"]
+        for stage in workload_stages(stages, workload):
+            namespace = f"{stage.get('namespace_prefix') or ''}{base_namespace}"
+            entry = gitops_namespaces.get(namespace)
+            if entry is None:
+                continue
+            branch = entry.get("git_branch") or entry["_cluster_gitops"].get("git_branch", "main")
+            file_path = entry["file_expression"].replace("{namespace}", namespace).replace("{workload}", workload["name"])
+            manifest = workload_manifest(workload, namespace)
+            files_by_branch.setdefault(branch, {})[file_path] = manifest
+
+    if not files_by_branch:
+        return
+
+    print("Pushing GitOps-managed manifests to the demo repo...")
+    with tempfile.TemporaryDirectory() as tmp:
+        clone = subprocess.run(["git", "clone", GITEA_REPO_URL, tmp], capture_output=True, text=True)
+        if clone.returncode != 0:
+            print(f"Error cloning GitOps repo: {clone.stderr}", file=sys.stderr)
+            print("Has development/argocd/setup-gitops-repo.sh been run?", file=sys.stderr)
+            sys.exit(1)
+
+        for branch, files in files_by_branch.items():
+            checkout = git_run("checkout", branch, cwd=tmp)
+            if checkout.returncode != 0:
+                print(f"Error checking out branch '{branch}': {checkout.stderr}", file=sys.stderr)
                 sys.exit(1)
-            kubectl_apply(manifest, f"{kind.lower()} {name} in {namespace}")
+            for file_path, content in files.items():
+                full_path = Path(tmp) / file_path
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+                full_path.write_text(content)
+                print(f"  {file_path} ({branch})")
+            git_run("add", "-A", cwd=tmp)
+            commit = git_run("commit", "-m", "cdrm seed: bootstrap workload manifests", cwd=tmp)
+            if commit.returncode != 0 and "nothing to commit" not in commit.stdout:
+                print(f"Error committing to branch '{branch}': {commit.stderr}", file=sys.stderr)
+                sys.exit(1)
+            push = git_run("push", "origin", branch, cwd=tmp)
+            if push.returncode != 0:
+                print(f"Error pushing branch '{branch}': {push.stderr}", file=sys.stderr)
+                sys.exit(1)
 
 
 def reset_database() -> None:
@@ -326,6 +426,19 @@ def reset_database() -> None:
 
 def reset_kubernetes_objects(clusters: list[dict], stages: list[dict], workloads: list[dict]) -> None:
     print("Deleting bootstrapped Kubernetes objects...")
+    gitops_namespaces = gitops_namespace_map(clusters)
+
+    if gitops_namespaces:
+        # Best-effort: an Application's syncPolicy.automated.selfHeal would otherwise
+        # fight the namespace deletion below by recreating what it removes. Silently
+        # skipped if ArgoCD (or its Application CRD) was never installed.
+        print("Deleting ArgoCD Applications for GitOps-managed namespaces (best-effort)...")
+        for namespace in gitops_namespaces:
+            subprocess.run(
+                ["kubectl", "delete", "application", namespace, "-n", "argocd", "--ignore-not-found"],
+                capture_output=True, text=True,
+            )
+
     kinds = {"DEPLOYMENT": "deployment", "STATEFUL_SET": "statefulset"}
     for workload in workloads:
         if not workload.get("kubernetes"):
@@ -335,6 +448,8 @@ def reset_kubernetes_objects(clusters: list[dict], stages: list[dict], workloads
         base_namespace = workload["kubernetes_namespace"]
         for stage in workload_stages(stages, workload):
             namespace = f"{stage.get('namespace_prefix') or ''}{base_namespace}"
+            if namespace in gitops_namespaces:
+                continue  # deleting the namespace below removes these too
             result = kubectl("delete", resource, name, "-n", namespace, "--ignore-not-found")
             if result.returncode != 0:
                 print(f"Error deleting {resource} '{name}' in '{namespace}': {result.stderr}", file=sys.stderr)

@@ -26,17 +26,18 @@ two ;)).
 
 ### Available services
 
-| Service    | Default port | Description        |
-|------------|--------------|--------------------|
-| `postgres` | 5432         | PostgreSQL 18      |
-| `keycloak` | 2305         | Keycloak 26 (HTTP) |
-| ``         |              |                    |
+| Service    | Default port | Description                              |
+|------------|--------------|-------------------------------------------|
+| `postgres` | 5432         | PostgreSQL 18                             |
+| `keycloak` | 2305         | Keycloak 26 (HTTP)                        |
+| `gitea`    | 3000         | Git server for the ArgoCD/GitOps demo     |
 
 To start only a subset, edit `components`:
 
 ```
 postgres
 keycloak
+gitea
 ```
 
 ## PostgreSQL
@@ -120,11 +121,19 @@ cdrm's local dev setup deploys into a `minikube` cluster (the default context na
 four cdrm stages (development/qa/staging/production) share that one cluster, so each stage's `namespace_prefix` (see
 `seed/data.yaml`) keeps them from colliding on namespace. To get a graphical view use `minikube dashboard --port=1964`.
 
+### ArgoCD / GitOps demo
+
+The paris pipeline's namespaces (`p-*`) are GitOps-managed instead of cdrm's direct Kubernetes patch — see
+`argocd/README.md` for the full setup (installs ArgoCD into minikube, plus a local Gitea instance for the demo repo).
+ArgoCD's UI: `argocd/portforward.sh`, then https://localhost:1961.
+
 ### Setting up seed data
 
 This script is not idempotent. It also creates the namespaces listed in `seed/data.yaml`'s `clusters[].k8s_namespaces`
 (and the bootstrapped Deployment/StatefulSet objects) in minikube — keep that list in sync with the stages'
-`namespace_prefix` and workloads' `kubernetes_namespace` values.
+`namespace_prefix` and workloads' `kubernetes_namespace` values. A namespace with `use_git_ops: true` is the
+exception: seed.py pushes its manifests to the GitOps demo repo instead of applying them directly — see
+`argocd/README.md`.
 
 Run ./seed.py --token
 

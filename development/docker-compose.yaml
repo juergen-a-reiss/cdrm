@@ -60,7 +60,32 @@ services:
       - ./src/keycloak-blacklist:/opt/keycloak/data/password-blacklists:ro
     networks:
       - shared_net
-  
+
+  # Local git server for the GitOps demo (see development/argocd/README.md) — hosts the
+  # repo cdrm's paris-pipeline (p-*) namespaces are configured to sync from. HTTP only
+  # (no SSH) since nothing here needs SSH push yet. Web UI / HTTP git: http://localhost:3000
+  # (admin / admin, see development/argocd/setup-gitops-repo.sh).
+  gitea:
+    profiles: [gitea]
+    image: gitea/gitea:1.24
+    container_name: gitea
+    restart: always
+    environment:
+      GITEA__database__DB_TYPE: sqlite3
+      GITEA__server__DOMAIN: localhost
+      GITEA__server__ROOT_URL: http://localhost:3000/
+      GITEA__server__DISABLE_SSH: "true"
+      GITEA__security__INSTALL_LOCK: "true"
+      GITEA__service__DISABLE_REGISTRATION: "true"
+    ports:
+      - "3000:3000"
+    volumes:
+      - gitea-data:/data
+    networks:
+      - shared_net
+
 volumes:
   db-data:
+    driver: local
+  gitea-data:
     driver: local

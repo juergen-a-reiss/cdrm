@@ -87,6 +87,9 @@ is explicitly supported by the application. In the Cluster View:
 A **deploy** in a GitOps scenario is a commit into the git repository. The deployment in such a case is always
 "immediate". The GitOps tool's config must be used to deploy to k8s either immediate or scheduled.
 
+See `development/argocd/README.md` for a runnable local demo of this — ArgoCD installed into minikube, managing the
+seed data's paris pipeline namespaces from a local Gitea repo.
+
 #### Proxmox Clusters
 
 TODO: coming soon.

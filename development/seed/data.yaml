@@ -19,6 +19,12 @@
 # are the cluster-wide GitOps settings — git_branch is the default branch commits go to;
 # an entry's own git_branch (see p-prod-platform/p-prod-website below) overrides it for
 # just that namespace.
+#
+# git_repo points at the local Gitea instance (see development/argocd/README.md) —
+# "localhost" because seed.py and cdrm's own bootRun process both run on the host;
+# development/argocd/generate-applications.py substitutes host.minikube.internal for
+# ArgoCD's own in-cluster Application manifests, since pods can't resolve "localhost" as
+# the host machine.
 
 clusters:
   # Only the paris pipeline's namespaces (the "p-" prefixed ones) are GitOps-managed;
@@ -30,47 +36,20 @@ clusters:
     url: "http://127.0.0.1:1964/api/v1"
     gitops:
       use_git_ops: true
-      git_repo: "git@github.com:example/cdrm-gitops-demo.git"
+      git_repo: "http://localhost:3000/cdrm/gitops-demo.git"
       git_branch: "main"
     k8s_namespaces:
       - namespace: f-dev-platform
       - namespace: f-qa-platform
-      - namespace: f-staging-platform
       - namespace: f-prod-platform
       - namespace: f-dev-website
       - namespace: f-qa-website
-      - namespace: f-staging-website
       - namespace: f-prod-website
-      - namespace: p-dev-platform
-        use_git_ops: true
-        file_expression: "environments/{namespace}/{workload}.yaml"
-        yaml_expression: "spec.template.spec.containers[0].image"
       - namespace: p-qa-platform
         use_git_ops: true
         file_expression: "environments/{namespace}/{workload}.yaml"
         yaml_expression: "spec.template.spec.containers[0].image"
-      - namespace: p-staging-platform
-        use_git_ops: true
-        file_expression: "environments/{namespace}/{workload}.yaml"
-        yaml_expression: "spec.template.spec.containers[0].image"
       - namespace: p-prod-platform
-        use_git_ops: true
-        file_expression: "environments/{namespace}/{workload}.yaml"
-        yaml_expression: "spec.template.spec.containers[0].image"
-        git_branch: "release"
-      - namespace: p-dev-website
-        use_git_ops: true
-        file_expression: "environments/{namespace}/{workload}.yaml"
-        yaml_expression: "spec.template.spec.containers[0].image"
-      - namespace: p-qa-website
-        use_git_ops: true
-        file_expression: "environments/{namespace}/{workload}.yaml"
-        yaml_expression: "spec.template.spec.containers[0].image"
-      - namespace: p-staging-website
-        use_git_ops: true
-        file_expression: "environments/{namespace}/{workload}.yaml"
-        yaml_expression: "spec.template.spec.containers[0].image"
-      - namespace: p-prod-website
         use_git_ops: true
         file_expression: "environments/{namespace}/{workload}.yaml"
         yaml_expression: "spec.template.spec.containers[0].image"
@@ -150,13 +129,6 @@ workloads:
     kubernetes_kind: DEPLOYMENT
     kubernetes_namespace: platform
     pipeline: frankfurt  
-  - name: platform-interface-emea
-    product: Platform
-    description: Platform interface
-    kubernetes: true
-    kubernetes_kind: DEPLOYMENT
-    kubernetes_namespace: platform
-    pipeline: paris
   - name: platform-worker
     product: Platform
     description: Platform background worker workload
@@ -171,6 +143,15 @@ workloads:
     kubernetes_kind: STATEFUL_SET
     kubernetes_namespace: website
     pipeline: frankfurt
+
+  - name: platform-interface-emea
+    product: Platform
+    description: Platform interface
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: platform
+    pipeline: paris
+
   - name: payments-ledger
     product: Payments
     description: Payment ledger workload
