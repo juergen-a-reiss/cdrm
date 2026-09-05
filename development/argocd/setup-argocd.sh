@@ -30,8 +30,21 @@ echo "Installing ArgoCD (development/argocd/install.yaml, vendored from the upst
 # (>262144 bytes) — server-side apply doesn't store that annotation at all.
 kubectl apply --server-side --force-conflicts -n "${ARGOCD_NAMESPACE}" -f "${DIR}/install.yaml"
 
-echo "Waiting for argocd-server to be ready..."
-kubectl -n "${ARGOCD_NAMESPACE}" rollout status deployment/argocd-server --timeout=300s
+echo "Waiting for argocd-server to be ready (can take several minutes on a fresh minikube — a"
+echo "~570MB image to pull, sometimes with a few transient DNS-resolution failures against"
+echo "quay.io right after minikube start, plus a couple of startup-order races kubelet just"
+echo "retries through on its own)..."
+kubectl -n "${ARGOCD_NAMESPACE}" rollout status deployment/argocd-server --timeout=1200s
+
+echo "Shortening ArgoCD's git-polling interval for the demo (default is 3 minutes — a push"
+echo "otherwise looks 'not synced' for a while even though automated sync is configured;"
+echo "see syncPolicy.automated in generate-applications.py)..."
+# A real push-triggered webhook would need Gitea (docker-compose/host) to reach
+# argocd-server (inside minikube) across that network boundary — real setup (host.docker
+# .internal wiring, a stable port-forward, a webhook secret) for a demo-scale payoff.
+# Polling faster is the simpler fix here; ArgoCD picks up an argocd-cm change like this
+# without a restart.
+kubectl -n "${ARGOCD_NAMESPACE}" patch configmap argocd-cm --type merge -p '{"data":{"timeout.reconciliation":"30s"}}'
 
 echo "Applying Applications generated from seed/data.yaml..."
 GENERATED="$(mktemp)"

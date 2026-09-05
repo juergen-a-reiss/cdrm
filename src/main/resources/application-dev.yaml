@@ -8,3 +8,10 @@ spring:
       resourceserver:
         jwt:
           issuer-uri: http://localhost:2305/realms/cdrm
+
+cdrm:
+  gitops:
+    # Matches development/argocd/setup-gitops-repo.sh's local Gitea demo user — needed to
+    # push GitOps commits (see GitCommitClient); anonymous read alone isn't enough.
+    git-username: cdrm
+    git-password: cdrm

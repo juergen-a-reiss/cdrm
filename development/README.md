@@ -8,7 +8,25 @@ two ;)).
 ## Prerequisites
 
 - Docker with the Compose plugin
+- kubectl
 - minikube
+- Python 3 + PyYAML (pip install pyyaml).
+- git — seed.py's GitOps push (push_gitops_manifests) shells out to it directly.
+- lsof — the start.sh/purge.sh pre-kill on re-run (lsof -ti:PORT ... | xargs kill).
+- Java/JDK/IDE for ./gradlew bootRun.
+- Node.js/npm for npm.
+
+## TLDR ;)
+
+1. Install the prerequisites
+2. Run `./up.sh`
+3. Run `./start.sh`. Note that the setup of gitops setup from scratch loads argocd and other images. Expect quite some time for this to run.
+4. Start your IDE and start the main application 
+5. get a token of a devop role (see keycloak.http)
+6. Run `./seed.py --token YOURTOKEN` 
+7. Run `npm run dev`
+
+
 
 ## Usage
 
@@ -125,7 +143,15 @@ four cdrm stages (development/qa/staging/production) share that one cluster, so 
 
 The paris pipeline's namespaces (`p-*`) are GitOps-managed instead of cdrm's direct Kubernetes patch — see
 `argocd/README.md` for the full setup (installs ArgoCD into minikube, plus a local Gitea instance for the demo repo).
-ArgoCD's UI: `argocd/portforward.sh`, then https://localhost:1961.
+
+UI: `argocd/portforward.sh`, then https://localhost:1961 — user `admin`, password:
+
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+```
+
+Auto-generated fresh by ArgoCD's install on every `setup-argocd.sh` run against a new cluster, so it changes each
+time you `purge.sh` and set up again.
 
 ### Setting up seed data
 

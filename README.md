@@ -285,3 +285,32 @@ docker build -t cdrm-frontend -f frontend/Dockerfile frontend
 pushes them to `ghcr.io/<owner>/cdrm-backend` and `ghcr.io/<owner>/cdrm-frontend` on pushes to `master` and on `vX.Y.Z`
 tags (pull requests only build, to validate the Dockerfiles without needing registry credentials).
 
+## Production Setup
+
+Nothing environment-specific is hardcoded — `application.yaml` (always active) reads everything below from the
+environment, with sensible defaults where one makes sense. `application-dev.yaml` (active only under the `dev` Spring
+profile used by `./gradlew bootRun` locally) is what supplies convenience values for local development; none of it
+applies in production, where only `application.yaml`'s defaults (or lack thereof) are in effect.
+
+| Variable              | Required | Default              | Purpose                                                                    |
+|-----------------------|----------|-----------------------|-----------------------------------------------------------------------------|
+| `OIDC_ISSUER_URI`     | yes      | —                     | OpenID Connect issuer URL (see Access Control)                              |
+| `DB_URL`              | yes      | —                     | Postgres JDBC URL                                                           |
+| `DB_USERNAME`         | yes      | —                     | Postgres user                                                               |
+| `DB_PASSWORD`         | yes      | —                     | Postgres password                                                          |
+| `OIDC_CLIENT_ID`      | no       | `cdrm`                | OIDC client ID cdrm validates tokens against                                |
+| `KUBECONFIG`          | no       | `~/.kube/config`      | Kubeconfig file for direct Kubernetes deploys (see Kubernetes Clusters)     |
+| `GITOPS_GIT_USERNAME` | no       | *(unset — anonymous)* | Git username to push GitOps commits with (see Kubernetes Clusters)         |
+| `GITOPS_GIT_PASSWORD` | no       | *(unset — anonymous)* | Git password/token for `GITOPS_GIT_USERNAME`                               |
+| `GITOPS_WORKDIR`      | no       | OS temp directory     | Local working directory for GitOps repo clones                             |
+
+`KUBECONFIG` and the `GITOPS_*` credentials are read straight from the environment and never persisted to Postgres —
+same principle for both: the deployment target's credentials are the runtime environment's problem, not the
+database's. Whoever manages that environment (a mounted Kubernetes Secret, a file on the host, ...) owns provisioning
+and rotating them; cdrm itself never stores them anywhere.
+
+`GITOPS_GIT_USERNAME`/`GITOPS_GIT_PASSWORD` are only needed if any GitOps-managed namespace's repository requires
+authenticated pushes (a repo that accepts anonymous pushes, or a deployment with no GitOps-managed namespaces at all,
+needs neither). They're sent as an HTTP Basic `Authorization` header per git operation, so this currently only
+supports git remotes over `http://`/`https://` — not SSH.
+

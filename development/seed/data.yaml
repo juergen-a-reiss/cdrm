@@ -54,6 +54,15 @@ clusters:
         file_expression: "environments/{namespace}/{workload}.yaml"
         yaml_expression: "spec.template.spec.containers[0].image"
         git_branch: "release"
+      - namespace: p-qa-website
+        use_git_ops: true
+        file_expression: "environments/{namespace}/{workload}.yaml"
+        yaml_expression: "spec.template.spec.containers[0].image"
+      - namespace: p-prod-website
+        use_git_ops: true
+        file_expression: "environments/{namespace}/{workload}.yaml"
+        yaml_expression: "spec.template.spec.containers[0].image"
+        git_branch: "release"
 
 stages:
   - name: ffm-development
@@ -150,6 +159,13 @@ workloads:
     kubernetes: true
     kubernetes_kind: DEPLOYMENT
     kubernetes_namespace: platform
+    pipeline: paris
+  - name: website-portal-france
+    product: Payments
+    description: Payment gateway workload
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: website
     pipeline: paris
 
   - name: payments-ledger

@@ -15,14 +15,17 @@ development/argocd/README.md); ArgoCD creates the actual objects by syncing
 from there, so this script never kubectl-applies anything into those
 namespaces. Both steps are idempotent and safe to re-run on their own.
 
-Pass --reset to instead wipe the database tables and delete those Kubernetes
-objects, including their namespaces, so you can re-run a normal seed from a
-clean slate. --reset does not need --token — it talks to Postgres and
-minikube directly, not the API.
+Pass --reset to instead wipe the database tables, delete those Kubernetes
+objects (including their namespaces), and remove the GitOps demo repo's
+seeded manifests (best-effort — skipped if that repo isn't reachable), so
+you can re-run a normal seed from a clean slate. --reset does not need
+--token — it talks to Postgres, minikube, and the GitOps repo directly, not
+the API.
 """
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -40,7 +43,21 @@ BOOTSTRAP_IMAGE = "nginx:1.20-alpine"
 DB_CONTAINER = "postgres"
 DB_USER = "dockers"
 DB_NAME = "cdrm"
-DB_TABLES = ["release_history", "release", "workload_stage", "workload", "product_stage", "product", "stage"]
+# Every table in the schema (see src/main/resources/db/changelog/changes/*.yaml),
+# ordered leaf-first (the tables other tables have foreign keys into come last) — not
+# that order actually matters to Postgres here (see reset_database()), but it documents
+# the dependency graph for whoever next has to keep this list in sync with a new table.
+DB_TABLES = [
+    "release_history",
+    "release",
+    "workload_stage",
+    "product_stage",
+    "stage_cluster",
+    "workload",
+    "stage",
+    "cluster",
+    "product",
+]
 
 # Matches development/argocd/setup-gitops-repo.sh.
 GITEA_USER = "cdrm"
@@ -347,8 +364,31 @@ def bootstrap_kubernetes_objects(clusters: list[dict], stages: list[dict], workl
     push_gitops_manifests(gitops_namespaces, stages, workloads)
 
 
+def git_env() -> dict[str, str]:
+    """Every git call here already carries explicit credentials in the repo URL
+    (GITEA_REPO_URL) — if those are ever wrong, the command should just fail with a
+    clear, captured error, not hang (or pop up a GUI askpass prompt, which some desktop
+    git/credential-helper setups do even when the URL has embedded credentials) waiting
+    for interactive input this non-interactive script can never provide."""
+    env = os.environ.copy()
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env.pop("GIT_ASKPASS", None)
+    env.pop("SSH_ASKPASS", None)
+    env["SSH_ASKPASS_REQUIRE"] = "never"
+    return env
+
+
+# -c credential.helper= (empty value) clears whatever chain of credential helpers is
+# configured (system/global/local — GCM, libsecret, osxkeychain, ...) for just this
+# invocation, so nothing but the repo URL's own embedded username/password is ever
+# consulted. This is a *separate* mechanism from GIT_ASKPASS/SSH_ASKPASS (git_env()
+# above) — a configured credential.helper is invoked regardless of those env vars, so
+# disabling only one of the two still leaves the other free to prompt.
+GIT_NO_CREDENTIAL_HELPER = ["-c", "credential.helper="]
+
+
 def git_run(*args: str, cwd: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    return subprocess.run(["git", *GIT_NO_CREDENTIAL_HELPER, *args], cwd=cwd, capture_output=True, text=True, env=git_env())
 
 
 def push_gitops_manifests(gitops_namespaces: dict[str, dict], stages: list[dict], workloads: list[dict]) -> None:
@@ -381,7 +421,7 @@ def push_gitops_manifests(gitops_namespaces: dict[str, dict], stages: list[dict]
 
     print("Pushing GitOps-managed manifests to the demo repo...")
     with tempfile.TemporaryDirectory() as tmp:
-        clone = subprocess.run(["git", "clone", GITEA_REPO_URL, tmp], capture_output=True, text=True)
+        clone = subprocess.run(["git", *GIT_NO_CREDENTIAL_HELPER, "clone", GITEA_REPO_URL, tmp], capture_output=True, text=True, env=git_env())
         if clone.returncode != 0:
             print(f"Error cloning GitOps repo: {clone.stderr}", file=sys.stderr)
             print("Has development/argocd/setup-gitops-repo.sh been run?", file=sys.stderr)
@@ -413,7 +453,13 @@ def reset_database() -> None:
     if shutil.which("docker") is None:
         print("Error: 'docker' is required but not installed.", file=sys.stderr)
         sys.exit(1)
-    statement = f"TRUNCATE TABLE {', '.join(DB_TABLES)};"
+    # A single TRUNCATE naming every table together is what actually avoids the foreign
+    # key ordering problem: Postgres only rejects truncating a table that's still
+    # referenced by a row in some OTHER table not also being truncated in the same
+    # statement — listing every table (regardless of order) sidesteps that entirely.
+    # CASCADE on top is just a safety net for a future table this list falls out of sync
+    # with (a FK from it into one of these would otherwise abort the whole statement).
+    statement = f"TRUNCATE TABLE {', '.join(DB_TABLES)} CASCADE;"
     result = subprocess.run(
         ["docker", "exec", DB_CONTAINER, "psql", "-U", DB_USER, "-d", DB_NAME, "-c", statement],
         capture_output=True, text=True,
@@ -464,6 +510,58 @@ def reset_kubernetes_objects(clusters: list[dict], stages: list[dict], workloads
         print(f"  {result.stdout.strip() or f'namespace {namespace}: not found'}")
 
 
+def gitops_branches(clusters: list[dict]) -> set[str]:
+    """Every branch push_gitops_manifests() could have written to: each GitOps cluster's
+    own default (gitops.git_branch) plus every namespace's override (git_branch)."""
+    branches: set[str] = set()
+    for cluster in clusters:
+        gitops = cluster.get("gitops")
+        if not gitops:
+            continue
+        branches.add(gitops.get("git_branch", "main"))
+        for entry in cluster.get("k8s_namespaces") or []:
+            if entry.get("use_git_ops") and entry.get("git_branch"):
+                branches.add(entry["git_branch"])
+    return branches
+
+
+def reset_gitops_repo(clusters: list[dict]) -> None:
+    """Removes environments/ from every branch push_gitops_manifests() could have
+    written to, so a stale namespace/workload from a previous seed.py run (e.g. one
+    since renamed or removed in data.yaml) doesn't linger in the repo — and doesn't keep
+    getting synced by whatever ArgoCD Application still points at it. Best-effort:
+    silently does nothing if the repo isn't reachable (setup-gitops-repo.sh never run)."""
+    branches = gitops_branches(clusters)
+    if not branches:
+        return
+
+    print("Resetting the GitOps demo repo...")
+    with tempfile.TemporaryDirectory() as tmp:
+        clone = subprocess.run(["git", *GIT_NO_CREDENTIAL_HELPER, "clone", GITEA_REPO_URL, tmp], capture_output=True, text=True, env=git_env())
+        if clone.returncode != 0:
+            print("  skipping (repo not reachable — has development/argocd/setup-gitops-repo.sh been run?)")
+            return
+
+        for branch in sorted(branches):
+            checkout = git_run("checkout", branch, cwd=tmp)
+            if checkout.returncode != 0:
+                print(f"  {branch}: branch does not exist, skipping")
+                continue
+            if not (Path(tmp) / "environments").is_dir():
+                print(f"  {branch}: nothing to remove")
+                continue
+            git_run("rm", "-r", "-q", "environments", cwd=tmp)
+            commit = git_run("commit", "-m", "cdrm reset: remove seeded workload manifests", cwd=tmp)
+            if commit.returncode != 0 and "nothing to commit" not in commit.stdout:
+                print(f"Error committing removal on branch '{branch}': {commit.stderr}", file=sys.stderr)
+                sys.exit(1)
+            push = git_run("push", "origin", branch, cwd=tmp)
+            if push.returncode != 0:
+                print(f"Error pushing branch '{branch}': {push.stderr}", file=sys.stderr)
+                sys.exit(1)
+            print(f"  {branch}: removed environments/")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -480,6 +578,7 @@ def main() -> None:
     if args.reset:
         reset_database()
         reset_kubernetes_objects(data["clusters"], data["stages"], data["workloads"])
+        reset_gitops_repo(data["clusters"])
         print("Done.")
         return
 

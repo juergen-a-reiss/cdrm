@@ -3,6 +3,8 @@
 
 package dev.juergenreiss.cdrm.release
 
+import dev.juergenreiss.cdrm.gitops.GitCommitClient
+import dev.juergenreiss.cdrm.gitops.GitOpsResolver
 import dev.juergenreiss.cdrm.kubernetes.KubernetesDeploymentClient
 import dev.juergenreiss.cdrm.stage.Stage
 import dev.juergenreiss.cdrm.workload.Workload
@@ -18,6 +20,8 @@ import org.springframework.stereotype.Component
 @Component
 class DeploymentExecutor(
     private val kubernetesDeploymentClient: KubernetesDeploymentClient,
+    private val gitOpsResolver: GitOpsResolver,
+    private val gitCommitClient: GitCommitClient,
     private val meterRegistry: MeterRegistry,
 ) {
 
@@ -25,6 +29,17 @@ class DeploymentExecutor(
 
     fun attemptDeploy(workload: Workload, stage: Stage, image: String): String? {
         if (!workload.kubernetes) return null
+
+        val gitOpsTarget = gitOpsResolver.resolve(workload, stage)
+        if (gitOpsTarget != null) {
+            val commitMessage = "cdrm: deploy $image for workload '${workload.name}' at stage '${stage.name}'"
+            val error = gitCommitClient.commitImageChange(gitOpsTarget, image, commitMessage)
+            if (error != null) {
+                log.error("Failed to commit GitOps deploy for workload {} at stage {}: {}", workload.id, stage.id, error)
+                incrementDeployFailedMetric(workload, stage)
+            }
+            return error
+        }
 
         val context = stage.kubernetesContext
         val namespace = workload.kubernetesNameSpace
