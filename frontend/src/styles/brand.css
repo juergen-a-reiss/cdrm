@@ -1,0 +1,65 @@
+/*
+ * Required Notice: Copyright Dr. Juergen A. Reiss
+ * Licensed under the terms in the LICENSE file at the repository root.
+ *
+ * Company branding — this is the one file to edit to reskin cdrm for an
+ * organization. No component or TypeScript changes needed for any of it.
+ *
+ * - Colors: override the --v-theme-* RGB triplets below (Vuetify's own
+ *   format — "r, g, b", no rgb(...) wrapper) for the light and/or dark
+ *   theme. These need !important: Vuetify doesn't define its theme colors
+ *   in the static vuetify/styles stylesheet (which does load before this
+ *   file) — it generates and injects its own <style> tag for them at
+ *   runtime, when app.use(vuetify) runs in main.ts, which happens after
+ *   this file's import has already been evaluated. So Vuetify's own
+ *   values would otherwise end up later in the document and win on
+ *   cascade order alone, regardless of import order here.
+ * - Font: set --brand-font-family. To use a custom font file/webfont, add
+ *   an @font-face rule (or a <link> in index.html) yourself and reference
+ *   its family name here.
+ * - Logo (shown in the app bar): set --brand-logo-url to any image URL —
+ *   relative, absolute, or a data: URI.
+ * - Favicon (browser tab icon): unlike the above, this can't be changed
+ *   via CSS — browsers load it directly from the <link rel="icon"> in
+ *   index.html, outside the CSS cascade entirely. Replace the file at
+ *   public/favicon.svg (same path both index.html and --brand-logo-url's
+ *   default below point at) to change it.
+ */
+
+:root {
+  --brand-logo-url: url('/favicon.svg');
+  --brand-font-family: 'Roboto', sans-serif;
+}
+
+.v-theme--light {
+  --v-theme-primary: 25, 118, 210 !important;
+  --v-theme-on-primary: 255, 255, 255 !important;
+  --v-theme-secondary: 66, 66, 66 !important;
+  --v-theme-on-secondary: 255, 255, 255 !important;
+}
+
+.v-theme--dark {
+  --v-theme-primary: 100, 181, 246 !important;
+  --v-theme-on-primary: 0, 0, 0 !important;
+  --v-theme-secondary: 189, 189, 189 !important;
+  --v-theme-on-secondary: 0, 0, 0 !important;
+}
+
+/* !important: Vuetify's own typography classes (.text-h6 etc.) also set
+   font-family at the same specificity as .v-application — without this,
+   which one wins would depend on import order inside Vuetify's own
+   bundle rather than on this file. */
+.v-application {
+  font-family: var(--brand-font-family), sans-serif !important;
+}
+
+.brand-logo {
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background-image: var(--brand-logo-url);
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}

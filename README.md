@@ -432,3 +432,52 @@ authenticated pushes (a repo that accepts anonymous pushes, or a deployment with
 needs neither). They're sent as an HTTP Basic `Authorization` header per git operation, so this currently only
 supports git remotes over `http://`/`https://` — not SSH.
 
+## Frontend Customization
+
+The frontend supports a dark/light mode toggle out of the box (a button in the app bar, remembered per browser via
+`localStorage`, defaulting to the OS/browser preference on first visit) — no configuration needed for that part.
+
+Reskinning cdrm for a company — colors, font, and the logo shown in the app bar — is a single CSS file:
+`frontend/src/styles/brand.css`. No component or TypeScript changes are needed for any of it; the file is loaded
+after Vuetify's own stylesheet, so its values simply win.
+
+| What                          | How                                                                             |
+|-------------------------------|----------------------------------------------------------------------------------|
+| Colors (light and dark theme) | Override the `--v-theme-*` variables (Vuetify's own RGB-triplet format, each needs `!important` — see `brand.css`'s comments for why) under the `.v-theme--light`/`.v-theme--dark` selectors |
+| Font                          | Set `--brand-font-family`. For a custom font file/webfont, add an `@font-face` (or a `<link>` in `frontend/index.html`) yourself and reference its family name here |
+| Logo (app bar)                | Set `--brand-logo-url` to any image URL — relative, absolute, or a `data:` URI |
+| Favicon (browser tab icon)    | Can't be done via CSS — browsers load `<link rel="icon">` directly, outside the CSS cascade. Replace the file at `frontend/public/favicon.svg` instead (same file `--brand-logo-url` points at by default, so replacing it alone reskins both) |
+
+Rebuild/redeploy the frontend after editing `brand.css` — it's a static asset baked in at `npm run build` time, not
+something read at runtime.
+
+### Example
+
+As an illustration (not an actual partnership or endorsement — just colors and a font pulled from
+[wsd.com](https://www.wsd.com/)'s own public stylesheet, to show a real-looking result rather than arbitrary values):
+
+```css
+:root {
+  --brand-logo-url: url('/favicon.svg');
+  --brand-font-family: 'Inter', sans-serif;
+}
+
+.v-theme--light {
+  --v-theme-primary: 26, 53, 82 !important;       /* #1a3552 */
+  --v-theme-on-primary: 255, 255, 255 !important;
+  --v-theme-secondary: 77, 98, 121 !important;    /* #4d6279 */
+  --v-theme-on-secondary: 255, 255, 255 !important;
+}
+
+.v-theme--dark {
+  --v-theme-primary: 179, 188, 197 !important;    /* #b3bcc5 */
+  --v-theme-on-primary: 0, 31, 63 !important;
+  --v-theme-secondary: 128, 143, 159 !important;  /* #808f9f */
+  --v-theme-on-secondary: 0, 0, 0 !important;
+}
+```
+
+Also add `frontend/public/favicon.svg` (and, since `--brand-logo-url` defaults to that same path, the app-bar logo
+updates with it) and, if using a webfont like Inter rather than a system font, a `<link>` to it in
+`frontend/index.html`.
+

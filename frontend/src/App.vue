@@ -4,8 +4,18 @@
 -->
 
 <script setup lang="ts">
+import { useTheme } from 'vuetify'
 import { authenticatedUser, isAuthenticated, login, logout } from './auth/authService'
 import ToastHost from './components/ToastHost.vue'
+import { THEME_STORAGE_KEY } from './plugins/vuetify'
+
+const theme = useTheme()
+
+function toggleTheme() {
+  const next = theme.global.current.value.dark ? 'light' : 'dark'
+  theme.change(next)
+  localStorage.setItem(THEME_STORAGE_KEY, next)
+}
 
 const navItems = [
   { title: 'Clusters', to: '/clusters', icon: 'mdi-server-network' },
@@ -33,11 +43,15 @@ const navItems = [
 
     <v-app-bar title="Continuous Delivery Release Management">
       <template #prepend>
-        <v-avatar size="32" rounded="lg" class="ml-2">
-          <v-img src="/favicon.svg" alt="cdrm" />
-        </v-avatar>
+        <span class="brand-logo ml-2" aria-hidden="true" />
       </template>
       <template #append>
+        <v-btn
+          :icon="theme.global.current.value.dark ? 'mdi-weather-sunny' : 'mdi-weather-night'"
+          variant="text"
+          :title="theme.global.current.value.dark ? 'Switch to light mode' : 'Switch to dark mode'"
+          @click="toggleTheme"
+        />
         <v-btn v-if="!isAuthenticated" @click="login">Log in</v-btn>
         <template v-else>
           <span class="mr-4">{{ authenticatedUser?.profile.preferred_username }}</span>
