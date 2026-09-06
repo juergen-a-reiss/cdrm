@@ -8,6 +8,8 @@ import dev.juergenreiss.cdrm.stage.StageRepository
 import dev.juergenreiss.cdrm.workload.Workload
 import dev.juergenreiss.cdrm.workload.WorkloadRepository
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.BeforeEach
@@ -97,6 +99,8 @@ class DeploymentSchedulerJobTest {
         stageId: UUID,
         deployedAt: Instant? = null,
         createdAt: Instant = Instant.now(),
+        gitOpsManaged: Boolean = false,
+        gitopsRetryCount: Int = 0,
     ) = ReleaseHistory(
         releaseId = releaseId,
         productId = UUID.randomUUID(),
@@ -107,6 +111,8 @@ class DeploymentSchedulerJobTest {
         stageName = "stage",
         deployedAt = deployedAt,
         createdAt = createdAt,
+        gitOpsManaged = gitOpsManaged,
+        gitopsRetryCount = gitopsRetryCount,
         createdBy = UUID.randomUUID(),
     )
 
@@ -127,7 +133,7 @@ class DeploymentSchedulerJobTest {
         given(productStageRepository.findByProductIdAndStageId(productId, stageId)).willReturn(
             ProductStage(productId = productId, stageId = stageId, deploymentCron = "0 0 0 * * *")
         )
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(null)
+        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.Success)
 
         job.processPendingDeployments()
 
@@ -172,7 +178,7 @@ class DeploymentSchedulerJobTest {
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
         val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
         given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(null)
+        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.Success)
 
         job.processPendingDeployments()
 
@@ -194,13 +200,91 @@ class DeploymentSchedulerJobTest {
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
         val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
         given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn("cluster not reachable")
+        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.Failed("cluster not reachable"))
 
         job.processPendingDeployments()
 
         assertNull(pending.deployedAt)
         assertEquals("cluster not reachable", pending.deployError)
         verify(releaseHistoryRepository).save(pending)
+    }
+
+    @Test
+    fun `increments the GitOps retry count and sets gitopsError, not deployError, on a GitOps push failure`() {
+        val releaseId = UUID.randomUUID()
+        val workloadId = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val stageId = UUID.randomUUID()
+
+        val pending = persistedHistoryEntry(releaseId = releaseId, stageId = stageId, createdAt = Instant.now(), gitOpsManaged = true)
+        given(releaseHistoryRepository.findPendingForUpdate()).willReturn(listOf(pending))
+        given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
+        val workload = persistedWorkload(workloadId, productId)
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
+        given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
+        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.Failed("git push failed"))
+
+        job.processPendingDeployments()
+
+        assertNull(pending.deployedAt)
+        assertEquals(1, pending.gitopsRetryCount)
+        assertEquals("git push failed", pending.gitopsError)
+        assertNull(pending.deployError)
+        assertFalse(pending.deploymentFailed)
+        assertNull(pending.deploymentFinished)
+        verify(releaseHistoryRepository).save(pending)
+    }
+
+    @Test
+    fun `gives up on a GitOps row after the 5th consecutive failed push attempt`() {
+        val releaseId = UUID.randomUUID()
+        val workloadId = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val stageId = UUID.randomUUID()
+
+        val pending = persistedHistoryEntry(
+            releaseId = releaseId, stageId = stageId, createdAt = Instant.now(), gitOpsManaged = true, gitopsRetryCount = 4,
+        )
+        given(releaseHistoryRepository.findPendingForUpdate()).willReturn(listOf(pending))
+        given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
+        val workload = persistedWorkload(workloadId, productId)
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
+        given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
+        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.Failed("git push failed"))
+
+        job.processPendingDeployments()
+
+        assertEquals(5, pending.gitopsRetryCount)
+        assertTrue(pending.deploymentFailed)
+        assertNotNull(pending.deploymentFinished)
+        assertNull(pending.deployedAt)
+        verify(releaseHistoryRepository).save(pending)
+    }
+
+    @Test
+    fun `skips silently without spending retry budget when the git lock is busy`() {
+        val releaseId = UUID.randomUUID()
+        val workloadId = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val stageId = UUID.randomUUID()
+
+        val pending = persistedHistoryEntry(releaseId = releaseId, stageId = stageId, createdAt = Instant.now(), gitOpsManaged = true)
+        given(releaseHistoryRepository.findPendingForUpdate()).willReturn(listOf(pending))
+        given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
+        val workload = persistedWorkload(workloadId, productId)
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
+        given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
+        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.GitLockBusy)
+
+        job.processPendingDeployments()
+
+        assertNull(pending.deployedAt)
+        assertEquals(0, pending.gitopsRetryCount)
+        assertNull(pending.gitopsError)
+        verify(releaseHistoryRepository, never()).save(pending)
     }
 
     @Test

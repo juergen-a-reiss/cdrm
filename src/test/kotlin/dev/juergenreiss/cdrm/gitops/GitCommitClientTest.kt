@@ -4,11 +4,16 @@
 package dev.juergenreiss.cdrm.gitops
 
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.`when`
+import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.TransactionStatus
 import java.io.File
 import java.nio.file.Path
 
@@ -57,7 +62,17 @@ class GitCommitClientTest {
         git(seed, "branch", "release")
         git(seed, "push", "origin", "release")
 
-        client = GitCommitClient(tempDir.resolve("workdir").toString(), "", "")
+        // No real database in this test — commitImageChange's git_lock acquisition is
+        // mocked out to always succeed immediately, so this stays a pure git-mechanics
+        // test (see the class doc comment) rather than needing a real Postgres/
+        // Testcontainers dependency just to exercise SELECT ... FOR UPDATE.
+        val jdbcTemplate = mock(JdbcTemplate::class.java)
+        `when`(jdbcTemplate.queryForObject("select id from git_lock where id = 1 for update nowait", Int::class.java)).thenReturn(1)
+        val transactionManager = mock(PlatformTransactionManager::class.java)
+        val transactionStatus = mock(TransactionStatus::class.java)
+        `when`(transactionManager.getTransaction(org.mockito.ArgumentMatchers.any(TransactionDefinition::class.java))).thenReturn(transactionStatus)
+
+        client = GitCommitClient(tempDir.resolve("workdir").toString(), "", "", jdbcTemplate, transactionManager)
     }
 
     private fun target(branch: String = "main") = GitOpsTarget(
@@ -77,7 +92,7 @@ class GitCommitClientTest {
     fun `commits and pushes the new image, actually visible in a fresh clone`() {
         val result = client.commitImageChange(target(), "new:2.0", "test commit")
 
-        assertNull(result)
+        assertEquals(GitCommitResult.Success, result)
         assertTrue(cloneAndReadFile("main").contains("new:2.0"))
     }
 
@@ -87,7 +102,7 @@ class GitCommitClientTest {
 
         val result = client.commitImageChange(target(), "new:2.0", "test commit again")
 
-        assertNull(result)
+        assertEquals(GitCommitResult.Success, result)
     }
 
     @Test
@@ -111,20 +126,35 @@ class GitCommitClientTest {
     fun `returns an error when the file does not exist in the repo`() {
         val result = client.commitImageChange(target().copy(filePath = "does/not/exist.yaml"), "new:2.0", "test commit")
 
-        assertEquals("file 'does/not/exist.yaml' not found in repo", result)
+        assertEquals(GitCommitResult.Failed("file 'does/not/exist.yaml' not found in repo"), result)
     }
 
     @Test
     fun `returns an error when the yaml key path does not resolve`() {
         val result = client.commitImageChange(target().copy(yamlKeyPath = "spec.nonexistent.image"), "new:2.0", "test commit")
 
-        assertTrue(result?.startsWith("yamlKeyPath 'spec.nonexistent.image'") == true)
+        assertTrue((result as? GitCommitResult.Failed)?.reason?.startsWith("yamlKeyPath 'spec.nonexistent.image'") == true)
     }
 
     @Test
     fun `returns an error for a branch that doesn't exist on the remote`() {
         val result = client.commitImageChange(target(branch = "no-such-branch"), "new:2.0", "test commit")
 
-        assertTrue(result?.contains("git checkout") == true)
+        assertTrue((result as? GitCommitResult.Failed)?.reason?.contains("git checkout") == true)
+    }
+
+    @Test
+    fun `returns LockBusy without touching git when the git_lock row can't be acquired`() {
+        val busyJdbcTemplate = mock(JdbcTemplate::class.java)
+        `when`(busyJdbcTemplate.queryForObject("select id from git_lock where id = 1 for update nowait", Int::class.java))
+            .thenThrow(org.springframework.dao.CannotAcquireLockException("lock not available"))
+        val transactionManager = mock(PlatformTransactionManager::class.java)
+        val transactionStatus = mock(TransactionStatus::class.java)
+        `when`(transactionManager.getTransaction(org.mockito.ArgumentMatchers.any(TransactionDefinition::class.java))).thenReturn(transactionStatus)
+        val busyClient = GitCommitClient(tempDir.resolve("workdir-busy").toString(), "", "", busyJdbcTemplate, transactionManager)
+
+        val result = busyClient.commitImageChange(target(), "new:2.0", "test commit")
+
+        assertEquals(GitCommitResult.LockBusy, result)
     }
 }

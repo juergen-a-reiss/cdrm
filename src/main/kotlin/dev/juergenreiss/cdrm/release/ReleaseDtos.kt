@@ -48,6 +48,11 @@ data class ReleaseResponse(
     // Reason deploymentFailed is true (e.g. "1 pod(s) restarting (restart count > 0)"),
     // so the frontend can show why without a separate history fetch. Null otherwise.
     val deploymentError: String?,
+    // See docs/deployment-status-state-machine.odg — NOT_APPLICABLE hides the
+    // respective UI column rather than showing it empty.
+    val gitOpsStatus: GitOpsStatus,
+    val gitopsError: String?,
+    val kubernetesStatus: KubernetesStatus,
     val createdAt: Instant,
     val modifiedAt: Instant,
     val createdBy: UUID,
@@ -81,6 +86,11 @@ data class ReleaseHistoryEntry(
     // is null, or while a Kubernetes rollout is still within its verification window.
     val deploymentFinished: Instant?,
     val deploymentFailed: Boolean,
+    // See docs/deployment-status-state-machine.odg — NOT_APPLICABLE hides the
+    // respective UI column rather than showing it empty.
+    val gitOpsStatus: GitOpsStatus,
+    val gitopsError: String?,
+    val kubernetesStatus: KubernetesStatus,
     val createdBy: UUID,
 )
 
@@ -104,6 +114,9 @@ data class ReleaseHistoryOverviewEntry(
     val deployError: String?,
     val deploymentFinished: Instant?,
     val deploymentFailed: Boolean,
+    val gitOpsStatus: GitOpsStatus,
+    val gitopsError: String?,
+    val kubernetesStatus: KubernetesStatus,
     val createdBy: UUID,
 )
 

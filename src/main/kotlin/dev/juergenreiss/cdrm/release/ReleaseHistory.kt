@@ -88,6 +88,42 @@ class ReleaseHistory(
     @Column(name = "deployment_failed", nullable = false)
     var deploymentFailed: Boolean = false,
 
+    // Snapshotted at insert time — see GitOpsResolver. Whether this row's deploy went
+    // through GitOps rather than a direct Kubernetes patch; gates which of gitopsError/
+    // deployError DeploymentExecutor's result is written into (see DeploymentSchedulerJob).
+    @Column(name = "gitops_managed", nullable = false)
+    val gitOpsManaged: Boolean = false,
+
+    // Also snapshotted at insert time — whether the workload was a Kubernetes workload.
+    // Purely a display concern (whether the "Kubernetes Status" column applies at all);
+    // actual deployment behavior always reads workload.kubernetes live.
+    @Column(name = "kubernetes_managed", nullable = false)
+    val kubernetesManaged: Boolean = false,
+
+    // Reason the most recent GitOps push attempt failed; cleared once it succeeds.
+    // Distinct from deployError, which is the Kubernetes rollout's own error.
+    @Column(name = "gitops_error")
+    var gitopsError: String? = null,
+
+    // Consecutive failed GitOps push attempts, capped at 5 (see DeploymentSchedulerJob) —
+    // on the 5th the row is given up on rather than retried forever.
+    @Column(name = "gitops_retry_count", nullable = false)
+    var gitopsRetryCount: Int = 0,
+
+    // First time verification observed the new image actually running on a pod — the
+    // 5-minute rollout grace period (DeploymentVerificationJob) is measured from here,
+    // not deployedAt, so an unsynced GitOps deploy waiting on ArgoCD/a human never times
+    // out on its own; only a rollout that visibly started and then stalls does.
+    @Column(name = "rollout_started_at")
+    var rolloutStartedAt: Instant? = null,
+
+    // Set when another deploy lands on this row's (workload, stage) while this one is
+    // still awaiting cluster sync or mid-rollout — superseding it instead of blocking
+    // the new deploy (see ReleaseService.requireNoConcurrentDeployment). Implies
+    // deploymentFinished is set to the same instant; deploymentFailed stays false.
+    @Column(name = "replaced_at")
+    var replacedAt: Instant? = null,
+
     @CreatedDate
     @Column(nullable = false, updatable = false)
     var createdAt: Instant? = null,

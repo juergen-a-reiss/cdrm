@@ -28,7 +28,7 @@ import type { ReleaseHistoryEntry, ReleaseResponse } from '../api/types'
 import { canManageReleases, canPromoteReleases, canRedeployReleases, canRollbackReleases } from '../auth/roles'
 import { formatDateTime } from '../utils/formatDateTime'
 import { RELEASE_HISTORY_ACTION_LABELS } from '../utils/releaseHistoryAction'
-import { formatDeploymentStatus } from '../utils/releaseHistoryStatus'
+import { formatDeploymentStatus, gitOpsStatusDisplay, kubernetesStatusDisplay } from '../utils/releaseHistoryStatus'
 import { sortParam } from '../utils/sortParam'
 
 interface ReleaseRow {
@@ -352,6 +352,8 @@ async function onRedeployed() {
                 <th>Action</th>
                 <th>Promoted</th>
                 <th>Deployed</th>
+                <th>GitOps</th>
+                <th>Kubernetes</th>
                 <th>By</th>
               </tr>
             </thead>
@@ -361,6 +363,26 @@ async function onRedeployed() {
                 <td>{{ RELEASE_HISTORY_ACTION_LABELS[entry.action] }}</td>
                 <td>{{ formatDateTime(entry.timestamp) }}</td>
                 <td>{{ formatDeploymentStatus(entry) }}</td>
+                <td>
+                  <v-chip
+                    v-if="gitOpsStatusDisplay(entry.gitOpsStatus)"
+                    :color="gitOpsStatusDisplay(entry.gitOpsStatus)!.color"
+                    size="small"
+                    variant="flat"
+                  >
+                    {{ gitOpsStatusDisplay(entry.gitOpsStatus)!.label }}
+                  </v-chip>
+                </td>
+                <td>
+                  <v-chip
+                    v-if="kubernetesStatusDisplay(entry.kubernetesStatus)"
+                    :color="kubernetesStatusDisplay(entry.kubernetesStatus)!.color"
+                    size="small"
+                    variant="flat"
+                  >
+                    {{ kubernetesStatusDisplay(entry.kubernetesStatus)!.label }}
+                  </v-chip>
+                </td>
                 <td>{{ entry.createdBy }}</td>
               </tr>
             </tbody>

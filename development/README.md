@@ -7,6 +7,7 @@ two ;)).
 
 ## Prerequisites
 
+- linux box: The startup scripts are very much linux tuned. While development on Mac/Win might be possible, it might be not straightforward to setup.
 - Docker with the Compose plugin
 - kubectl
 - minikube

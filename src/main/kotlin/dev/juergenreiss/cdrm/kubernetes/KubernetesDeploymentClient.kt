@@ -17,7 +17,12 @@ import java.time.Duration
 // Whether a Deployment/StatefulSet's rollout to a given image has actually completed —
 // not just accepted (see patchImage). detail explains why not when ready is false, or
 // "rollout complete" when true; DeploymentVerificationJob logs/stores it either way.
-data class RolloutStatus(val ready: Boolean, val detail: String)
+// imageObserved is true once at least one pod is confirmed running the target image —
+// DeploymentVerificationJob only starts its 5-minute grace-period clock once this flips
+// true, since before that we can't tell "still on the old image" apart from "ArgoCD/a
+// human hasn't gotten around to syncing yet", and only the former is ever worth timing
+// out on.
+data class RolloutStatus(val ready: Boolean, val detail: String, val imageObserved: Boolean)
 
 // Patches only the container image of a Deployment/StatefulSet via a JSON Patch PATCH
 // request — no full manifest management. Requires the workload's pod spec to have
@@ -87,10 +92,10 @@ class KubernetesDeploymentClient(
         val spec = objectMapper.readTree(current).path("spec")
         val expectedReplicas = if (spec.path("replicas").isMissingNode) 1 else spec.path("replicas").asInt(1)
         val containerName = spec.path("template").path("spec").path("containers").path(0).path("name").asString(null)
-            ?: return RolloutStatus(false, "manifest has no container to check")
+            ?: return RolloutStatus(false, "manifest has no container to check", imageObserved = false)
         val matchLabels = spec.path("selector").path("matchLabels")
         val selector = matchLabels.properties().joinToString(",") { (key, value) -> "$key=${value.asString()}" }
-        if (selector.isBlank()) return RolloutStatus(false, "no label selector found")
+        if (selector.isBlank()) return RolloutStatus(false, "no label selector found", imageObserved = false)
 
         val podsJson = restClient.get()
             .uri { it.path("/api/v1/namespaces/$namespace/pods").queryParam("labelSelector", selector).build() }
@@ -122,7 +127,12 @@ class KubernetesDeploymentClient(
         if (notReady > 0) reasons += "$notReady pod(s) not ready"
         if (restarting > 0) reasons += "$restarting pod(s) restarting (restart count > 0)"
 
-        return if (reasons.isEmpty()) RolloutStatus(true, "rollout complete") else RolloutStatus(false, reasons.joinToString("; "))
+        val imageObserved = podCount > 0 && staleImage < podCount
+        return if (reasons.isEmpty()) {
+            RolloutStatus(true, "rollout complete", imageObserved = true)
+        } else {
+            RolloutStatus(false, reasons.joinToString("; "), imageObserved)
+        }
     }
 
     private fun resourcePath(kind: KubernetesKind, namespace: String, name: String): String {

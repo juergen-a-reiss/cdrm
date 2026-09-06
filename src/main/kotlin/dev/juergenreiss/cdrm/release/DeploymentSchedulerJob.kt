@@ -35,6 +35,15 @@ class DeploymentSchedulerJob(
 
     private val log = LoggerFactory.getLogger(DeploymentSchedulerJob::class.java)
 
+    companion object {
+        // Consecutive failed GitOps push attempts before giving up on the row (see
+        // ReleaseHistory.gitopsRetryCount) — repeated git failures need a human to look
+        // at the repo/credentials, not an indefinite retry loop. Only ever applies to
+        // GitOps-managed rows; a direct Kubernetes patch failure keeps retrying forever,
+        // same as before this existed.
+        private const val MAX_GITOPS_RETRIES = 5
+    }
+
     @Scheduled(fixedRate = 60_000)
     @Transactional
     fun processPendingDeployments() {
@@ -49,19 +58,53 @@ class DeploymentSchedulerJob(
 
             if (!isDue(entry, workload.productId, stage.deploymentPolicy, now)) continue
 
-            val error = deploymentExecutor.attemptDeploy(workload, stage, release.image)
-            if (error == null) {
-                entry.deployedAt = now
-                entry.deployError = null
-                // Nothing to verify for a non-Kubernetes workload — DeploymentVerificationJob
-                // only ever looks at Kubernetes-backed deploys.
-                if (!workload.kubernetes) entry.deploymentFinished = now
-                releaseHistoryRepository.save(entry)
-                log.info("Deployed release {} at stage {}", entry.releaseId, entry.stageId)
-            } else {
-                entry.deployError = error
-                releaseHistoryRepository.save(entry)
-                log.warn("Deployment attempt failed for release {} at stage {} — will retry next tick", entry.releaseId, entry.stageId)
+            when (val result = deploymentExecutor.attemptDeploy(workload, stage, release.image)) {
+                is DeployAttemptResult.Success -> {
+                    entry.deployedAt = now
+                    entry.deployError = null
+                    entry.gitopsError = null
+                    // Nothing to verify for a non-Kubernetes workload — DeploymentVerificationJob
+                    // only ever looks at Kubernetes-backed deploys.
+                    if (!workload.kubernetes) entry.deploymentFinished = now
+                    releaseHistoryRepository.save(entry)
+                    log.info("Deployed release {} at stage {}", entry.releaseId, entry.stageId)
+                }
+                is DeployAttemptResult.Failed -> {
+                    if (entry.gitOpsManaged) {
+                        entry.gitopsRetryCount += 1
+                        entry.gitopsError = result.reason
+                        if (entry.gitopsRetryCount >= MAX_GITOPS_RETRIES) {
+                            entry.deploymentFailed = true
+                            entry.deploymentFinished = now
+                        }
+                    } else {
+                        entry.deployError = result.reason
+                    }
+                    // save() must not be the last statement of this branch — Kotlin
+                    // inserts an implicit non-null assertion on a when-branch's tail
+                    // expression, and JpaRepository.save's Java-generic return type
+                    // trips it (harmless against a real save, but NPEs against
+                    // Mockito's default null answer in tests) — keep a log call last.
+                    releaseHistoryRepository.save(entry)
+                    when {
+                        !entry.gitOpsManaged -> log.warn(
+                            "Deployment attempt failed for release {} at stage {} — will retry next tick", entry.releaseId, entry.stageId,
+                        )
+                        entry.gitopsRetryCount >= MAX_GITOPS_RETRIES -> log.error(
+                            "GitOps push permanently failed for release {} at stage {} after {} attempts: {}",
+                            entry.releaseId, entry.stageId, entry.gitopsRetryCount, result.reason,
+                        )
+                        else -> log.warn(
+                            "GitOps push attempt {}/{} failed for release {} at stage {} — will retry next tick",
+                            entry.gitopsRetryCount, MAX_GITOPS_RETRIES, entry.releaseId, entry.stageId,
+                        )
+                    }
+                }
+                DeployAttemptResult.GitLockBusy -> {
+                    // Contention with another git operation, not a failure of this push —
+                    // skip silently, retry next tick, don't spend any retry budget on it.
+                    log.debug("GitOps lock busy for release {} at stage {}, will retry next tick", entry.releaseId, entry.stageId)
+                }
             }
         }
     }

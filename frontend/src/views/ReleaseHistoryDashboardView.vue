@@ -25,7 +25,8 @@ import type { ReleaseHistoryAction, ReleaseHistoryFilterParams, ReleaseHistoryGr
 import { RELEASE_HISTORY_ACTIONS, RELEASE_HISTORY_ACTION_COLORS, RELEASE_HISTORY_ACTION_LABELS } from '../utils/releaseHistoryAction'
 import { colorForKey } from '../utils/categoricalPalette'
 import { formatDateTime } from '../utils/formatDateTime'
-import { formatDeploymentStatus } from '../utils/releaseHistoryStatus'
+import { formatDeploymentStatus, gitOpsStatusDisplay, kubernetesStatusDisplay } from '../utils/releaseHistoryStatus'
+import type { GitOpsStatus, KubernetesStatus } from '../api/types'
 import { sortParam } from '../utils/sortParam'
 
 // Everything below — the table's rows, its total count, and the chart's aggregated
@@ -214,6 +215,8 @@ interface HistoryRow {
   stageName: string
   image: string
   deployedDisplay: string
+  gitOpsStatus: GitOpsStatus
+  kubernetesStatus: KubernetesStatus
   createdBy: string
 }
 
@@ -255,6 +258,8 @@ const tableRows = computed<HistoryRow[]>(() =>
     stageName: entry.stage.name,
     image: entry.image,
     deployedDisplay: formatDeploymentStatus(entry),
+    gitOpsStatus: entry.gitOpsStatus,
+    kubernetesStatus: entry.kubernetesStatus,
     createdBy: entry.createdBy,
   })),
 )
@@ -267,6 +272,10 @@ const historyHeaders: DataTableHeader<HistoryRow>[] = [
   { title: 'Stage', key: 'stageName' },
   { title: 'Image', key: 'image' },
   { title: 'Deployed', key: 'deployedDisplay' },
+  // Not backend-sortable — historyOverviewSortKeys (ReleaseService) doesn't expose
+  // these two derived columns as sort keys.
+  { title: 'GitOps', key: 'gitOpsStatus', sortable: false },
+  { title: 'Kubernetes', key: 'kubernetesStatus', sortable: false },
   { title: 'By', key: 'createdBy' },
 ]
 
@@ -369,6 +378,26 @@ onMounted(() => {
       v-model:items-per-page="itemsPerPage"
     >
       <template #item.timestamp="{ item }">{{ formatDateTime(item.timestamp) }}</template>
+      <template #item.gitOpsStatus="{ item }">
+        <v-chip
+          v-if="gitOpsStatusDisplay(item.gitOpsStatus)"
+          :color="gitOpsStatusDisplay(item.gitOpsStatus)!.color"
+          size="small"
+          variant="flat"
+        >
+          {{ gitOpsStatusDisplay(item.gitOpsStatus)!.label }}
+        </v-chip>
+      </template>
+      <template #item.kubernetesStatus="{ item }">
+        <v-chip
+          v-if="kubernetesStatusDisplay(item.kubernetesStatus)"
+          :color="kubernetesStatusDisplay(item.kubernetesStatus)!.color"
+          size="small"
+          variant="flat"
+        >
+          {{ kubernetesStatusDisplay(item.kubernetesStatus)!.label }}
+        </v-chip>
+      </template>
     </ResourceTable>
   </v-card>
 </template>

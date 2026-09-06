@@ -1,6 +1,7 @@
 package dev.juergenreiss.cdrm.release
 
 import dev.juergenreiss.cdrm.gitops.GitCommitClient
+import dev.juergenreiss.cdrm.gitops.GitCommitResult
 import dev.juergenreiss.cdrm.gitops.GitOpsResolver
 import dev.juergenreiss.cdrm.gitops.GitOpsTarget
 import dev.juergenreiss.cdrm.kubernetes.KubernetesDeploymentClient
@@ -13,6 +14,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
@@ -82,30 +84,30 @@ class DeploymentExecutorTest {
     )
 
     @Test
-    fun `returns null without calling the client for a non-kubernetes workload`() {
+    fun `returns Success without calling the client for a non-kubernetes workload`() {
         val result = executor.attemptDeploy(workload(kubernetes = false), stage(), "image:1.0")
 
-        assertNull(result)
+        assertEquals(DeployAttemptResult.Success, result)
         verifyNoInteractions(kubernetesDeploymentClient)
     }
 
     @Test
-    fun `returns a reason and increments the failure counter when the stage has no kubernetes context configured`() {
+    fun `returns Failed and increments the failure counter when the stage has no kubernetes context configured`() {
         val result = executor.attemptDeploy(workload(kubernetes = true), stage(kubernetesContext = null), "image:1.0")
 
-        assertNotNull(result)
+        assertTrue(result is DeployAttemptResult.Failed)
         verifyNoInteractions(kubernetesDeploymentClient)
         assertEquals(1.0, meterRegistry.get("cdrm.deploy.failed").counter().count())
     }
 
     @Test
-    fun `returns null and patches the image on success`() {
+    fun `returns Success and patches the image on success`() {
         val stage = stage(kubernetesContext = "my-context")
         val workload = workload(kubernetes = true)
 
         val result = executor.attemptDeploy(workload, stage, "image:1.0")
 
-        assertNull(result)
+        assertEquals(DeployAttemptResult.Success, result)
         verify(kubernetesDeploymentClient).patchImage("my-context", "platform", KubernetesKind.DEPLOYMENT, "workload", "image:1.0")
     }
 
@@ -116,7 +118,7 @@ class DeploymentExecutorTest {
 
         val result = executor.attemptDeploy(workload, stage, "image:1.0")
 
-        assertNull(result)
+        assertEquals(DeployAttemptResult.Success, result)
         verify(kubernetesDeploymentClient).patchImage("minikube", "dev-platform", KubernetesKind.DEPLOYMENT, "workload", "image:1.0")
     }
 
@@ -129,7 +131,7 @@ class DeploymentExecutorTest {
 
         val result = executor.attemptDeploy(workload, stage, "image:1.0")
 
-        assertEquals("cluster not reachable", result)
+        assertEquals(DeployAttemptResult.Failed("cluster not reachable"), result)
         assertEquals(1.0, meterRegistry.get("cdrm.deploy.failed").counter().count())
     }
 
@@ -150,11 +152,11 @@ class DeploymentExecutorTest {
         // expected commit message sidesteps that entirely.
         given(
             gitCommitClient.commitImageChange(target, "image:1.0", "cdrm: deploy image:1.0 for workload 'workload' at stage 'Prod'")
-        ).willReturn(null)
+        ).willReturn(GitCommitResult.Success)
 
         val result = executor.attemptDeploy(workload, stage, "image:1.0")
 
-        assertNull(result)
+        assertEquals(DeployAttemptResult.Success, result)
         verifyNoInteractions(kubernetesDeploymentClient)
     }
 
@@ -171,11 +173,11 @@ class DeploymentExecutorTest {
         given(gitOpsResolver.resolve(workload, stage)).willReturn(target)
         given(
             gitCommitClient.commitImageChange(target, "image:1.0", "cdrm: deploy image:1.0 for workload 'workload' at stage 'Prod'")
-        ).willReturn("git push failed: connection refused")
+        ).willReturn(GitCommitResult.Failed("git push failed: connection refused"))
 
         val result = executor.attemptDeploy(workload, stage, "image:1.0")
 
-        assertEquals("git push failed: connection refused", result)
+        assertEquals(DeployAttemptResult.Failed("git push failed: connection refused"), result)
         assertEquals(1.0, meterRegistry.get("cdrm.deploy.failed").counter().count())
         verifyNoInteractions(kubernetesDeploymentClient)
     }

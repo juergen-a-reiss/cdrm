@@ -97,7 +97,7 @@ class DeploymentVerificationJobTest {
         modifiedBy = UUID.randomUUID(),
     )
 
-    private fun awaitingEntry(releaseId: UUID, stageId: UUID, deployedAt: Instant) = ReleaseHistory(
+    private fun awaitingEntry(releaseId: UUID, stageId: UUID, deployedAt: Instant, rolloutStartedAt: Instant? = null) = ReleaseHistory(
         releaseId = releaseId,
         workloadName = "workload",
         productId = UUID.randomUUID(),
@@ -106,6 +106,7 @@ class DeploymentVerificationJobTest {
         stageId = stageId,
         stageName = "stage",
         deployedAt = deployedAt,
+        rolloutStartedAt = rolloutStartedAt,
         createdBy = UUID.randomUUID(),
     )
 
@@ -123,7 +124,7 @@ class DeploymentVerificationJobTest {
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
         given(stageRepository.findById(stageId)).willReturn(Optional.of(persistedStage(stageId)))
         given(kubernetesDeploymentClient.checkRollout("my-context", "platform", KubernetesKind.DEPLOYMENT, workload.name, entry.image))
-            .willReturn(RolloutStatus(true, "rollout complete"))
+            .willReturn(RolloutStatus(true, "rollout complete", imageObserved = true))
 
         job.verifyPendingDeployments()
 
@@ -134,20 +135,77 @@ class DeploymentVerificationJobTest {
     }
 
     @Test
-    fun `leaves a not-yet-ready rollout pending within the grace period`() {
+    fun `never fails while the new image hasn't been observed on any pod, even long past the grace period`() {
         val releaseId = UUID.randomUUID()
         val workloadId = UUID.randomUUID()
         val productId = UUID.randomUUID()
         val stageId = UUID.randomUUID()
 
-        val entry = awaitingEntry(releaseId, stageId, deployedAt = Instant.now().minus(1, ChronoUnit.MINUTES))
+        // Still on the previous image (e.g. an unsynced GitOps deploy) — indistinguishable
+        // from "ArgoCD/a human hasn't gotten to it yet", so this must never time out.
+        val entry = awaitingEntry(releaseId, stageId, deployedAt = Instant.now().minus(1, ChronoUnit.HOURS))
         given(releaseHistoryRepository.findAwaitingVerification()).willReturn(listOf(entry))
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         val workload = persistedWorkload(workloadId, productId, kubernetes = true)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
         given(stageRepository.findById(stageId)).willReturn(Optional.of(persistedStage(stageId)))
         given(kubernetesDeploymentClient.checkRollout("my-context", "platform", KubernetesKind.DEPLOYMENT, workload.name, entry.image))
-            .willReturn(RolloutStatus(false, "1/2 pods present"))
+            .willReturn(RolloutStatus(false, "1 pod(s) still running the previous image", imageObserved = false))
+
+        job.verifyPendingDeployments()
+
+        assertNull(entry.deploymentFinished)
+        assertFalse(entry.deploymentFailed)
+        assertNull(entry.rolloutStartedAt)
+        verify(releaseHistoryRepository, never()).save(entry)
+    }
+
+    @Test
+    fun `starts the grace-period clock the first time the new image is observed running`() {
+        val releaseId = UUID.randomUUID()
+        val workloadId = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val stageId = UUID.randomUUID()
+
+        // deployedAt is old, but rolloutStartedAt is null — this is the first tick that
+        // sees the new image, however late; that's what should start the clock, not
+        // deployedAt.
+        val entry = awaitingEntry(releaseId, stageId, deployedAt = Instant.now().minus(1, ChronoUnit.HOURS))
+        given(releaseHistoryRepository.findAwaitingVerification()).willReturn(listOf(entry))
+        given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
+        val workload = persistedWorkload(workloadId, productId, kubernetes = true)
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        given(stageRepository.findById(stageId)).willReturn(Optional.of(persistedStage(stageId)))
+        given(kubernetesDeploymentClient.checkRollout("my-context", "platform", KubernetesKind.DEPLOYMENT, workload.name, entry.image))
+            .willReturn(RolloutStatus(false, "1/2 pods present", imageObserved = true))
+
+        job.verifyPendingDeployments()
+
+        assertNotNull(entry.rolloutStartedAt)
+        assertNull(entry.deploymentFinished)
+        assertFalse(entry.deploymentFailed)
+        verify(releaseHistoryRepository).save(entry)
+    }
+
+    @Test
+    fun `leaves a rollout pending within the grace period once it has started`() {
+        val releaseId = UUID.randomUUID()
+        val workloadId = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val stageId = UUID.randomUUID()
+
+        val entry = awaitingEntry(
+            releaseId, stageId,
+            deployedAt = Instant.now().minus(1, ChronoUnit.HOURS),
+            rolloutStartedAt = Instant.now().minus(1, ChronoUnit.MINUTES),
+        )
+        given(releaseHistoryRepository.findAwaitingVerification()).willReturn(listOf(entry))
+        given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
+        val workload = persistedWorkload(workloadId, productId, kubernetes = true)
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        given(stageRepository.findById(stageId)).willReturn(Optional.of(persistedStage(stageId)))
+        given(kubernetesDeploymentClient.checkRollout("my-context", "platform", KubernetesKind.DEPLOYMENT, workload.name, entry.image))
+            .willReturn(RolloutStatus(false, "1/2 pods present", imageObserved = true))
 
         job.verifyPendingDeployments()
 
@@ -157,7 +215,58 @@ class DeploymentVerificationJobTest {
     }
 
     @Test
-    fun `marks the deployment failed once the grace period elapses without a ready rollout`() {
+    fun `marks the deployment failed once the grace period elapses after the rollout started`() {
+        val releaseId = UUID.randomUUID()
+        val workloadId = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val stageId = UUID.randomUUID()
+
+        val entry = awaitingEntry(
+            releaseId, stageId,
+            deployedAt = Instant.now().minus(1, ChronoUnit.HOURS),
+            rolloutStartedAt = Instant.now().minus(6, ChronoUnit.MINUTES),
+        )
+        given(releaseHistoryRepository.findAwaitingVerification()).willReturn(listOf(entry))
+        given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
+        val workload = persistedWorkload(workloadId, productId, kubernetes = true)
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        given(stageRepository.findById(stageId)).willReturn(Optional.of(persistedStage(stageId)))
+        given(kubernetesDeploymentClient.checkRollout("my-context", "platform", KubernetesKind.DEPLOYMENT, workload.name, entry.image))
+            .willReturn(RolloutStatus(false, "1 pod(s) restarting (restart count > 0)", imageObserved = true))
+
+        job.verifyPendingDeployments()
+
+        assertNotNull(entry.deploymentFinished)
+        assertTrue(entry.deploymentFailed)
+        assertEquals("1 pod(s) restarting (restart count > 0)", entry.deployError)
+        verify(releaseHistoryRepository).save(entry)
+    }
+
+    @Test
+    fun `never fails when the cluster or API server is unreachable`() {
+        val releaseId = UUID.randomUUID()
+        val workloadId = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val stageId = UUID.randomUUID()
+
+        val entry = awaitingEntry(releaseId, stageId, deployedAt = Instant.now().minus(1, ChronoUnit.HOURS))
+        given(releaseHistoryRepository.findAwaitingVerification()).willReturn(listOf(entry))
+        given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
+        val workload = persistedWorkload(workloadId, productId, kubernetes = true)
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        given(stageRepository.findById(stageId)).willReturn(Optional.of(persistedStage(stageId)))
+        given(kubernetesDeploymentClient.checkRollout("my-context", "platform", KubernetesKind.DEPLOYMENT, workload.name, entry.image))
+            .willThrow(RuntimeException("connection refused"))
+
+        job.verifyPendingDeployments()
+
+        assertNull(entry.deploymentFinished)
+        assertFalse(entry.deploymentFailed)
+        verify(releaseHistoryRepository, never()).save(entry)
+    }
+
+    @Test
+    fun `still times out from deployedAt when Kubernetes configuration is missing for the stage`() {
         val releaseId = UUID.randomUUID()
         val workloadId = UUID.randomUUID()
         val productId = UUID.randomUUID()
@@ -168,15 +277,13 @@ class DeploymentVerificationJobTest {
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         val workload = persistedWorkload(workloadId, productId, kubernetes = true)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
-        given(stageRepository.findById(stageId)).willReturn(Optional.of(persistedStage(stageId)))
-        given(kubernetesDeploymentClient.checkRollout("my-context", "platform", KubernetesKind.DEPLOYMENT, workload.name, entry.image))
-            .willReturn(RolloutStatus(false, "1 pod(s) restarting (restart count > 0)"))
+        given(stageRepository.findById(stageId)).willReturn(Optional.of(persistedStage(stageId, context = null)))
 
         job.verifyPendingDeployments()
 
         assertNotNull(entry.deploymentFinished)
         assertTrue(entry.deploymentFailed)
-        assertEquals("1 pod(s) restarting (restart count > 0)", entry.deployError)
+        assertEquals("Kubernetes configuration missing for this stage", entry.deployError)
         verify(releaseHistoryRepository).save(entry)
     }
 

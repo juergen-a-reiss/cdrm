@@ -198,6 +198,124 @@ scheduled deployments survive an application restart - the job simply resumes fr
 after startup. If the application was down when a scheduled deployment's cron time should have fired, it is deployed
 late, on the next tick after the app comes back up, rather than being skipped.
 
+#### Deployment Status Tracking
+
+Once a deploy is accepted, cdrm tracks its outcome as two independent tracks rather than
+a single pass/fail flag — a GitOps-managed deploy is only partially in cdrm's own
+control, so "failed" has to mean different things depending on which part broke. Each
+track's state machine is kept as a Mermaid diagram directly below, so it renders inline
+on GitHub and stays in one place rather than needing a separate file exported to an
+image.
+
+**GitOps Status** — only shown when the target stage/namespace is GitOps-managed (see
+Kubernetes Clusters above): whether committing and pushing the image change to the
+GitOps repo succeeded. A push failure is retried automatically on the next scheduler
+tick; after 5 consecutive failures the row is given up on and flagged as a permanent
+failure needing attention (e.g. a broken credential or an unreachable repo), rather than
+retried forever.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Pending
+
+    state "Pending<br/>not attempted yet" as Pending
+    state "Push Succeeded<br/>git commit + push accepted" as PushSucceeded
+    state "Push Failed: Retrying<br/>gitopsError set, will retry" as PushFailedRetrying
+    state "Push Failure<br/>git reset hard." as PushFailure
+
+    Pending --> PushSucceeded: commit + push OK
+    Pending --> PushFailedRetrying: git error
+    PushFailedRetrying --> Pending: retry next scheduler tick (60s)
+    PushFailedRetrying --> PushFailure: 5 failed retries
+    PushSucceeded --> [*]
+    PushFailure --> [*]
+
+    classDef success fill:#e8f6ec,stroke:#1a3a63,color:#000
+    classDef retry fill:#ffe8c2,stroke:#6b4c14,color:#000
+    classDef fail fill:#d94f1e,stroke:#1a3a63,color:#fff
+    class PushSucceeded success
+    class PushFailedRetrying retry
+    class PushFailure fail
+```
+
+**Kubernetes Status** — only shown for Kubernetes workloads: whether the image is
+actually confirmed running in the cluster (all replicas on the new image, ready, no
+restarts). For a GitOps-managed deploy, this only starts progressing once ArgoCD (or
+whichever tool reconciles the repo) has actually synced the change — cdrm never times
+out while waiting for that on its own, since a slow or manual sync is not a failure. Only
+once the new image is observed running on at least one pod does a 5-minute grace period
+apply; a rollout that has not fully succeeded by then is marked failed. If a release is
+promoted or redeployed to a (workload, stage) pair while a previous deploy there is still
+awaiting cluster sync or mid-rollout, that previous one is marked **Replaced** instead of
+blocking the new one — a deploy that already finished (successfully or not) is never
+affected this way.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> NotStarted
+
+    state "Not Started<br/>deploy not yet accepted" as NotStarted
+    state "Awaiting Cluster Sync<br/>pods still on previous image<br/>NO timeout in this state" as AwaitingClusterSync
+    state "Rolling Out<br/>grace-period clock running" as RollingOut
+    state "Healthy<br/>deploymentFailed = false" as Healthy
+    state "Failed<br/>deploymentFailed = true<br/>blocks promotion (redeploy OK)" as Failed
+    state "Replaced" as Replaced
+
+    NotStarted --> AwaitingClusterSync: deploy accepted
+    AwaitingClusterSync --> AwaitingClusterSync: cluster unreachable, workload missing
+    AwaitingClusterSync --> RollingOut: new image observed on ≥1 pod, grace-period clock starts
+    RollingOut --> Healthy: all replicas ready, 0 restarts
+    RollingOut --> Failed: grace period (5 min) elapsed, still not ready or restarting
+    AwaitingClusterSync --> Replaced: superseded
+    RollingOut --> Replaced: superseded
+    note right of Replaced
+        Only reachable from Awaiting Cluster Sync or
+        Rolling Out: set when another release is promoted/redeployed to this same (workload, stage) pair before this one
+        finishes. A release already Healthy or Failed is never retroactively Replaced.
+    end note
+    Healthy --> [*]
+    Failed --> [*]
+    Replaced --> [*]
+
+    classDef success fill:#e8f6ec,stroke:#1a3a63,color:#000
+    classDef progress fill:#fff8e1,stroke:#6b4c14,color:#000
+    classDef fail fill:#fdecea,stroke:#6b4c14,color:#000
+    classDef replaced fill:#ffd9b3,stroke:#6b4c14,color:#000
+    class Healthy success
+    class AwaitingClusterSync,RollingOut progress
+    class Failed fail
+    class Replaced replaced
+```
+
+A deploy is only ever reported as failed once it has actually reached Kubernetes and
+failed there, or — for GitOps — once the push itself has permanently failed; never merely
+because an external tool hasn't gotten around to it yet. Only a release still awaiting
+cluster sync or mid-rollout can be superseded this way — one that already finished
+(successfully or not) never gets its status changed retroactively.
+
+**UI mapping into the Release History and Releases views:**
+
+* "GitOps Status" column
+  * Lane 1's current state,
+  * or "—" when this row's stage/namespace isn't GitOps-managed (snapshotted per row as `gitOpsManaged`).
+  * Not rendered in the Releases view for releases that aren't GitOps-managed.
+* "Kubernetes Status" column
+  * Lane 2's current state,
+  * or "—" when the workload isn't a Kubernetes workload.
+  * Not rendered in the Releases view for releases that aren't Kubernetes.
+* Non-Kubernetes workload: Lane 2 is skipped entirely — acceptance immediately counts as Healthy (`deploymentFinished = deployedAt`).
+* The legacy single "Failed" badge (`deploymentFailed`) is driven purely by Lane 1 or Lane 2:
+  * Lane 1: a terminal GitOps push failure sets it — after all, what shall we do if git simply does not allow us to push? We fail.
+  * Lane 2: only a real Kubernetes rollout failure sets it — we wait for the cluster to come up again, or for the workload to appear.
+
+All GitOps commits across the whole application (and every instance of it, if scaled out)
+are strictly serialized through a single database-backed lock, so two deploys can never
+interleave commits to the same clone. A request that can't acquire it right away fails
+fast with HTTP 429 rather than queuing — retrying shortly after succeeds once whichever
+other git operation was in progress has completed.
+
 ## Release History Dashboard
 
 The release history is what it is all about! In case you ever built a CI/CD pipeline with jenkins or github actions, you

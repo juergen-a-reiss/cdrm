@@ -122,6 +122,60 @@ databaseChangeLog:
                   defaultValueBoolean: false
                   constraints:
                     nullable: false
+              # Snapshotted at insert time (the resolver's answer can change later as
+              # cluster config is edited) — whether this row's deploy went through
+              # GitOps (see GitOpsResolver) rather than a direct Kubernetes patch. Drives
+              # which columns the UI shows: gitops_error/gitops_retry_count only ever
+              # apply when this is true; deploy_error is Kubernetes-rollout-side only.
+              - column:
+                  name: gitops_managed
+                  type: boolean
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              # Also snapshotted at insert time, alongside gitops_managed — whether the
+              # workload was a Kubernetes workload. Used purely to decide whether the UI's
+              # "Kubernetes Status" column applies at all (it's hidden, not computed, when
+              # this is false) rather than to change any deployment behavior — that's
+              # still workload.kubernetes, read live via WorkloadRepository.
+              - column:
+                  name: kubernetes_managed
+                  type: boolean
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              # Reason the most recent GitOps push attempt failed; cleared once it
+              # succeeds. Distinct from deploy_error, which is the Kubernetes rollout's
+              # own error — a GitOps push failure never touches deploy_error.
+              - column:
+                  name: gitops_error
+                  type: text
+              # Consecutive failed GitOps push attempts. Capped at 5 (see
+              # DeploymentSchedulerJob) — on the 5th, the row is given up on
+              # (deployment_failed/deployment_finished set) rather than retried forever,
+              # since repeated git failures need a human to look at the repo/credentials.
+              - column:
+                  name: gitops_retry_count
+                  type: integer
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              # First time the Kubernetes rollout verification observed the new image
+              # actually running on a pod. The 5-minute rollout grace period is measured
+              # from here, not from deployed_at — a GitOps deploy can sit unsynced for an
+              # arbitrary time waiting on ArgoCD/a human without ever being reported as
+              # failed; only a rollout that has visibly started and then stalls is.
+              - column:
+                  name: rollout_started_at
+                  type: timestamp with time zone
+              # Set when another deploy lands on this row's (workload, stage) while this
+              # one is still awaiting cluster sync or mid-rollout (deployment_finished
+              # still null) — superseding it instead of blocking the new deploy. Implies
+              # deployment_finished is also set (to the same instant); deployment_failed
+              # stays false, since being superseded isn't a failure of this deploy.
+              - column:
+                  name: replaced_at
+                  type: timestamp with time zone
               # No FK to workload.id/product.id on purpose: denormalized so by-workload/
               # by-product statistics keep working once a workload's releases (and then the
               # workload itself, and then its product) are deleted.

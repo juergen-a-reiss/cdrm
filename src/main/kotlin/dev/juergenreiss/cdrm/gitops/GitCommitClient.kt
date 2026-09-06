@@ -5,16 +5,29 @@ package dev.juergenreiss.cdrm.gitops
 
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.dao.CannotAcquireLockException
+import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Component
+import org.springframework.transaction.PlatformTransactionManager
+import org.springframework.transaction.TransactionDefinition
+import org.springframework.transaction.support.TransactionTemplate
 import org.yaml.snakeyaml.DumperOptions
 import org.yaml.snakeyaml.Yaml
 import java.io.File
 import java.security.MessageDigest
 import java.util.Base64
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.locks.ReentrantLock
 
 class GitCommitException(message: String) : RuntimeException(message)
+
+sealed interface GitCommitResult {
+    data object Success : GitCommitResult
+    data class Failed(val reason: String) : GitCommitResult
+    // git_lock (see the 005-create-git-lock migration) couldn't be taken with NOWAIT —
+    // another git operation, anywhere in the app (any instance), is in progress right
+    // now. Not this commit's own failure; the caller decides what that means (see
+    // DeployAttemptResult.GitLockBusy).
+    data object LockBusy : GitCommitResult
+}
 
 // Commits an image-tag change into a GitOps repo instead of patching Kubernetes
 // directly (see GitOpsResolver) — ArgoCD (or similar) reconciles the cluster from what
@@ -30,50 +43,69 @@ class GitCommitClient(
     @Value("\${cdrm.gitops.work-dir:\${java.io.tmpdir}/cdrm-gitops}") private val workDir: String,
     @Value("\${cdrm.gitops.git-username:}") private val gitUsername: String,
     @Value("\${cdrm.gitops.git-password:}") private val gitPassword: String,
+    private val jdbcTemplate: JdbcTemplate,
+    transactionManager: PlatformTransactionManager,
 ) {
     private val log = LoggerFactory.getLogger(GitCommitClient::class.java)
 
-    // One local clone per repo URL, fast-forwarded before every use — a
-    // ReentrantLock per repo so two concurrent deploys touching the same repo (even
-    // different files/branches) never race on the same working tree.
-    private val locks = ConcurrentHashMap<String, ReentrantLock>()
+    // Every git operation across the whole app (and every instance of it) is strictly
+    // serialized through the single git_lock row — a git clone's working tree isn't
+    // safe for concurrent commits, and unlike a plain in-JVM lock this also holds across
+    // multiple backend instances. PROPAGATION_REQUIRES_NEW: the lock (and the dedicated
+    // connection holding it) must span exactly this git operation, independent of
+    // whatever transaction the caller is already in.
+    private val lockTransaction = TransactionTemplate(transactionManager).apply {
+        propagationBehavior = TransactionDefinition.PROPAGATION_REQUIRES_NEW
+    }
 
-    // Returns null on success, else a short human-readable reason — same contract
-    // KubernetesDeploymentClient.patchImage's caller (DeploymentExecutor) already uses.
-    fun commitImageChange(target: GitOpsTarget, image: String, commitMessage: String): String? {
-        val lock = locks.computeIfAbsent(target.repositoryUrl) { ReentrantLock() }
-        lock.lock()
-        try {
+    // NOWAIT: a caller that can't get the lock right now fails fast instead of queuing
+    // behind whichever git operation is currently running — DeployAttemptResult.GitLockBusy
+    // maps to an immediate HTTP 429 for a synchronous request, or a same-tick retry
+    // (without spending retry budget) for the scheduler. Postgres releases the row lock
+    // automatically if the holding transaction/connection dies, so a crash mid-git-
+    // operation can't wedge every future deploy behind it.
+    fun commitImageChange(target: GitOpsTarget, image: String, commitMessage: String): GitCommitResult {
+        return try {
+            lockTransaction.execute {
+                jdbcTemplate.queryForObject("select id from git_lock where id = 1 for update nowait", Int::class.java)
+                doCommit(target, image, commitMessage)
+            } ?: GitCommitResult.Failed("git lock transaction returned no result")
+        } catch (e: CannotAcquireLockException) {
+            log.info("GitOps lock busy — another git operation is in progress, will retry ({})", target.repositoryUrl)
+            GitCommitResult.LockBusy
+        }
+    }
+
+    private fun doCommit(target: GitOpsTarget, image: String, commitMessage: String): GitCommitResult {
+        return try {
             val dir = ensureClone(target.repositoryUrl)
             checkout(dir, target.branch)
 
             val file = File(dir, target.filePath)
-            if (!file.isFile) return "file '${target.filePath}' not found in repo"
+            if (!file.isFile) return GitCommitResult.Failed("file '${target.filePath}' not found in repo")
             val yaml = Yaml(DumperOptions().apply { defaultFlowStyle = DumperOptions.FlowStyle.BLOCK })
             @Suppress("UNCHECKED_CAST")
             val root = (yaml.load(file.readText()) as? MutableMap<String, Any?>)
-                ?: return "'${target.filePath}' is not a YAML mapping"
+                ?: return GitCommitResult.Failed("'${target.filePath}' is not a YAML mapping")
             try {
                 YamlPathEditor.setValue(root, target.yamlKeyPath, image)
             } catch (e: IllegalArgumentException) {
-                return "yamlKeyPath '${target.yamlKeyPath}' in '${target.filePath}': ${e.message}"
+                return GitCommitResult.Failed("yamlKeyPath '${target.yamlKeyPath}' in '${target.filePath}': ${e.message}")
             }
             file.writeText(yaml.dump(root))
 
             git(dir, "add", target.filePath)
             val commit = git(dir, "commit", "-m", commitMessage, allowFailure = true)
             if (commit.exitCode != 0) {
-                if ("nothing to commit" in commit.output) return null
-                return "git commit failed: ${commit.output.trim()}"
+                if ("nothing to commit" in commit.output) return GitCommitResult.Success
+                return GitCommitResult.Failed("git commit failed: ${commit.output.trim()}")
             }
             git(dir, "push", "origin", target.branch)
             log.info("Committed {} = '{}' to {}#{} ({})", target.yamlKeyPath, image, target.repositoryUrl, target.branch, target.filePath)
-            return null
+            GitCommitResult.Success
         } catch (e: GitCommitException) {
             log.error("GitOps commit failed for {}: {}", target.repositoryUrl, e.message)
-            return e.message
-        } finally {
-            lock.unlock()
+            GitCommitResult.Failed(e.message ?: "git operation failed")
         }
     }
 
@@ -88,6 +120,10 @@ class GitCommitClient(
         return dir
     }
 
+    // Also the terminal recovery action after a GitOps row gives up (5 failed retries,
+    // see DeploymentSchedulerJob): the local clone is already reset/cleaned to the
+    // remote branch tip on every attempt, so there's nothing extra to unwind — the next
+    // attempt (a fresh redeploy) starts from a known-good state by construction.
     private fun checkout(dir: File, branch: String) {
         git(dir, "checkout", "-B", branch, "origin/$branch")
         git(dir, "reset", "--hard", "origin/$branch")

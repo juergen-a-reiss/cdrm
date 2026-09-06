@@ -89,8 +89,10 @@ interface ReleaseHistoryRepository : JpaRepository<ReleaseHistory, UUID>, JpaSpe
     fun findLastDeployedAtByReleaseIdIn(releaseIds: Collection<UUID>): List<ReleaseIdAndLastDeployedAt>
 
     // Locked so a second app instance (or a slow-running overlapping tick) can't
-    // process the same pending row twice.
+    // process the same pending row twice. Excludes rows already given up on (a GitOps
+    // row that hit its 5th failed push retry has deploymentFinished set despite
+    // deployedAt staying null — see DeploymentSchedulerJob).
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select h from ReleaseHistory h where h.deployedAt is null")
+    @Query("select h from ReleaseHistory h where h.deployedAt is null and h.deploymentFinished is null")
     fun findPendingForUpdate(): List<ReleaseHistory>
 }

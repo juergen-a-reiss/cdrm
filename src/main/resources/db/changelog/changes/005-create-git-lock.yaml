@@ -1,0 +1,27 @@
+databaseChangeLog:
+  - changeSet:
+      id: 005-create-git-lock
+      author: juergen
+      changes:
+        # Exactly one row, ever. GitCommitClient takes it with SELECT ... FOR UPDATE
+        # NOWAIT before touching any GitOps repo, so all git operations across the whole
+        # app (and every instance of it) are strictly serialized — two concurrent
+        # commits to the same clone would otherwise be able to interleave/corrupt each
+        # other. NOWAIT means a caller that can't get it fails fast (mapped to HTTP 429)
+        # instead of queuing; Postgres releases the row lock automatically if the
+        # holding transaction/connection dies, so a crash mid-operation can't wedge it.
+        - createTable:
+            tableName: git_lock
+            columns:
+              - column:
+                  name: id
+                  type: int
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+        - insert:
+            tableName: git_lock
+            columns:
+              - column:
+                  name: id
+                  valueNumeric: 1

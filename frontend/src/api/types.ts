@@ -181,6 +181,20 @@ export interface ReleaseStageInfo {
   order: number
 }
 
+// See docs/deployment-status-state-machine.odg — release_history's two independent
+// tracks. NOT_APPLICABLE means the respective UI column should be hidden entirely for
+// this row, not shown empty (it's not GitOps-managed / not a Kubernetes workload).
+export type GitOpsStatus = 'NOT_APPLICABLE' | 'PENDING' | 'PUSH_SUCCEEDED' | 'PUSH_FAILED_RETRYING' | 'PUSH_FAILED'
+
+export type KubernetesStatus =
+  | 'NOT_APPLICABLE'
+  | 'NOT_STARTED'
+  | 'AWAITING_CLUSTER_SYNC'
+  | 'ROLLING_OUT'
+  | 'HEALTHY'
+  | 'FAILED'
+  | 'REPLACED'
+
 export interface ReleaseResponse {
   id: string
   image: string
@@ -209,6 +223,9 @@ export interface ReleaseResponse {
   deploymentFailed: boolean
   // Reason deploymentFailed is true. Null otherwise.
   deploymentError: string | null
+  gitOpsStatus: GitOpsStatus
+  gitopsError: string | null
+  kubernetesStatus: KubernetesStatus
   createdAt: string
   modifiedAt: string
   createdBy: string
@@ -235,6 +252,9 @@ export interface ReleaseHistoryEntry {
   // is null, or while a Kubernetes rollout is still within its verification window.
   deploymentFinished: string | null
   deploymentFailed: boolean
+  gitOpsStatus: GitOpsStatus
+  gitopsError: string | null
+  kubernetesStatus: KubernetesStatus
   createdBy: string
 }
 
@@ -258,6 +278,9 @@ export interface ReleaseHistoryOverviewEntry {
   deployError: string | null
   deploymentFinished: string | null
   deploymentFailed: boolean
+  gitOpsStatus: GitOpsStatus
+  gitopsError: string | null
+  kubernetesStatus: KubernetesStatus
   createdBy: string
 }
 

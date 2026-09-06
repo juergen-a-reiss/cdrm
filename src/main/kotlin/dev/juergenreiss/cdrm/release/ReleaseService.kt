@@ -5,6 +5,7 @@ package dev.juergenreiss.cdrm.release
 
 import dev.juergenreiss.cdrm.common.SortSpec
 import dev.juergenreiss.cdrm.common.sortedBySpec
+import dev.juergenreiss.cdrm.gitops.GitOpsResolver
 import dev.juergenreiss.cdrm.product.Product
 import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.product.ProductStageRepository
@@ -52,6 +53,7 @@ class ReleaseService(
     private val productRepository: ProductRepository,
     private val productStageRepository: ProductStageRepository,
     private val deploymentExecutor: DeploymentExecutor,
+    private val gitOpsResolver: GitOpsResolver,
     private val currentUser: AuditorAware<UUID>,
     private val meterRegistry: MeterRegistry,
     private val rebac: RebacContext,
@@ -126,6 +128,9 @@ class ReleaseService(
                 deployError = entry.deployError,
                 deploymentFinished = entry.deploymentFinished,
                 deploymentFailed = entry.deploymentFailed,
+                gitOpsStatus = entry.gitOpsStatus(),
+                gitopsError = entry.gitopsError,
+                kubernetesStatus = entry.kubernetesStatus(),
                 createdBy = entry.createdBy,
             )
         }
@@ -224,6 +229,9 @@ class ReleaseService(
                 deployError = entry.deployError,
                 deploymentFinished = entry.deploymentFinished,
                 deploymentFailed = entry.deploymentFailed,
+                gitOpsStatus = entry.gitOpsStatus(),
+                gitopsError = entry.gitopsError,
+                kubernetesStatus = entry.kubernetesStatus(),
                 createdBy = entry.createdBy,
             )
         }
@@ -278,7 +286,7 @@ class ReleaseService(
         val entry = recordHistory(saved, initialStage, workload, product, userId, ReleaseHistoryAction.CREATED)
         incrementReleaseMetric("cdrm.releases.promoted", workload, product, initialStage)
         log.info("Created release {} ('{}') by user {}, starting at stage {}", saved.id, saved.image, userId, initialStage.name)
-        return saved.toResponse(deployError = entry.deployError, currentStageLatestEntry = entry)
+        return saved.toResponse(deployError = entry.synchronousError, currentStageLatestEntry = entry)
     }
 
     @Transactional
@@ -320,7 +328,7 @@ class ReleaseService(
         // entry is only set (and only then matches saved.currentStageId) when the
         // workload changed; otherwise fall back to a live lookup for the unchanged stage.
         return if (entry != null) {
-            saved.toResponse(deployError = entry.deployError, currentStageLatestEntry = entry)
+            saved.toResponse(deployError = entry.synchronousError, currentStageLatestEntry = entry)
         } else {
             saved.toResponse()
         }
@@ -354,7 +362,7 @@ class ReleaseService(
         val entry = recordHistory(saved, nextStage, workload, product, userId, ReleaseHistoryAction.PROMOTED)
         incrementReleaseMetric("cdrm.releases.promoted", workload, product, nextStage)
         log.info("Promoted release {} ('{}') to stage {} by user {}", saved.id, saved.image, nextStage.name, saved.modifiedBy)
-        return saved.toResponse(deployError = entry.deployError, currentStageLatestEntry = entry)
+        return saved.toResponse(deployError = entry.synchronousError, currentStageLatestEntry = entry)
     }
 
     // A release can't be promoted onward while its current stage's own latest deployment
@@ -363,10 +371,17 @@ class ReleaseService(
     // stage (the recovery path) is unaffected, see redeploy().
     private fun requireStageDeploymentComplete(release: Release, stage: Stage) {
         val latest = releaseHistoryRepository.findFirstByReleaseIdAndStageIdOrderByCreatedAtDesc(release.id!!, stage.id!!) ?: return
-        if (latest.deploymentFailed) {
+        if (latest.replacedAt != null) {
             throw ResponseStatusException(
                 HttpStatus.CONFLICT,
-                "Cannot promote: the deployment to stage '${stage.name}' failed (${latest.deployError ?: "unknown reason"})",
+                "Cannot promote: this release's deployment to stage '${stage.name}' was superseded by a newer deployment",
+            )
+        }
+        if (latest.deploymentFailed) {
+            val reason = latest.deployError ?: latest.gitopsError ?: "unknown reason"
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Cannot promote: the deployment to stage '${stage.name}' failed ($reason)",
             )
         }
         if (latest.deploymentFinished == null) {
@@ -375,19 +390,31 @@ class ReleaseService(
     }
 
     // Two different releases of the same workload landing on the same stage before the
-    // first one's deployment is confirmed (or failed) would race to patch the same
-    // Kubernetes resource — whichever patch lands last wins, and the other's
-    // verification can never see its own image and eventually times out and fails.
-    // Blocks a new deploy (create()'s initial stage, promote()'s next stage) to a
-    // (workload, stage) pair that already has one in flight; redeploy()/rollback() are
+    // first one's GitOps push (or, for a direct Kubernetes patch, the patch call itself)
+    // has succeeded would race on that operation — so a row still in that state (Pending/
+    // Retrying for GitOps, or the patch not yet attempted/accepted at all) still blocks a
+    // new deploy outright. Once that's succeeded, though, the row is only waiting on
+    // Kubernetes to actually catch up (ArgoCD sync, or a rollout still converging) —
+    // safe to supersede rather than block, since a later commit/patch simply replaces the
+    // desired state rather than racing with the first one. redeploy()/rollback() are
     // intentionally exempt since they target the acting release's own current stage.
     private fun requireNoConcurrentDeployment(workloadId: UUID, stage: Stage) {
         val inFlight = releaseHistoryRepository
             .findFirstByWorkloadIdAndStageIdAndDeploymentFinishedIsNullOrderByCreatedAtDesc(workloadId, stage.id!!)
             ?: return
-        throw ResponseStatusException(
-            HttpStatus.CONFLICT,
-            "Cannot deploy: another deployment ('${inFlight.image}') to stage '${stage.name}' is still in progress",
+        if (inFlight.deployedAt == null) {
+            throw ResponseStatusException(
+                HttpStatus.CONFLICT,
+                "Cannot deploy: another deployment ('${inFlight.image}') to stage '${stage.name}' is still in progress",
+            )
+        }
+        val now = Instant.now()
+        inFlight.replacedAt = now
+        inFlight.deploymentFinished = now
+        releaseHistoryRepository.save(inFlight)
+        log.info(
+            "Release history {} ('{}') at stage {} superseded by a new deployment before it finished",
+            inFlight.id, inFlight.image, stage.name,
         )
     }
 
@@ -416,7 +443,7 @@ class ReleaseService(
         val entry = recordHistory(saved, stage, workload, product, userId, ReleaseHistoryAction.ROLLED_BACK)
         incrementReleaseMetric("cdrm.releases.rollback", workload, product, stage)
         log.info("Rolled back release {} ('{}') to head at stage {} by user {}", saved.id, saved.image, stage.name, saved.modifiedBy)
-        return saved.toResponse(deployError = entry.deployError, currentStageLatestEntry = entry)
+        return saved.toResponse(deployError = entry.synchronousError, currentStageLatestEntry = entry)
     }
 
     // Re-deploys the release's already-recorded binary to its own current stage (only if
@@ -462,9 +489,9 @@ class ReleaseService(
         // a redeploy to an earlier stage doesn't move currentStageId, so that stage's
         // status isn't what canPromote et al. should reflect; fall back to a live lookup.
         return if (targetStage.id == release.currentStageId) {
-            release.toResponse(deployError = entry.deployError, currentStageLatestEntry = entry)
+            release.toResponse(deployError = entry.synchronousError, currentStageLatestEntry = entry)
         } else {
-            release.toResponse(deployError = entry.deployError)
+            release.toResponse(deployError = entry.synchronousError)
         }
     }
 
@@ -519,18 +546,31 @@ class ReleaseService(
                 pipeline = stage.pipeline,
                 action = action,
                 deployedAt = null,
+                gitOpsManaged = gitOpsResolver.resolve(workload, stage) != null,
+                kubernetesManaged = workload.kubernetes,
                 createdBy = userId,
             )
         )
         if (stage.deploymentPolicy == DeploymentPolicy.IMMEDIATE) {
-            val error = deploymentExecutor.attemptDeploy(workload, stage, release.image)
-            if (error == null) {
-                entry.deployedAt = Instant.now()
-                // Nothing to verify for a non-Kubernetes workload — DeploymentVerificationJob
-                // only ever looks at Kubernetes-backed deploys.
-                if (!workload.kubernetes) entry.deploymentFinished = entry.deployedAt
-            } else {
-                entry.deployError = error
+            when (val result = deploymentExecutor.attemptDeploy(workload, stage, release.image)) {
+                is DeployAttemptResult.Success -> {
+                    entry.deployedAt = Instant.now()
+                    // Nothing to verify for a non-Kubernetes workload — DeploymentVerificationJob
+                    // only ever looks at Kubernetes-backed deploys.
+                    if (!workload.kubernetes) entry.deploymentFinished = entry.deployedAt
+                }
+                is DeployAttemptResult.Failed -> {
+                    if (entry.gitOpsManaged) entry.gitopsError = result.reason else entry.deployError = result.reason
+                }
+                DeployAttemptResult.GitLockBusy -> {
+                    // Fails the whole action (rolling back the release row saved above
+                    // along with this history row) rather than leaving a pending row
+                    // behind — the caller retries the action itself in a moment.
+                    throw ResponseStatusException(
+                        HttpStatus.TOO_MANY_REQUESTS,
+                        "Another GitOps operation is in progress, please try again shortly",
+                    )
+                }
             }
             releaseHistoryRepository.save(entry)
         }
@@ -547,7 +587,10 @@ class ReleaseService(
     // IMMEDIATE-policy stages (retried every tick, no fixed time), or if no cron is
     // configured for this (product, stage).
     private fun scheduledDeploymentFor(entry: ReleaseHistory, stage: Stage?, cron: String?): Instant? {
-        if (entry.deployedAt != null || stage?.deploymentPolicy != DeploymentPolicy.SCHEDULED || cron.isNullOrBlank()) return null
+        // deploymentFinished can be set despite deployedAt staying null for a GitOps row
+        // that gave up after MAX_GITOPS_RETRIES — that's a terminal outcome, not
+        // something still waiting on a cron trigger.
+        if (entry.deployedAt != null || entry.deploymentFinished != null || stage?.deploymentPolicy != DeploymentPolicy.SCHEDULED || cron.isNullOrBlank()) return null
         return try {
             CronExpression.parse(cron).next(entry.createdAt!!.atZone(ZoneId.systemDefault()))?.toInstant()
         } catch (e: IllegalArgumentException) {
@@ -656,6 +699,12 @@ class ReleaseService(
         orderedStagesFor(workloadId).firstOrNull()
             ?: throw ResponseStatusException(HttpStatus.BAD_REQUEST, "Workload has no linked stages")
 
+    // Whichever of the two lanes the just-attempted synchronous deploy actually failed
+    // on — the two are mutually exclusive per entry (see recordHistory), so this is
+    // simply whichever is non-null.
+    private val ReleaseHistory.synchronousError: String?
+        get() = deployError ?: gitopsError
+
     // deployError, when passed, reflects only the synchronous IMMEDIATE-policy deploy
     // attempt made by the action that produced this response (promote/rollback/redeploy/
     // create) — not a live lookup — so a caller like findAll()/findById() that isn't
@@ -675,7 +724,9 @@ class ReleaseService(
         val orderedStages = orderedStagesFor(workloadId)
         val currentIndex = orderedStages.indexOfFirst { it.id == currentStageId }
         val hasNextStage = currentIndex != -1 && currentIndex != orderedStages.lastIndex
-        val deploymentComplete = currentStageLatestEntry?.deploymentFinished != null && currentStageLatestEntry.deploymentFailed != true
+        val deploymentComplete = currentStageLatestEntry?.deploymentFinished != null &&
+            currentStageLatestEntry.deploymentFailed != true &&
+            currentStageLatestEntry.replacedAt == null
         val canPromote = hasNextStage && deploymentComplete &&
             allowsReleaseAction(ReleaseActionClaim.PROMOTE, orderedStages[currentIndex + 1].name, "cdrm-productowner")
         val head = isHead(this)
@@ -701,7 +752,10 @@ class ReleaseService(
             deployError = deployError,
             deploymentFinished = currentStageLatestEntry?.deploymentFinished,
             deploymentFailed = currentStageLatestEntry?.deploymentFailed ?: false,
-            deploymentError = currentStageLatestEntry?.deployError,
+            deploymentError = currentStageLatestEntry?.deployError ?: currentStageLatestEntry?.gitopsError,
+            gitOpsStatus = currentStageLatestEntry?.gitOpsStatus() ?: GitOpsStatus.NOT_APPLICABLE,
+            gitopsError = currentStageLatestEntry?.gitopsError,
+            kubernetesStatus = currentStageLatestEntry?.kubernetesStatus() ?: KubernetesStatus.NOT_APPLICABLE,
             createdAt = createdAt!!,
             modifiedAt = modifiedAt!!,
             createdBy = createdBy,

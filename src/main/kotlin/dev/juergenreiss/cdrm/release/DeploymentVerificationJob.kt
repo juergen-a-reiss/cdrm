@@ -18,10 +18,17 @@ import java.time.Instant
 // Confirms a Kubernetes deploy that DeploymentSchedulerJob already got accepted by the API
 // server (deployedAt set) actually rolled out: only pods on the new image exist, all ready,
 // none restarting. Runs independently of deployment policy — both IMMEDIATE and SCHEDULED
-// rows funnel through the same deployedAt/deploymentFinished fields. A row is left pending
-// (retried next tick) until either the rollout is confirmed or GRACE_PERIOD elapses, at
-// which point it's marked failed with a reason. Never throws — a bad row or an unreachable
-// cluster is logged and simply retried (or timed out) like any other not-ready result.
+// rows funnel through the same deployedAt/deploymentFinished fields. Never throws — a bad
+// row or an unreachable cluster is logged and simply retried like any other not-ready
+// result.
+//
+// GRACE_PERIOD only ever bounds the time between the new image first being observed
+// running (rolloutStartedAt) and the rollout actually finishing — not the time since
+// deployedAt. Until the new image is observed on at least one pod, this just keeps
+// retrying forever: that covers a cluster/API-server that's temporarily unreachable and a
+// GitOps deploy that hasn't been synced by ArgoCD (or a human) yet, neither of which cdrm
+// itself can do anything about, so neither is ever reported as failed on its own. Only a
+// rollout that has visibly started and then stalls or starts restarting is timed out.
 @Component
 class DeploymentVerificationJob(
     private val releaseHistoryRepository: ReleaseHistoryRepository,
@@ -64,7 +71,11 @@ class DeploymentVerificationJob(
         val namespace = workload.kubernetesNameSpace
         val kind = workload.kubernetesKind
         if (context.isNullOrBlank() || namespace.isNullOrBlank() || kind == null) {
-            failIfOverdue(entry, now, "Kubernetes configuration missing for this stage")
+            // Missing stage/workload Kubernetes config, not a cluster/sync-timing issue —
+            // nothing external is ever going to fix this on its own, so (unlike the cases
+            // below) this still times out on the original deployedAt-anchored clock.
+            if (Duration.between(entry.deployedAt!!, now) < GRACE_PERIOD) return
+            failWith(entry, now, "Kubernetes configuration missing for this stage")
             return
         }
         val effectiveNamespace = (namespacePrefix ?: "") + namespace
@@ -72,26 +83,41 @@ class DeploymentVerificationJob(
         val status = try {
             kubernetesDeploymentClient.checkRollout(context, effectiveNamespace, kind, workload.name, entry.image)
         } catch (e: Exception) {
-            log.error("Failed to check rollout for workload {} at stage {}: {}", workload.id, entry.stageId, e.message, e)
-            failIfOverdue(entry, now, "cluster not reachable")
+            log.info("Cluster/API unreachable checking rollout for workload {} at stage {}, will keep waiting: {}", workload.id, entry.stageId, e.message)
             return
         }
 
-        if (status.ready) {
-            entry.deploymentFinished = now
-            entry.deploymentFailed = false
-            entry.deployError = null
-            releaseHistoryRepository.save(entry)
-            meterRegistry.counter("cdrm.deploy.verification_succeeded", "workload", workload.name, "stage", entry.stageName).increment()
-            log.info("Verified rollout for release {} at stage {}", entry.releaseId, entry.stageId)
-        } else {
-            failIfOverdue(entry, now, status.detail)
+        when {
+            status.ready -> {
+                entry.deploymentFinished = now
+                entry.deploymentFailed = false
+                entry.deployError = null
+                releaseHistoryRepository.save(entry)
+                meterRegistry.counter("cdrm.deploy.verification_succeeded", "workload", workload.name, "stage", entry.stageName).increment()
+                log.info("Verified rollout for release {} at stage {}", entry.releaseId, entry.stageId)
+            }
+            !status.imageObserved -> {
+                // Still on the previous image (or the resource/pods don't exist yet) —
+                // indistinguishable from "ArgoCD/a human hasn't synced this yet", so just
+                // keep waiting; never times out on its own.
+                log.debug("Workload {} at stage {} not yet observed on the new image, will keep waiting: {}", workload.id, entry.stageId, status.detail)
+            }
+            else -> {
+                // The rollout has visibly started — this is the one case the grace period
+                // actually applies to.
+                if (entry.rolloutStartedAt == null) {
+                    entry.rolloutStartedAt = now
+                    releaseHistoryRepository.save(entry)
+                    log.debug("Rollout started for release {} at stage {}, grace period clock started", entry.releaseId, entry.stageId)
+                    return
+                }
+                if (Duration.between(entry.rolloutStartedAt!!, now) < GRACE_PERIOD) return
+                failWith(entry, now, status.detail)
+            }
         }
     }
 
-    private fun failIfOverdue(entry: ReleaseHistory, now: Instant, reason: String) {
-        // findAwaitingVerification() only ever returns rows with deployedAt already set.
-        if (Duration.between(entry.deployedAt!!, now) < GRACE_PERIOD) return
+    private fun failWith(entry: ReleaseHistory, now: Instant, reason: String) {
         entry.deploymentFinished = now
         entry.deploymentFailed = true
         entry.deployError = reason
