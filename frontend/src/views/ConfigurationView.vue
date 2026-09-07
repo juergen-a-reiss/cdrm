@@ -109,3 +109,22 @@ onMounted(load)
     <v-btn color="primary" :loading="saving" :disabled="loading" @click="save">Save</v-btn>
   </div>
 </template>
+
+<style scoped>
+/* Same reasoning as ResourceTable: keep header/role labels on one line so a narrow
+   (tablet-width) viewport scrolls the grid sideways (Vuetify's .v-table__wrapper
+   already supports that) instead of wrapping them and misaligning the checkbox columns. */
+:deep(.v-table__wrapper th),
+:deep(.v-table__wrapper td) {
+  white-space: nowrap;
+}
+
+/* On phone-width screens, let the role names and menu-entry titles wrap instead —
+   a narrower grid beats one you have to scroll sideways to use. */
+@media (max-width: 600px) {
+  :deep(.v-table__wrapper th),
+  :deep(.v-table__wrapper td) {
+    white-space: normal;
+  }
+}
+</style>

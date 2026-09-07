@@ -4,8 +4,8 @@
 -->
 
 <script setup lang="ts">
-import { computed } from 'vue'
-import { useTheme } from 'vuetify'
+import { computed, ref, watch } from 'vue'
+import { useDisplay, useTheme } from 'vuetify'
 import { authenticatedUser, isAuthenticated, login, logout } from './auth/authService'
 import { useMenuVisibility } from './composables/useMenuVisibility'
 import { NAV_ITEMS } from './navigation'
@@ -22,11 +22,26 @@ function toggleTheme() {
 
 const { visibleKeys } = useMenuVisibility()
 const navItems = computed(() => NAV_ITEMS.filter((item) => visibleKeys.value.has(item.key)))
+
+// Below the mobile breakpoint the drawer becomes a temporary overlay (closed by
+// default, toggled by the nav icon) instead of permanently reserving screen width —
+// there's no room for both a fixed drawer and the actual page content on a phone.
+const { mobile } = useDisplay()
+const drawerOpen = ref(!mobile.value)
+watch(mobile, (isMobile) => {
+  drawerOpen.value = !isMobile
+})
+
+function closeDrawerOnMobileNav() {
+  if (mobile.value) {
+    drawerOpen.value = false
+  }
+}
 </script>
 
 <template>
   <v-app>
-    <v-navigation-drawer v-if="isAuthenticated" permanent>
+    <v-navigation-drawer v-if="isAuthenticated" v-model="drawerOpen" :permanent="!mobile" :temporary="mobile">
       <v-list nav>
         <v-list-item
           v-for="item in navItems"
@@ -34,12 +49,14 @@ const navItems = computed(() => NAV_ITEMS.filter((item) => visibleKeys.value.has
           :to="item.to"
           :prepend-icon="item.icon"
           :title="item.title"
+          @click="closeDrawerOnMobileNav"
         />
       </v-list>
     </v-navigation-drawer>
 
     <v-app-bar title="Continuous Delivery Release Management">
       <template #prepend>
+        <v-app-bar-nav-icon v-if="isAuthenticated && mobile" @click="drawerOpen = !drawerOpen" />
         <span class="brand-logo ml-2" aria-hidden="true" />
       </template>
       <template #append>
@@ -51,7 +68,7 @@ const navItems = computed(() => NAV_ITEMS.filter((item) => visibleKeys.value.has
         />
         <v-btn v-if="!isAuthenticated" @click="login">Log in</v-btn>
         <template v-else>
-          <span class="mr-4">{{ authenticatedUser?.profile.preferred_username }}</span>
+          <span v-if="!mobile" class="mr-4">{{ authenticatedUser?.profile.preferred_username }}</span>
           <v-btn @click="logout">Log out</v-btn>
         </template>
       </template>

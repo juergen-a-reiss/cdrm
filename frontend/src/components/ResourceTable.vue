@@ -97,4 +97,23 @@ const itemSlotNames = computed(() => Object.keys(slots).filter((name) => name.st
 .cdrm-expandable-rows :deep(tbody tr) {
   cursor: pointer;
 }
+
+/* Vuetify's .v-table__wrapper already scrolls horizontally (overflow: auto) — it just
+   never needs to, because cells wrap their text instead of overflowing. Forcing cells to
+   stay on one line lets a narrow (tablet-width) viewport scroll the table sideways
+   instead of squeezing every column into unreadable multi-line cells. */
+:deep(.v-table__wrapper th),
+:deep(.v-table__wrapper td) {
+  white-space: nowrap;
+}
+
+/* On phone-width screens, a sideways-scrolling table is harder to use than a narrower
+   one — so let headers/cells wrap there instead, trading the single-line layout above
+   for one that fits (or comes closer to fitting) without scrolling. */
+@media (max-width: 600px) {
+  :deep(.v-table__wrapper th),
+  :deep(.v-table__wrapper td) {
+    white-space: normal;
+  }
+}
 </style>
