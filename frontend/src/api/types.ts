@@ -45,6 +45,22 @@ export interface ClusterResponse {
   modifiedBy: string
 }
 
+// Keys assignable in the "menu-visibility" config entry — must match the `key` of each
+// entry in App.vue's navItems. "configuration" is deliberately excluded: it's hardcoded
+// visible to cdrm-devops only (see the backend's MenuVisibilityService), never editable.
+export type AssignableMenuKey = 'clusters' | 'stages' | 'products' | 'workloads' | 'releases' | 'release-history'
+
+export type MenuVisibilityConfig = Record<string, AssignableMenuKey[]>
+
+export interface ConfigResponse {
+  key: string
+  value: unknown
+  createdAt: string
+  modifiedAt: string
+  createdBy: string
+  modifiedBy: string
+}
+
 export interface StageClusterInfo {
   id: string
   name: string

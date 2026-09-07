@@ -4,8 +4,11 @@
 -->
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useTheme } from 'vuetify'
 import { authenticatedUser, isAuthenticated, login, logout } from './auth/authService'
+import { useMenuVisibility } from './composables/useMenuVisibility'
+import { NAV_ITEMS } from './navigation'
 import ToastHost from './components/ToastHost.vue'
 import { THEME_STORAGE_KEY } from './plugins/vuetify'
 
@@ -17,14 +20,8 @@ function toggleTheme() {
   localStorage.setItem(THEME_STORAGE_KEY, next)
 }
 
-const navItems = [
-  { title: 'Clusters', to: '/clusters', icon: 'mdi-server-network' },
-  { title: 'Stages', to: '/stages', icon: 'mdi-stairs' },
-  { title: 'Products', to: '/products', icon: 'mdi-package-variant-closed' },
-  { title: 'Workloads', to: '/workloads', icon: 'mdi-rocket-launch' },
-  { title: 'Releases', to: '/releases', icon: 'mdi-tag' },
-  { title: 'Release History', to: '/release-history', icon: 'mdi-chart-bar' },
-]
+const { visibleKeys } = useMenuVisibility()
+const navItems = computed(() => NAV_ITEMS.filter((item) => visibleKeys.value.has(item.key)))
 </script>
 
 <template>

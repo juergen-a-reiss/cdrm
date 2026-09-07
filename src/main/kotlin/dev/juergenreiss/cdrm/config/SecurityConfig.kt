@@ -54,6 +54,10 @@ class SecurityConfig(
                 // baseline release permission) as well as narrow one that would. This
                 // gate only needs to require a logged-in cdrm user.
                 authorize("/releases/**", authenticated)
+                // Any authenticated user needs their own effective menu; only cdrm-devops
+                // may read/edit the underlying config entries (see the Configuration view).
+                authorize("/menu-visibility", authenticated)
+                authorize("/config/**", hasRole("cdrm-devops"))
                 authorize(anyRequest, authenticated)
             }
             oauth2ResourceServer {

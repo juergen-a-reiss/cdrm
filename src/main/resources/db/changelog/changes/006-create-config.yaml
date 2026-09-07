@@ -1,0 +1,64 @@
+databaseChangeLog:
+  - changeSet:
+      id: 006-create-config
+      author: juergen
+      changes:
+        # Generic key/value store for admin-editable settings — one row per setting,
+        # value shape is owned by whichever service reads that key (see menu-visibility
+        # below). Seeded so every existing role keeps seeing every current menu entry
+        # until a cdrm-devops user customizes it via the Configuration screen.
+        - createTable:
+            tableName: config
+            columns:
+              - column:
+                  name: config_key
+                  type: varchar(100)
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: config_value
+                  type: jsonb
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: modified_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_by
+                  type: uuid
+                  constraints:
+                    nullable: false
+              - column:
+                  name: modified_by
+                  type: uuid
+                  constraints:
+                    nullable: false
+        - insert:
+            tableName: config
+            columns:
+              - column:
+                  name: config_key
+                  value: menu-visibility
+              - column:
+                  name: config_value
+                  value: '{"cdrm-devops":["clusters","stages","products","workloads","releases","release-history"],"cdrm-productowner":["clusters","stages","products","workloads","releases","release-history"],"cdrm-developer":["clusters","stages","products","workloads","releases","release-history"],"cdrm-manager":["clusters","stages","products","workloads","releases","release-history"]}'
+              - column:
+                  name: created_at
+                  valueDate: now()
+              - column:
+                  name: modified_at
+                  valueDate: now()
+              - column:
+                  name: created_by
+                  value: '00000000-0000-0000-0000-000000000000'
+              - column:
+                  name: modified_by
+                  value: '00000000-0000-0000-0000-000000000000'

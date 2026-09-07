@@ -357,6 +357,11 @@ rest of the data.
 
 `cdrm-manager`: Can view the data.
 
+Which menu entries a role sees in the navigation drawer is itself configurable: a
+`cdrm-devops` user can whitelist entries per role on the **Configuration** screen (the
+last nav entry, always visible to `cdrm-devops` regardless of this whitelist). This only
+hides/shows nav entries — it does not change any of the write-access rules above.
+
 ### ReBAC Relationship Based Access Control
 
 The access to resources can be restricted by additional user attributes in the JWT token. The following attributes are

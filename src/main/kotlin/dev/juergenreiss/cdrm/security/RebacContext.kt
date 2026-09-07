@@ -32,6 +32,14 @@ class RebacContext {
     fun hasRole(role: String): Boolean =
         SecurityContextHolder.getContext().authentication?.authorities?.any { it.authority == "ROLE_$role" } ?: false
 
+    // Every cdrm-* role the caller holds, stripped of the "ROLE_" prefix the JWT
+    // converter (see SecurityConfig) adds — e.g. for MenuVisibilityService, which needs
+    // the raw role names to look them up in the menu-visibility config JSON.
+    val currentRoles: Set<String>
+        get() = SecurityContextHolder.getContext().authentication?.authorities
+            ?.mapNotNull { it.authority?.removePrefix("ROLE_") }
+            ?.toSet() ?: emptySet()
+
     val allowedProducts: Set<String>?
         get() = claimList(PRODUCTS_CLAIM)
 
