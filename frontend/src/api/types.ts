@@ -218,6 +218,11 @@ export interface ReleaseResponse {
   workloadId: string
   currentStage: ReleaseStageInfo
   commitId: string | null
+  // Whether the pipeline even has a stage after the current one — independent of
+  // canPromote (which also folds in permission and deployment-completion): distinguishes
+  // "already at the final stage" (hide the promote control) from "blocked for some other
+  // reason" (show it disabled, with a reason).
+  hasNextStage: boolean
   canPromote: boolean
   canRollback: boolean
   canEdit: boolean

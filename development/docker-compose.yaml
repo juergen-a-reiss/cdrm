@@ -84,8 +84,58 @@ services:
     networks:
       - shared_net
 
+  # Single-node Kafka cluster in KRaft mode (no ZooKeeper) — backs cdrm's release
+  # notifications and WebSocket live-push (see README's "Release Notifications" and
+  # "Live UI Updates (WebSocket)" sections). Broker reachable at:
+  #  - localhost:9092   (from the host, e.g. cdrm's own application-dev.yaml)
+  #  - kafka:9092       (from other containers on shared_net)
+  kafka:
+    profiles: [kafka]
+    image: apache/kafka:4.0.0
+    container_name: kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: dockers-kafka-cluster-01
+      KAFKA_JMX_PORT: ""
+    ports:
+      - "9092:29092"
+    volumes:
+      - kafka:/var/lib/kafka/data
+    networks:
+      - shared_net
+
+  # Read-only web UI for browsing Kafka topics and their messages: http://localhost:9000
+  # Bundled under the same [kafka] profile — there's no reason to run one without the
+  # other in this setup.
+  kafka-ui:
+    profiles: [kafka]
+    image: obsidiandynamics/kafdrop:4.1.0
+    container_name: kafka-ui
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKERCONNECT: kafka:9092
+      JVM_OPTS: "-Xms32M -Xmx64M"
+    ports:
+      - "9000:9000"
+    networks:
+      - shared_net
+
 volumes:
   db-data:
     driver: local
   gitea-data:
+    driver: local
+  kafka:
     driver: local

@@ -23,9 +23,8 @@ two ;)).
 2. Run `./up.sh`
 3. Run `./start.sh`. Note that the setup of gitops setup from scratch loads argocd and other images. Expect quite some time for this to run.
 4. Start your IDE and start the main application 
-5. get a token of a devop role (see keycloak.http)
-6. Run `./seed.py --token YOURTOKEN` 
-7. Run `npm run dev`
+5. Run `./seed.py`
+6. Run `npm run dev`
 
 
 
@@ -50,6 +49,7 @@ two ;)).
 | `postgres` | 5432         | PostgreSQL 18                             |
 | `keycloak` | 2305         | Keycloak 26 (HTTP)                        |
 | `gitea`    | 3000         | Git server for the ArgoCD/GitOps demo     |
+| `kafka`    | 9092, 9000   | Kafka 4 (KRaft, no ZK) + Kafdrop UI       |
 
 To start only a subset, edit `components`:
 
@@ -57,6 +57,7 @@ To start only a subset, edit `components`:
 postgres
 keycloak
 gitea
+kafka
 ```
 
 ## PostgreSQL
@@ -114,6 +115,31 @@ The playbook is idempotent — safe to re-run.
 
 Playbooks: `ansible/playbooks/configure-keycloak-cdrm.yml`
 
+## Kafka
+
+Single-node KRaft cluster (no ZooKeeper), backing cdrm's release notifications and WebSocket live-push (see the
+main README's "Release Notifications" and "Live UI Updates (WebSocket)" sections).
+
+| Listener    | Address          | Reachable from                    |
+|-------------|------------------|------------------------------------|
+| `HOST`      | `localhost:9092` | Host machine (e.g. cdrm itself)   |
+| `PLAINTEXT` | `kafka:9092`     | Other containers on `shared_net`  |
+
+`cdrm`'s `application-dev.yaml` already points at `localhost:9092` and defaults the topic to `cdrm` — no
+further config needed once this component is running.
+
+### Viewing messages
+
+[Kafdrop](https://github.com/obsidiandynamics/kafdrop) — a simple read-only topic/message browser — comes up
+alongside the broker (same `[kafka]` profile): http://localhost:9000. Pick a topic, click a partition, and
+browse its messages; no separate setup needed.
+
+Prefer the CLI? The broker image ships the usual scripts:
+
+```bash
+docker exec -it kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic cdrm --from-beginning
+```
+
 ## Networking
 
 All containers share the `shared_net` bridge network (`172.30.200.0/24`), allowing inter-container communication by
@@ -162,15 +188,15 @@ This script is not idempotent. It also creates the namespaces listed in `seed/da
 exception: seed.py pushes its manifests to the GitOps demo repo instead of applying them directly — see
 `argocd/README.md`.
 
-Run ./seed.py --token
-
 ```bash
-./seed.py --token 
+./seed.py
 ```
 
-With a token for a `cdrm-devops` role. Consider using the keycloak.http file to get such a token. This file is in a
-format for visual studio code with the "REST Client" extension from Huachao Mao. However, any curl or postman script
-will also work ;).
+Needs a bearer token for a `cdrm-devops` role — by default it fetches one itself from Keycloak (password grant
+for the `cdrm-devops` test user `start.sh`'s Ansible playbook creates), so no manual token wrangling is needed for
+the default local setup. Pass `--token YOURTOKEN` to use a token of your own instead (e.g. a different Keycloak
+instance, or a non-default user) — the keycloak.http file is one way to get one; it's in a format for Visual
+Studio Code with the "REST Client" extension from Huachao Mao, but any curl or Postman script works just as well.
 
 ### Generating chart demo history
 

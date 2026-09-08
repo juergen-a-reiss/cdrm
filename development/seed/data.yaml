@@ -39,55 +39,57 @@ clusters:
       git_repo: "http://localhost:3000/cdrm/gitops-demo.git"
       git_branch: "main"
     k8s_namespaces:
-      - namespace: f-dev-platform
-      - namespace: f-qa-platform
-      - namespace: f-prod-platform
-      - namespace: f-dev-website
-      - namespace: f-qa-website
-      - namespace: f-prod-website
-      - namespace: p-qa-platform
+      - namespace: frankfurt-dev-platform
+      - namespace: frankfurt-qa-platform
+      - namespace: frankfurt-prod-platform
+      - namespace: frankfurt-dev-website
+      - namespace: frankfurt-qa-website
+      - namespace: frankfurt-prod-website
+      - namespace: paris-qa-platform
         use_git_ops: true
         file_expression: "environments/{namespace}/{workload}.yaml"
         yaml_expression: "spec.template.spec.containers[0].image"
-      - namespace: p-prod-platform
+        git_branch: "paris-qa"
+      - namespace: paris-prod-platform
         use_git_ops: true
         file_expression: "environments/{namespace}/{workload}.yaml"
         yaml_expression: "spec.template.spec.containers[0].image"
-        git_branch: "release"
-      - namespace: p-qa-website
+        git_branch: "paris-production"
+      - namespace: paris-qa-website
         use_git_ops: true
         file_expression: "environments/{namespace}/{workload}.yaml"
         yaml_expression: "spec.template.spec.containers[0].image"
-      - namespace: p-prod-website
+        git_branch: "paris-qa"
+      - namespace: paris-prod-website
         use_git_ops: true
         file_expression: "environments/{namespace}/{workload}.yaml"
         yaml_expression: "spec.template.spec.containers[0].image"
-        git_branch: "release"
+        git_branch: "paris-production"
 
 stages:
-  - name: ffm-development
+  - name: frankfurt-development
     pipeline: frankfurt
     description: Development environment
     order: 1
     deployment_policy: IMMEDIATE
     kubernetes_context: minikube
-    namespace_prefix: f-dev-
+    namespace_prefix: frankfurt-dev-
     clusters: [minikube]
-  - name: ffm-qa
+  - name: frankfurt-qa
     pipeline: frankfurt
     description: Quality assurance environment
     order: 2
     deployment_policy: IMMEDIATE
     kubernetes_context: minikube
-    namespace_prefix: f-qa-
+    namespace_prefix: frankfurt-qa-
     clusters: [minikube]
-  - name: ffm-production
+  - name: frankfurt-production
     pipeline: frankfurt
     description: Production environment
     order: 3
     deployment_policy: SCHEDULED
     kubernetes_context: minikube
-    namespace_prefix: f-prod-
+    namespace_prefix: frankfurt-prod-
     clusters: [minikube]
 
   - name: paris-qa
@@ -96,7 +98,7 @@ stages:
     order: 1
     deployment_policy: IMMEDIATE
     kubernetes_context: minikube
-    namespace_prefix: p-qa-
+    namespace_prefix: paris-qa-
     clusters: [minikube]
   - name: paris-production
     pipeline: paris
@@ -104,7 +106,7 @@ stages:
     order: 2
     deployment_policy: SCHEDULED
     kubernetes_context: minikube
-    namespace_prefix: p-prod-
+    namespace_prefix: paris-prod-
     clusters: [minikube]
 
 products:
@@ -117,13 +119,13 @@ products:
     description: Core platform services
     product_group: Core Products
     stage_deployment_crons:
-      - stage: ffm-production
+      - stage: frankfurt-production
         cron: "0 0 2 * * *"
   - name: Payments
     description: Payment processing services
     product_group: Core Products
     stage_deployment_crons:
-      - stage: ffm-production
+      - stage: frankfurt-production
         cron: "0 0 3 * * *"
   - name: Mobile
     description: Mobile backend services
@@ -171,12 +173,16 @@ workloads:
   - name: payments-ledger
     product: Payments
     description: Payment ledger workload
-    kubernetes: false
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: website
     pipeline: frankfurt
-  - name: mobile-bff
+  - name: mobile-backend
     product: Mobile
     description: Mobile backend-for-frontend workload
-    kubernetes: false
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: website
     pipeline: frankfurt
 
 releases:
@@ -195,6 +201,6 @@ releases:
   - workload: payments-ledger
     image: nginx:1.30-alpine
     description: Initial release
-  - workload: mobile-bff
-    image: https://artifacts.example.com/mobile-bff/1.0.0/mobile-bff.tar.gz
+  - workload: mobile-backend
+    image: nginx:1.30-alpine
     description: Initial release

@@ -2,6 +2,8 @@ package dev.juergenreiss.cdrm.release
 
 import dev.juergenreiss.cdrm.kubernetes.KubernetesDeploymentClient
 import dev.juergenreiss.cdrm.kubernetes.RolloutStatus
+import dev.juergenreiss.cdrm.notification.ReleaseHistoryNotificationKind
+import dev.juergenreiss.cdrm.notification.ReleaseHistoryRecordedEvent
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.Stage
 import dev.juergenreiss.cdrm.stage.StageRepository
@@ -45,13 +47,16 @@ class DeploymentVerificationJobTest {
     @Mock
     private lateinit var kubernetesDeploymentClient: KubernetesDeploymentClient
 
+    @Mock
+    private lateinit var eventPublisher: org.springframework.context.ApplicationEventPublisher
+
     private lateinit var job: DeploymentVerificationJob
 
     @BeforeEach
     fun setUp() {
         job = DeploymentVerificationJob(
             releaseHistoryRepository, releaseRepository, workloadRepository, stageRepository,
-            kubernetesDeploymentClient, SimpleMeterRegistry(),
+            kubernetesDeploymentClient, SimpleMeterRegistry(), eventPublisher,
         )
     }
 
@@ -132,6 +137,10 @@ class DeploymentVerificationJobTest {
         assertFalse(entry.deploymentFailed)
         assertNull(entry.deployError)
         verify(releaseHistoryRepository).save(entry)
+
+        val eventCaptor = org.mockito.ArgumentCaptor.forClass(ReleaseHistoryRecordedEvent::class.java)
+        verify(eventPublisher).publishEvent(eventCaptor.capture())
+        assertEquals(ReleaseHistoryNotificationKind.DEPLOYED, eventCaptor.value.kind)
     }
 
     @Test
@@ -185,6 +194,8 @@ class DeploymentVerificationJobTest {
         assertNull(entry.deploymentFinished)
         assertFalse(entry.deploymentFailed)
         verify(releaseHistoryRepository).save(entry)
+        // Starting the grace-period clock isn't the final go/no-go yet.
+        verify(eventPublisher, never()).publishEvent(org.mockito.ArgumentMatchers.any())
     }
 
     @Test
@@ -240,6 +251,10 @@ class DeploymentVerificationJobTest {
         assertTrue(entry.deploymentFailed)
         assertEquals("1 pod(s) restarting (restart count > 0)", entry.deployError)
         verify(releaseHistoryRepository).save(entry)
+
+        val eventCaptor = org.mockito.ArgumentCaptor.forClass(ReleaseHistoryRecordedEvent::class.java)
+        verify(eventPublisher).publishEvent(eventCaptor.capture())
+        assertEquals(ReleaseHistoryNotificationKind.DEPLOY_FAILED, eventCaptor.value.kind)
     }
 
     @Test
@@ -285,6 +300,10 @@ class DeploymentVerificationJobTest {
         assertTrue(entry.deploymentFailed)
         assertEquals("Kubernetes configuration missing for this stage", entry.deployError)
         verify(releaseHistoryRepository).save(entry)
+
+        val eventCaptor = org.mockito.ArgumentCaptor.forClass(ReleaseHistoryRecordedEvent::class.java)
+        verify(eventPublisher).publishEvent(eventCaptor.capture())
+        assertEquals(ReleaseHistoryNotificationKind.DEPLOY_FAILED, eventCaptor.value.kind)
     }
 
     @Test
@@ -304,6 +323,10 @@ class DeploymentVerificationJobTest {
         assertEquals(entry.deployedAt, entry.deploymentFinished)
         verify(releaseHistoryRepository).save(entry)
         verify(stageRepository, never()).findById(org.mockito.ArgumentMatchers.any())
+
+        val eventCaptor = org.mockito.ArgumentCaptor.forClass(ReleaseHistoryRecordedEvent::class.java)
+        verify(eventPublisher).publishEvent(eventCaptor.capture())
+        assertEquals(ReleaseHistoryNotificationKind.DEPLOYED, eventCaptor.value.kind)
     }
 
     @Test

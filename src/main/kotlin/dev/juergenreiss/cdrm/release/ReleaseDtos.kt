@@ -24,6 +24,11 @@ data class ReleaseResponse(
     val workloadId: UUID,
     val currentStage: ReleaseStageInfo,
     val commitId: String?,
+    // Whether the pipeline even has a stage after the current one — independent of
+    // canPromote (which also folds in permission and deployment-completion), so the
+    // frontend can tell "already at the final stage" (hide the promote control) apart
+    // from "blocked for some other reason" (show it disabled, with a reason).
+    val hasNextStage: Boolean,
     val canPromote: Boolean,
     val canRollback: Boolean,
     val canEdit: Boolean,

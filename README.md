@@ -338,6 +338,68 @@ The ultimate management questions will be answered here:
 
 Here we see the release history details als a table view.
 
+## Release Notifications
+
+Every release-history-recording moment is forwarded to Kafka as a [CloudEvents](https://cloudevents.io) 1.0
+structured-mode JSON message (`content-type: application/cloudevents+json`), keyed by release id. This is a
+general-purpose topic, not release-specific: it's meant to carry every entity's change events (release-history
+today; clusters, stages, products, and workloads as they're wired up) plus this instance's own live-push
+relaying (see below) — enterprise integrations consuming it should filter by CloudEvents `type`, not assume the
+topic is release-only.
+
+- The four release-API actions themselves — create, promote, rollback, redeploy — as
+  `dev.juergenreiss.cdrm.release-history.{created,promoted,rolled-back,redeployed}`.
+- The background jobs' terminal outcome for that deployment — whether the binary actually ended up
+  running on the stage, or didn't — as `dev.juergenreiss.cdrm.release-history.deployed` /
+  `...deploy-failed`. Only fired once an outcome is final; an in-progress retry (e.g. GitOps push
+  still being retried) does not notify again on every tick.
+
+Configuration:
+
+- `spring.kafka.bootstrap-servers` (env `KAFKA_BOOTSTRAP_SERVERS`, default `localhost:9092`)
+- `cdrm.notifications.kafka.enabled` (env `CDRM_NOTIFICATIONS_KAFKA_ENABLED`, default `true`) — set to
+  `false` to disable all Kafka activity: no producer (this feature) and no consumer (the cross-instance half
+  of live-push, see below).
+- `cdrm.notifications.kafka.topic` (env `CDRM_NOTIFICATIONS_KAFKA_TOPIC`) — **has no default**;
+  production must choose its own topic name explicitly, and startup fails fast if it's left unset while
+  `enabled` is true (or true by default). Local dev (`application-dev.yaml`) defaults it to `cdrm`,
+  matching `platform-dev-setup`'s Kafka component.
+- `cdrm.notifications.source` (env `CDRM_NOTIFICATIONS_SOURCE`, default `urn:cdrm:release-service`) — the
+  CloudEvents `source` attribute.
+
+This is a best-effort side channel, never a hard dependency: cdrm starts normally and every release
+action succeeds normally whether or not a Kafka broker is reachable. A send failure (or Kafka being
+down entirely) is only ever logged, never surfaced to the caller, and never affects `/actuator/health`.
+
+## Live UI Updates (WebSocket)
+
+The frontend doesn't poll for changes — the backend pushes a small "release X changed" signal over a
+STOMP-over-WebSocket connection (`/ws`, `/topic/changes`), and the affected view either patches the one
+row it has in memory (e.g. the plain Releases list) or, for views whose sorting/filtering/pagination is
+already done server-side (the Release History Dashboard), just triggers a fresh fetch. The message itself
+carries no entity data — only the same CloudEvents `type`/`subject` a Kafka consumer would see — so the
+frontend always refetches the real (permission-filtered) data through its normal REST calls; the channel
+needs no per-user authorization beyond "is this someone logged in".
+
+Because cdrm runs as multiple stateless instances, an action handled by one instance still needs to reach
+browsers connected to *another* instance. Two producers feed the same broadcaster
+(`WebSocketChangeBroadcaster`), so this degrades gracefully rather than being a hard dependency on Kafka:
+
+- `WebSocketChangeNotifier` — always active, pushes to this instance's own connected browsers regardless
+  of whether Kafka notifications are enabled. A single instance (the common small deployment) gets full
+  live-push with no Kafka involved at all.
+- `KafkaChangeRelay` — a Kafka consumer of the same topic described above, active only when Kafka
+  notifications are enabled. Each instance uses a fresh random consumer group id (not a shared one) so
+  every instance gets its own full copy of every message — broadcast semantics, not the usual Kafka
+  "exactly one consumer in the group" load-balancing. This is what lets *other* instances' browsers learn
+  about an action handled elsewhere.
+
+The JWT travels as a STOMP `CONNECT` frame header rather than an HTTP header — a browser's WebSocket API
+can't set the latter — so `/ws`'s initial HTTP handshake is intentionally left unauthenticated in
+`SecurityConfig`; `WebSocketConfig`'s STOMP interceptor is the actual gate, validating the token (via the
+same `JwtDecoder` used everywhere else) before accepting the connection. A reverse proxy in front of a
+production deployment needs to forward `/ws` with a WebSocket upgrade, same as any other STOMP/SockJS setup.
+
 ## Access Control
 
 Access control is secured via OpenId Connect.

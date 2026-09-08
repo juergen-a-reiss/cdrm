@@ -21,6 +21,31 @@ spring:
   web:
     error:
       include-stacktrace: never
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Short timeouts by design: ReleaseNotificationPublisher sends are best-effort and
+      # already off the request thread (see AsyncConfig), so there's nothing gained by
+      # the client's multi-minute defaults — a broker that's genuinely unreachable
+      # should fail (and get logged) within a few seconds, not hang a background thread.
+      properties:
+        max.block.ms: 3000
+        request.timeout.ms: 5000
+        delivery.timeout.ms: 10000
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # KafkaChangeRelay's group id is a fresh random UUID per instance (see its class
+      # docs) — it never has a committed offset to resume from, so "latest" is what
+      # makes this a live signal rather than a replay of the topic's entire history on
+      # every restart.
+      auto-offset-reset: latest
+    # Never let a missing/unreachable broker fail startup — Kafka notifications are an
+    # optional side channel (see ReleaseNotificationPublisher), not a hard dependency.
+    admin:
+      fail-fast: false
 
 cdrm:
   security:
@@ -34,6 +59,22 @@ cdrm:
     # Local working directory for GitOps repo clones — the default (OS temp dir) is
     # fine even in production since GitCommitClient re-clones/fetches on every use.
     work-dir: ${GITOPS_WORKDIR:${java.io.tmpdir}/cdrm-gitops}
+  notifications:
+    kafka:
+      # Set to false to disable all Kafka activity entirely: no producer
+      # (ReleaseNotificationPublisher) and no consumer (KafkaChangeRelay, the
+      # cross-instance half of the WebSocket live-push feature — see
+      # WebSocketChangeNotifier for the always-on, same-instance half that still works
+      # regardless of this flag). Independent of whether a broker is actually
+      # reachable: this only toggles whether cdrm tries.
+      enabled: ${CDRM_NOTIFICATIONS_KAFKA_ENABLED:true}
+      # No default on purpose — production must pick its own topic name explicitly
+      # rather than silently inherit a dev-only default (see application-dev.yaml).
+      # Startup fails fast if this is left unset while enabled is true.
+      topic: ${CDRM_NOTIFICATIONS_KAFKA_TOPIC}
+    # CloudEvents "source" attribute — a URI-reference identifying this service as the
+    # context the event occurred in (see ReleaseHistoryCloudEvent).
+    source: ${CDRM_NOTIFICATIONS_SOURCE:urn:cdrm:release-service}
 
 management:
   endpoints:
@@ -45,3 +86,9 @@ management:
   endpoint:
     health:
       show-details: always
+  health:
+    # Release-history notifications are a best-effort side channel (see
+    # ReleaseNotificationPublisher) — an unreachable Kafka broker must never turn
+    # /actuator/health (liveness/readiness probes) unhealthy.
+    kafka:
+      enabled: false

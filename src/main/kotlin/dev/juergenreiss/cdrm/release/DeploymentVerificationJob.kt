@@ -4,11 +4,14 @@
 package dev.juergenreiss.cdrm.release
 
 import dev.juergenreiss.cdrm.kubernetes.KubernetesDeploymentClient
+import dev.juergenreiss.cdrm.notification.ReleaseHistoryNotificationKind
+import dev.juergenreiss.cdrm.notification.ReleaseHistoryRecordedEvent
 import dev.juergenreiss.cdrm.stage.StageRepository
 import dev.juergenreiss.cdrm.workload.Workload
 import dev.juergenreiss.cdrm.workload.WorkloadRepository
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import org.springframework.transaction.annotation.Transactional
@@ -37,6 +40,7 @@ class DeploymentVerificationJob(
     private val stageRepository: StageRepository,
     private val kubernetesDeploymentClient: KubernetesDeploymentClient,
     private val meterRegistry: MeterRegistry,
+    private val eventPublisher: ApplicationEventPublisher,
 ) {
 
     private val log = LoggerFactory.getLogger(DeploymentVerificationJob::class.java)
@@ -59,6 +63,7 @@ class DeploymentVerificationJob(
             if (!workload.kubernetes) {
                 entry.deploymentFinished = entry.deployedAt
                 releaseHistoryRepository.save(entry)
+                eventPublisher.publishEvent(ReleaseHistoryRecordedEvent(entry, ReleaseHistoryNotificationKind.DEPLOYED))
                 continue
             }
 
@@ -95,6 +100,7 @@ class DeploymentVerificationJob(
                 releaseHistoryRepository.save(entry)
                 meterRegistry.counter("cdrm.deploy.verification_succeeded", "workload", workload.name, "stage", entry.stageName).increment()
                 log.info("Verified rollout for release {} at stage {}", entry.releaseId, entry.stageId)
+                eventPublisher.publishEvent(ReleaseHistoryRecordedEvent(entry, ReleaseHistoryNotificationKind.DEPLOYED))
             }
             !status.imageObserved -> {
                 // Still on the previous image (or the resource/pods don't exist yet) —
@@ -124,5 +130,6 @@ class DeploymentVerificationJob(
         releaseHistoryRepository.save(entry)
         meterRegistry.counter("cdrm.deploy.verification_failed", "workload", entry.workloadName, "stage", entry.stageName).increment()
         log.warn("Rollout verification failed for release {} at stage {}: {}", entry.releaseId, entry.stageId, reason)
+        eventPublisher.publishEvent(ReleaseHistoryRecordedEvent(entry, ReleaseHistoryNotificationKind.DEPLOY_FAILED))
     }
 }

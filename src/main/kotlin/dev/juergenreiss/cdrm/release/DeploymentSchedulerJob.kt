@@ -3,11 +3,14 @@
 
 package dev.juergenreiss.cdrm.release
 
+import dev.juergenreiss.cdrm.notification.ReleaseHistoryNotificationKind
+import dev.juergenreiss.cdrm.notification.ReleaseHistoryRecordedEvent
 import dev.juergenreiss.cdrm.product.ProductStageRepository
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.StageRepository
 import dev.juergenreiss.cdrm.workload.WorkloadRepository
 import org.slf4j.LoggerFactory
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.scheduling.support.CronExpression
 import org.springframework.stereotype.Component
@@ -31,6 +34,7 @@ class DeploymentSchedulerJob(
     private val stageRepository: StageRepository,
     private val productStageRepository: ProductStageRepository,
     private val deploymentExecutor: DeploymentExecutor,
+    private val eventPublisher: ApplicationEventPublisher,
 ) {
 
     private val log = LoggerFactory.getLogger(DeploymentSchedulerJob::class.java)
@@ -68,6 +72,12 @@ class DeploymentSchedulerJob(
                     if (!workload.kubernetes) entry.deploymentFinished = now
                     releaseHistoryRepository.save(entry)
                     log.info("Deployed release {} at stage {}", entry.releaseId, entry.stageId)
+                    // Only non-Kubernetes workloads are actually terminal here — a
+                    // Kubernetes deploy still needs DeploymentVerificationJob to confirm
+                    // the rollout before this is the "final go".
+                    if (entry.deploymentFinished != null) {
+                        eventPublisher.publishEvent(ReleaseHistoryRecordedEvent(entry, ReleaseHistoryNotificationKind.DEPLOYED))
+                    }
                 }
                 is DeployAttemptResult.Failed -> {
                     if (entry.gitOpsManaged) {
@@ -98,6 +108,12 @@ class DeploymentSchedulerJob(
                             "GitOps push attempt {}/{} failed for release {} at stage {} — will retry next tick",
                             entry.gitopsRetryCount, MAX_GITOPS_RETRIES, entry.releaseId, entry.stageId,
                         )
+                    }
+                    // Only the permanent give-up is terminal — a plain "will retry next
+                    // tick" failure isn't the final go/no-go yet, and notifying on every
+                    // retry would fire once per minute for as long as it keeps failing.
+                    if (entry.deploymentFailed) {
+                        eventPublisher.publishEvent(ReleaseHistoryRecordedEvent(entry, ReleaseHistoryNotificationKind.DEPLOY_FAILED))
                     }
                 }
                 DeployAttemptResult.GitLockBusy -> {

@@ -33,6 +33,8 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.2")
     implementation("org.springframework.ai:spring-ai-starter-mcp-server-webmvc")
+    implementation("org.springframework.boot:spring-boot-starter-kafka")
+    implementation("org.springframework.boot:spring-boot-starter-websocket")
     implementation("tools.jackson.module:jackson-module-kotlin")
     implementation("tools.jackson.core:jackson-databind")
     developmentOnly("org.springframework.boot:spring-boot-devtools")

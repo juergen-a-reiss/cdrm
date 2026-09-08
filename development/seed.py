@@ -21,6 +21,10 @@ seeded manifests (best-effort — skipped if that repo isn't reachable), so
 you can re-run a normal seed from a clean slate. --reset does not need
 --token — it talks to Postgres, minikube, and the GitOps repo directly, not
 the API.
+
+--token is otherwise optional: if omitted, one is fetched automatically from
+Keycloak (see --keycloak-url) for the cdrm-devops test user start.sh's
+Ansible playbook creates.
 """
 
 import argparse
@@ -31,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -59,26 +64,78 @@ DB_TABLES = [
     "product",
 ]
 
+# Applied to every ArgoCD Application argocd/generate-applications.py generates, so
+# reset_kubernetes_objects() below can delete all of them in one shot regardless of each
+# one's own name (application_name() there names an Application after its
+# workload/product + stage, not the namespace — deleting by that name would have to
+# duplicate that naming logic here, and silently miss every one if it ever drifted).
+ARGOCD_MANAGED_BY_LABEL = "app.kubernetes.io/managed-by"
+ARGOCD_MANAGED_BY_VALUE = "cdrm-seed"
+
 # Matches development/argocd/setup-gitops-repo.sh.
 GITEA_USER = "cdrm"
 GITEA_PASSWORD = "cdrm"
 GITEA_REPO_URL = f"http://{GITEA_USER}:{GITEA_PASSWORD}@localhost:3000/{GITEA_USER}/gitops-demo.git"
 
+# The cdrm-devops test user start.sh's Ansible playbook creates (see
+# development/README.md's Keycloak section) — used to fetch a token automatically when
+# --token is omitted, so a fresh checkout doesn't need a separate keycloak.http round trip
+# just to run the seed script.
+KEYCLOAK_REALM = "cdrm"
+KEYCLOAK_CLIENT_ID = "cdrm"
+SEED_USERNAME = "cdrm-devops"
+SEED_PASSWORD = "test"
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--token", help="Bearer token for a user with the cdrm-devops role (required unless --reset)")
+    parser.add_argument(
+        "--token",
+        help="Bearer token for a user with the cdrm-devops role. If omitted (and --reset isn't given), one is "
+        f"fetched automatically from Keycloak for the '{SEED_USERNAME}' test user — see --keycloak-url.",
+    )
     parser.add_argument("--api-url", default="http://localhost:8080", help="Backend base URL")
+    parser.add_argument(
+        "--keycloak-url", default="http://localhost:2305", help="Keycloak base URL, used to fetch a token when --token is omitted"
+    )
     parser.add_argument(
         "--data", type=Path, default=Path(__file__).parent / "seed" / "data.yaml", help="Path to the YAML seed data file"
     )
     parser.add_argument(
         "--reset", action="store_true", help="Wipe the database and delete the bootstrapped Kubernetes objects, then exit"
     )
-    args = parser.parse_args()
-    if not args.reset and not args.token:
-        parser.error("--token is required unless --reset is given")
-    return args
+    return parser.parse_args()
+
+
+def fetch_token(keycloak_url: str) -> str:
+    """Password-grant token for the cdrm-devops seed user (see SEED_USERNAME above)."""
+    body = urllib.parse.urlencode(
+        {
+            "client_id": KEYCLOAK_CLIENT_ID,
+            "username": SEED_USERNAME,
+            "password": SEED_PASSWORD,
+            "grant_type": "password",
+        }
+    ).encode()
+    request = urllib.request.Request(
+        f"{keycloak_url}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/token",
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            return json.loads(response.read())["access_token"]
+    except urllib.error.HTTPError as e:
+        print(
+            f"Failed to fetch a token from Keycloak ({keycloak_url}) for user '{SEED_USERNAME}' "
+            f"(HTTP {e.code}): {e.read().decode()}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"Failed to reach Keycloak at {keycloak_url}: {e.reason}", file=sys.stderr)
+        sys.exit(1)
 
 
 def post(api_url: str, token: str, path: str, body: dict) -> dict:
@@ -427,11 +484,21 @@ def push_gitops_manifests(gitops_namespaces: dict[str, dict], stages: list[dict]
             print("Has development/argocd/setup-gitops-repo.sh been run?", file=sys.stderr)
             sys.exit(1)
 
+        # Captured once, before the loop below can switch it to anything else — a
+        # branch this run needs that doesn't exist in the repo yet (e.g. one just
+        # renamed or newly added in seed/data.yaml) gets created fresh off this, not off
+        # whatever branch a previous loop iteration happened to leave checked out
+        # (which would otherwise carry that other branch's files along with it).
+        default_branch = git_run("symbolic-ref", "--short", "HEAD", cwd=tmp).stdout.strip()
+
         for branch, files in files_by_branch.items():
             checkout = git_run("checkout", branch, cwd=tmp)
             if checkout.returncode != 0:
-                print(f"Error checking out branch '{branch}': {checkout.stderr}", file=sys.stderr)
-                sys.exit(1)
+                checkout = git_run("checkout", "-b", branch, default_branch, cwd=tmp)
+                if checkout.returncode != 0:
+                    print(f"Error creating branch '{branch}' off '{default_branch}': {checkout.stderr}", file=sys.stderr)
+                    sys.exit(1)
+                print(f"  created new branch '{branch}' off '{default_branch}'")
             for file_path, content in files.items():
                 full_path = Path(tmp) / file_path
                 full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -477,13 +544,19 @@ def reset_kubernetes_objects(clusters: list[dict], stages: list[dict], workloads
     if gitops_namespaces:
         # Best-effort: an Application's syncPolicy.automated.selfHeal would otherwise
         # fight the namespace deletion below by recreating what it removes. Silently
-        # skipped if ArgoCD (or its Application CRD) was never installed.
+        # skipped if ArgoCD (or its Application CRD) was never installed. By label, not
+        # name — see ARGOCD_MANAGED_BY_LABEL's comment for why a name-based delete
+        # doesn't actually work.
         print("Deleting ArgoCD Applications for GitOps-managed namespaces (best-effort)...")
-        for namespace in gitops_namespaces:
-            subprocess.run(
-                ["kubectl", "delete", "application", namespace, "-n", "argocd", "--ignore-not-found"],
-                capture_output=True, text=True,
-            )
+        result = subprocess.run(
+            [
+                "kubectl", "delete", "application", "-n", "argocd",
+                "-l", f"{ARGOCD_MANAGED_BY_LABEL}={ARGOCD_MANAGED_BY_VALUE}", "--ignore-not-found",
+            ],
+            capture_output=True, text=True,
+        )
+        for line in result.stdout.splitlines():
+            print(f"  {line}")
 
     kinds = {"DEPLOYMENT": "deployment", "STATEFUL_SET": "statefulset"}
     for workload in workloads:
@@ -581,6 +654,9 @@ def main() -> None:
         reset_gitops_repo(data["clusters"])
         print("Done.")
         return
+
+    if not args.token:
+        args.token = fetch_token(args.keycloak_url)
 
     cluster_ids = seed_clusters(args.api_url, args.token, data["clusters"])
     stage_ids = seed_stages(args.api_url, args.token, data["stages"], cluster_ids)

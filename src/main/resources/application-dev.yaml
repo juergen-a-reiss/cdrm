@@ -15,3 +15,12 @@ cdrm:
     # push GitOps commits (see GitCommitClient); anonymous read alone isn't enough.
     git-username: cdrm
     git-password: cdrm
+  notifications:
+    kafka:
+      # A single general-purpose topic, not release-specific — it carries every
+      # entity's change events (release-history today, others as they're wired up) plus
+      # WebSocket live-push relaying (KafkaChangeRelay), not just enterprise-integration
+      # traffic. application.yaml has no default for this — production must choose its
+      # own topic name explicitly. Local dev only, matching platform-dev-setup's Kafka
+      # component.
+      topic: cdrm

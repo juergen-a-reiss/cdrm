@@ -4,7 +4,7 @@
 -->
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onUnmounted, ref, watch } from 'vue'
 import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
 import ResourceTable from '../components/ResourceTable.vue'
 import type { SortByItem } from '../components/ResourceTable.vue'
@@ -21,6 +21,7 @@ import { useWorkloadFilter } from '../composables/useWorkloadFilter'
 import { usePipelineFilter } from '../composables/usePipelineFilter'
 import { usePersistedRef } from '../composables/usePersistedRef'
 import { useToast } from '../composables/useToast'
+import { onChange, type ChangeMessage } from '../composables/useChangeSocket'
 import { releasesApi } from '../api/releases'
 import { workloadsApi } from '../api/workloads'
 import { ApiError } from '../api/http'
@@ -156,6 +157,42 @@ watch(expanded, async (ids) => {
   }
 })
 
+// A release's canPromote/deployment status can change without any action of the
+// viewer's own — DeploymentVerificationJob confirms a Kubernetes rollout (or
+// DeploymentSchedulerJob retries a pending one) independently, seconds to minutes after
+// the request that triggered it returned. Rather than polling for that, the backend
+// pushes a "release X changed" signal over the WebSocket the moment it happens (see
+// useChangeSocket) — this is the "backend actively pushes" half; the rest of this
+// handler is the "frontend just patches its own data model" half your view's sorting
+// and filtering already happen client-side against the one (unpaginated) list already
+// in memory, so there's no need to refetch the whole thing, only the one row that
+// changed.
+const RELEASE_HISTORY_CHANGE_TYPE_PREFIX = 'dev.juergenreiss.cdrm.release-history.'
+
+async function handleChange(message: ChangeMessage) {
+  if (!message.type.startsWith(RELEASE_HISTORY_CHANGE_TYPE_PREFIX)) return
+  const releaseId = message.subject
+  const index = items.value.findIndex((release) => release.id === releaseId)
+  if (index === -1) {
+    // Not currently in the list — a brand new release, or one just becoming visible to
+    // this caller. Patching one item in place doesn't help here; the (unpaginated)
+    // list itself needs refetching.
+    await reload()
+  } else {
+    try {
+      items.value[index] = await releasesApi.get(releaseId)
+    } catch {
+      // Most likely just deleted, or no longer visible to this caller — drop the stale
+      // row via a full reload rather than leaving it showing outdated data.
+      await reload()
+    }
+  }
+  if (expanded.value.includes(releaseId)) await loadHistory(releaseId)
+}
+
+const unsubscribeChanges = onChange(handleChange)
+onUnmounted(unsubscribeChanges)
+
 function openCreate() {
   editingRelease.value = null
   dialogOpen.value = true
@@ -209,11 +246,14 @@ async function rollbackRelease(release: ReleaseResponse) {
   }
 }
 
+// Only ever called for a row where raw.hasNextStage is true — see the promote button's
+// v-if below, which hides it entirely otherwise (a final-stage release has nothing left
+// to explain: there's no "reason" to show, so no disabled button either).
 function promoteTitle(row: ReleaseRow): string {
   if (row.canPromote) return 'Promote to next stage'
   if (row.raw.deploymentFailed) return `Deployment to this stage failed${row.raw.deploymentError ? ` (${row.raw.deploymentError})` : ''}`
   if (!row.raw.deploymentFinished) return "Deployment to this stage hasn't finished yet"
-  return 'Not allowed, or already at the final stage'
+  return 'You do not have permission to promote at this stage'
 }
 
 function redeployTitle(row: ReleaseRow): string {
@@ -290,55 +330,49 @@ async function onRedeployed() {
       </v-toolbar>
     </template>
     <template v-if="showActions" #item.actions="{ item }">
-      <v-btn
-        v-if="canPromoteReleases || item.canPromote"
-        icon="mdi-arrow-up-bold-circle-outline"
-        size="small"
-        variant="text"
-        class="mr-2"
-        :disabled="!item.canPromote"
-        :title="promoteTitle(item)"
-        @click.stop="promoteRelease(item.raw)"
-      />
-      <v-btn
+      <!-- Each button's tooltip is on a wrapping, always-hoverable <span> rather than the
+           v-btn itself: a native `title` attribute never shows on a *disabled* element
+           (Chrome/Firefox don't fire hover events on disabled form controls), so a title
+           on the button itself is silently swallowed exactly when it's most needed —
+           explaining why the disabled action is disabled. -->
+      <span v-if="item.raw.hasNextStage && (canPromoteReleases || item.canPromote)" class="mr-2" :title="promoteTitle(item)">
+        <v-btn
+          icon="mdi-arrow-up-bold-circle-outline"
+          size="small"
+          variant="text"
+          :disabled="!item.canPromote"
+          @click.stop="promoteRelease(item.raw)"
+        />
+      </span>
+      <span
         v-if="canRollbackReleases || item.canRollback"
-        icon="mdi-history"
-        size="small"
-        variant="text"
         class="mr-2"
-        :disabled="!item.canRollback"
         :title="item.canRollback ? 'Roll back stage to this release' : 'Not allowed, or already the head release for this stage'"
-        @click.stop="rollbackRelease(item.raw)"
-      />
-      <v-btn
-        v-if="canRedeployReleases || item.canRedeploy"
-        icon="mdi-cloud-upload-outline"
-        size="small"
-        variant="text"
-        class="mr-2"
-        :disabled="!item.canRedeploy"
-        :title="redeployTitle(item)"
-        @click.stop="openRedeploy(item.raw)"
-      />
-      <v-btn
+      >
+        <v-btn icon="mdi-history" size="small" variant="text" :disabled="!item.canRollback" @click.stop="rollbackRelease(item.raw)" />
+      </span>
+      <span v-if="canRedeployReleases || item.canRedeploy" class="mr-2" :title="redeployTitle(item)">
+        <v-btn
+          icon="mdi-cloud-upload-outline"
+          size="small"
+          variant="text"
+          :disabled="!item.canRedeploy"
+          @click.stop="openRedeploy(item.raw)"
+        />
+      </span>
+      <span
         v-if="canManageReleases || item.canEdit"
-        icon="mdi-pencil"
-        size="small"
-        variant="text"
         class="mr-2"
-        :disabled="!item.canEdit"
         :title="item.canEdit ? 'Edit release' : 'Not allowed to edit at this stage'"
-        @click.stop="openEdit(item.raw)"
-      />
-      <v-btn
+      >
+        <v-btn icon="mdi-pencil" size="small" variant="text" :disabled="!item.canEdit" @click.stop="openEdit(item.raw)" />
+      </span>
+      <span
         v-if="canManageReleases || item.canDelete"
-        icon="mdi-delete"
-        size="small"
-        variant="text"
-        :disabled="!item.canDelete"
         :title="item.canDelete ? 'Delete release' : 'Not allowed to delete at this stage'"
-        @click.stop="removeRelease(item.raw)"
-      />
+      >
+        <v-btn icon="mdi-delete" size="small" variant="text" :disabled="!item.canDelete" @click.stop="removeRelease(item.raw)" />
+      </span>
     </template>
     <template #expanded-row="{ item, columns }">
       <tr>

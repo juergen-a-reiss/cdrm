@@ -51,7 +51,7 @@ def namespace_context(data: dict) -> dict[str, dict]:
 
 
 def application_name(namespace: str, stage: dict, workloads: list[dict]) -> str:
-    """A namespace name alone (e.g. "p-qa-platform") doesn't read well in the ArgoCD UI —
+    """A namespace name alone (e.g. "paris-qa-platform") doesn't read well in the ArgoCD UI —
     prefer whichever of these is actually specific to what's being synced there: the
     workload's own name when there's exactly one, or the shared product name when several
     workloads land in the same namespace and all belong to the same product (a namespace
@@ -99,6 +99,10 @@ def applications(data: dict) -> list[dict]:
                     "metadata": {
                         "name": application_name(namespace, context["stage"], context["workloads"]),
                         "namespace": "argocd",
+                        # Lets seed.py --reset delete every Application generated here in
+                        # one shot, without having to duplicate application_name()'s
+                        # naming scheme to find them again (see seed.ARGOCD_MANAGED_BY_LABEL).
+                        "labels": {seed.ARGOCD_MANAGED_BY_LABEL: seed.ARGOCD_MANAGED_BY_VALUE},
                     },
                     "spec": {
                         "project": "default",

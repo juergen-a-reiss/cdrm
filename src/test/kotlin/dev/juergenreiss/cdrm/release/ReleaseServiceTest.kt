@@ -1,5 +1,6 @@
 package dev.juergenreiss.cdrm.release
 
+import dev.juergenreiss.cdrm.notification.ReleaseHistoryRecordedEvent
 import dev.juergenreiss.cdrm.product.Product
 import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.product.ProductStage
@@ -82,6 +83,9 @@ class ReleaseServiceTest {
     @Mock
     private lateinit var currentUser: AuditorAware<UUID>
 
+    @Mock
+    private lateinit var eventPublisher: org.springframework.context.ApplicationEventPublisher
+
     // A real (spied) instance, not a full mock: with no SecurityContext set up in these
     // unit tests, its canSeeWorkload()/allowsReleaseAction() naturally behave as
     // "unrestricted"/"claim not set" without needing to stub them — only hasRole() (used
@@ -109,6 +113,7 @@ class ReleaseServiceTest {
             currentUser,
             meterRegistry,
             rebac,
+            eventPublisher,
         )
         // Unrestricted by default — matches every test written before ReBAC existed.
         // Tests that specifically exercise ReBAC restrictions override this.
@@ -273,6 +278,11 @@ class ReleaseServiceTest {
         assertEquals(userId, captor.value.createdBy)
         assertEquals(ReleaseHistoryAction.CREATED, captor.value.action)
         assertNotNull(captor.value.deployedAt)
+
+        val eventCaptor = ArgumentCaptor.forClass(ReleaseHistoryRecordedEvent::class.java)
+        verify(eventPublisher).publishEvent(eventCaptor.capture())
+        assertEquals(ReleaseHistoryAction.CREATED, eventCaptor.value.entry.action)
+        assertEquals(saved.id, eventCaptor.value.entry.releaseId)
     }
 
     @Test
@@ -652,6 +662,11 @@ class ReleaseServiceTest {
                 .counter()
                 .count(),
         )
+
+        val eventCaptor = ArgumentCaptor.forClass(ReleaseHistoryRecordedEvent::class.java)
+        verify(eventPublisher).publishEvent(eventCaptor.capture())
+        assertEquals(ReleaseHistoryAction.PROMOTED, eventCaptor.value.entry.action)
+        assertEquals(releaseId, eventCaptor.value.entry.releaseId)
     }
 
     @Test
@@ -916,6 +931,11 @@ class ReleaseServiceTest {
                 .counter()
                 .count(),
         )
+
+        val eventCaptor = ArgumentCaptor.forClass(ReleaseHistoryRecordedEvent::class.java)
+        verify(eventPublisher).publishEvent(eventCaptor.capture())
+        assertEquals(ReleaseHistoryAction.ROLLED_BACK, eventCaptor.value.entry.action)
+        assertEquals(targetReleaseId, eventCaptor.value.entry.releaseId)
     }
 
     @Test
@@ -981,6 +1001,11 @@ class ReleaseServiceTest {
                 .counter()
                 .count(),
         )
+
+        val eventCaptor = ArgumentCaptor.forClass(ReleaseHistoryRecordedEvent::class.java)
+        verify(eventPublisher).publishEvent(eventCaptor.capture())
+        assertEquals(ReleaseHistoryAction.REDEPLOYED, eventCaptor.value.entry.action)
+        assertEquals(releaseId, eventCaptor.value.entry.releaseId)
     }
 
     @Test
@@ -1214,6 +1239,33 @@ class ReleaseServiceTest {
         val result = service.findById(releaseId)
 
         assertFalse(result.canPromote)
+        // Distinct from canPromote: the frontend hides the promote control entirely when
+        // this is false, rather than showing it disabled with a "not allowed" tooltip —
+        // so this specifically must reflect "no next stage exists", not the broader
+        // "can't promote for any reason" canPromote already reports above.
+        assertFalse(result.hasNextStage)
+    }
+
+    @Test
+    fun `toResponse reports hasNextStage true even when blocked by permission or an unfinished deployment`() {
+        val workloadId = UUID.randomUUID()
+        stubWorkloadVisible(workloadId)
+        val dev = persistedStage(order = 1, name = "Dev")
+        val qa = persistedStage(order = 2, name = "QA")
+        stubWorkloadStages(workloadId, listOf(dev, qa))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev, qa))
+        given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
+
+        val releaseId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = dev.id!!)
+        given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        // No history entry stubbed at all — deploymentFinished stays null (unfinished),
+        // which alone already forces canPromote false; hasNextStage must stay true.
+
+        val result = service.findById(releaseId)
+
+        assertFalse(result.canPromote)
+        assertTrue(result.hasNextStage)
     }
 
     @Test

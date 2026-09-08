@@ -4,7 +4,7 @@
 -->
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
 import { useProductFilter } from '../composables/useProductFilter'
 import { useStageFilter } from '../composables/useStageFilter'
@@ -28,6 +28,7 @@ import { formatDateTime } from '../utils/formatDateTime'
 import { formatDeploymentStatus, gitOpsStatusDisplay, kubernetesStatusDisplay } from '../utils/releaseHistoryStatus'
 import type { GitOpsStatus, KubernetesStatus } from '../api/types'
 import { sortParam } from '../utils/sortParam'
+import { onChange, type ChangeMessage } from '../composables/useChangeSocket'
 
 // Everything below — the table's rows, its total count, and the chart's aggregated
 // counts — comes from the backend already filtered, sorted, and (for the table)
@@ -302,6 +303,20 @@ onMounted(() => {
   loadTable()
   loadSummary()
 })
+
+// The table and chart are both sorted/filtered/paginated server-side (see
+// releasesApi.historyOverview()/historySummary() above) — unlike ReleasesView's plain
+// list, there's no single in-memory row to patch, so a change just reloads both.
+const RELEASE_HISTORY_CHANGE_TYPE_PREFIX = 'dev.juergenreiss.cdrm.release-history.'
+
+function handleChange(message: ChangeMessage) {
+  if (!message.type.startsWith(RELEASE_HISTORY_CHANGE_TYPE_PREFIX)) return
+  loadTable()
+  loadSummary()
+}
+
+const unsubscribeChanges = onChange(handleChange)
+onUnmounted(unsubscribeChanges)
 </script>
 
 <template>

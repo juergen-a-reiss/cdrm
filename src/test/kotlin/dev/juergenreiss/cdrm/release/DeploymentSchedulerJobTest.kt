@@ -1,5 +1,7 @@
 package dev.juergenreiss.cdrm.release
 
+import dev.juergenreiss.cdrm.notification.ReleaseHistoryNotificationKind
+import dev.juergenreiss.cdrm.notification.ReleaseHistoryRecordedEvent
 import dev.juergenreiss.cdrm.product.ProductStage
 import dev.juergenreiss.cdrm.product.ProductStageRepository
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
@@ -46,12 +48,16 @@ class DeploymentSchedulerJobTest {
     @Mock
     private lateinit var deploymentExecutor: DeploymentExecutor
 
+    @Mock
+    private lateinit var eventPublisher: org.springframework.context.ApplicationEventPublisher
+
     private lateinit var job: DeploymentSchedulerJob
 
     @BeforeEach
     fun setUp() {
         job = DeploymentSchedulerJob(
             releaseHistoryRepository, releaseRepository, workloadRepository, stageRepository, productStageRepository, deploymentExecutor,
+            eventPublisher,
         )
     }
 
@@ -139,6 +145,10 @@ class DeploymentSchedulerJobTest {
 
         assertNotNull(pending.deployedAt)
         verify(releaseHistoryRepository).save(pending)
+
+        val eventCaptor = org.mockito.ArgumentCaptor.forClass(ReleaseHistoryRecordedEvent::class.java)
+        verify(eventPublisher).publishEvent(eventCaptor.capture())
+        assertEquals(ReleaseHistoryNotificationKind.DEPLOYED, eventCaptor.value.kind)
     }
 
     @Test
@@ -184,6 +194,10 @@ class DeploymentSchedulerJobTest {
 
         assertNotNull(pending.deployedAt)
         verify(releaseHistoryRepository).save(pending)
+
+        val eventCaptor = org.mockito.ArgumentCaptor.forClass(ReleaseHistoryRecordedEvent::class.java)
+        verify(eventPublisher).publishEvent(eventCaptor.capture())
+        assertEquals(ReleaseHistoryNotificationKind.DEPLOYED, eventCaptor.value.kind)
     }
 
     @Test
@@ -207,6 +221,8 @@ class DeploymentSchedulerJobTest {
         assertNull(pending.deployedAt)
         assertEquals("cluster not reachable", pending.deployError)
         verify(releaseHistoryRepository).save(pending)
+        // Still retrying, not the final go/no-go — must not notify on every retry.
+        verify(eventPublisher, never()).publishEvent(org.mockito.ArgumentMatchers.any())
     }
 
     @Test
@@ -234,6 +250,8 @@ class DeploymentSchedulerJobTest {
         assertFalse(pending.deploymentFailed)
         assertNull(pending.deploymentFinished)
         verify(releaseHistoryRepository).save(pending)
+        // Still retrying, not the final go/no-go — must not notify on every retry.
+        verify(eventPublisher, never()).publishEvent(org.mockito.ArgumentMatchers.any())
     }
 
     @Test
@@ -261,6 +279,10 @@ class DeploymentSchedulerJobTest {
         assertNotNull(pending.deploymentFinished)
         assertNull(pending.deployedAt)
         verify(releaseHistoryRepository).save(pending)
+
+        val eventCaptor = org.mockito.ArgumentCaptor.forClass(ReleaseHistoryRecordedEvent::class.java)
+        verify(eventPublisher).publishEvent(eventCaptor.capture())
+        assertEquals(ReleaseHistoryNotificationKind.DEPLOY_FAILED, eventCaptor.value.kind)
     }
 
     @Test

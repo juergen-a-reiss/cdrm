@@ -31,6 +31,12 @@ class SecurityConfig(
                 authorize("/actuator/health/**", permitAll)
                 authorize("/actuator/metrics/**", permitAll)
                 authorize("/actuator/prometheus", permitAll)
+                // The initial HTTP handshake for the push-notification WebSocket is left
+                // unauthenticated here on purpose — a browser's WebSocket API can't set an
+                // Authorization header on it. WebSocketConfig's STOMP CONNECT interceptor
+                // is the actual gate: it validates the JWT (sent as a STOMP frame header,
+                // not an HTTP one) before accepting the connection.
+                authorize("/ws/**", permitAll)
                 authorize(HttpMethod.POST, "/clusters/**", hasRole("cdrm-devops"))
                 authorize(HttpMethod.PUT, "/clusters/**", hasRole("cdrm-devops"))
                 authorize(HttpMethod.DELETE, "/clusters/**", hasRole("cdrm-devops"))

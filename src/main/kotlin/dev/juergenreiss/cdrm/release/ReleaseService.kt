@@ -6,6 +6,7 @@ package dev.juergenreiss.cdrm.release
 import dev.juergenreiss.cdrm.common.SortSpec
 import dev.juergenreiss.cdrm.common.sortedBySpec
 import dev.juergenreiss.cdrm.gitops.GitOpsResolver
+import dev.juergenreiss.cdrm.notification.ReleaseHistoryRecordedEvent
 import dev.juergenreiss.cdrm.product.Product
 import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.product.ProductStageRepository
@@ -19,6 +20,7 @@ import dev.juergenreiss.cdrm.workload.WorkloadRepository
 import dev.juergenreiss.cdrm.workload.WorkloadStageRepository
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.data.domain.AuditorAware
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
@@ -57,6 +59,7 @@ class ReleaseService(
     private val currentUser: AuditorAware<UUID>,
     private val meterRegistry: MeterRegistry,
     private val rebac: RebacContext,
+    private val eventPublisher: ApplicationEventPublisher,
 ) {
 
     private val log = LoggerFactory.getLogger(ReleaseService::class.java)
@@ -578,6 +581,11 @@ class ReleaseService(
             "Recorded history for release {} at stage {} for workload {}: {}",
             release.id, stage.id, workload.id, if (entry.deployedAt != null) "deployed" else "pending",
         )
+        // One notification per release-API action (not per underlying save above), with
+        // the outcome of the synchronous IMMEDIATE-policy deploy attempt already baked
+        // into entry — see ReleaseNotificationPublisher, which only actually sends it
+        // once this method's transaction commits.
+        eventPublisher.publishEvent(ReleaseHistoryRecordedEvent(entry))
         return entry
     }
 
@@ -743,6 +751,7 @@ class ReleaseService(
             workloadId = workloadId,
             currentStage = ReleaseStageInfo(id = currentStage.id!!, name = currentStage.name, order = currentStage.order),
             commitId = commitId,
+            hasNextStage = hasNextStage,
             canPromote = canPromote,
             canRollback = canRollback,
             canEdit = canEdit,
