@@ -1,5 +1,10 @@
 package dev.juergenreiss.cdrm.cluster
 
+import dev.juergenreiss.cdrm.audit.AuditAction
+import dev.juergenreiss.cdrm.audit.AuditEntityType
+import dev.juergenreiss.cdrm.audit.AuditRecorder
+import dev.juergenreiss.cdrm.security.CurrentActorResolver
+import dev.juergenreiss.cdrm.testsupport.singleInvocationArgs
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.BeforeEach
@@ -13,7 +18,6 @@ import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.junit.jupiter.MockitoExtension
 import org.springframework.dao.DataIntegrityViolationException
-import org.springframework.data.domain.AuditorAware
 import org.springframework.web.server.ResponseStatusException
 import java.net.URI
 import java.time.Instant
@@ -27,13 +31,16 @@ class ClusterServiceTest {
     private lateinit var repository: ClusterRepository
 
     @Mock
-    private lateinit var currentUser: AuditorAware<UUID>
+    private lateinit var currentActorResolver: CurrentActorResolver
+
+    @Mock
+    private lateinit var auditRecorder: AuditRecorder
 
     private lateinit var service: ClusterService
 
     @BeforeEach
     fun setUp() {
-        service = ClusterService(repository, currentUser)
+        service = ClusterService(repository, currentActorResolver, auditRecorder)
     }
 
     private fun persistedCluster(
@@ -109,7 +116,7 @@ class ClusterServiceTest {
     @Test
     fun `create resolves current user as createdBy and modifiedBy`() {
         val userId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(userId))
+        given(currentActorResolver.resolve()).willReturn(userId)
         val captor = ArgumentCaptor.forClass(Cluster::class.java)
         val saved = persistedCluster(createdBy = userId, modifiedBy = userId)
         given(repository.save(captor.capture())).willReturn(saved)
@@ -121,11 +128,12 @@ class ClusterServiceTest {
         assertEquals("prod", captor.value.name)
         assertEquals(userId, captor.value.createdBy)
         assertEquals(saved.id, result.id)
+        verify(auditRecorder).recordCreate(AuditEntityType.CLUSTER, saved.id.toString(), "prod", null, result, userId)
     }
 
     @Test
     fun `create throws when current user cannot be resolved`() {
-        given(currentUser.currentAuditor).willReturn(Optional.empty())
+        given(currentActorResolver.resolve()).willThrow(IllegalStateException("Current user could not be determined"))
 
         assertThrows(IllegalStateException::class.java) {
             service.create(
@@ -142,7 +150,7 @@ class ClusterServiceTest {
         val cluster = persistedCluster(createdBy = originalUser, modifiedBy = originalUser)
         given(repository.findById(cluster.id!!)).willReturn(Optional.of(cluster))
         val newUser = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(newUser))
+        given(currentActorResolver.resolve()).willReturn(newUser)
         given(repository.save(cluster)).willReturn(cluster)
 
         val newUrl = URI("https://renamed.example.com").toURL()
@@ -156,6 +164,15 @@ class ClusterServiceTest {
         assertEquals(ClusterType.PROXMOX, cluster.clusterType)
         assertEquals(newUser, cluster.modifiedBy)
         assertEquals(newUser, result.modifiedBy)
+
+        val args = singleInvocationArgs(auditRecorder, "recordUpdate")
+        assertEquals(AuditEntityType.CLUSTER, args[0])
+        assertEquals(cluster.id.toString(), args[1])
+        assertEquals("renamed", args[2])
+        assertEquals(null, args[3])
+        assertEquals("prod", (args[4] as ClusterResponse).name)
+        assertEquals(result, args[5])
+        assertEquals(newUser, args[6])
     }
 
     @Test
@@ -173,19 +190,27 @@ class ClusterServiceTest {
 
     @Test
     fun `delete removes existing cluster after resolving current user`() {
-        val id = UUID.randomUUID()
-        given(repository.existsById(id)).willReturn(true)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val cluster = persistedCluster()
+        given(repository.findById(cluster.id!!)).willReturn(Optional.of(cluster))
+        val userId = UUID.randomUUID()
+        given(currentActorResolver.resolve()).willReturn(userId)
 
-        service.delete(id)
+        service.delete(cluster.id!!)
 
-        verify(repository).deleteById(id)
+        verify(repository).deleteById(cluster.id!!)
+        val args = singleInvocationArgs(auditRecorder, "recordDelete")
+        assertEquals(AuditEntityType.CLUSTER, args[0])
+        assertEquals(cluster.id.toString(), args[1])
+        assertEquals(cluster.name, args[2])
+        assertEquals(null, args[3])
+        assertEquals(cluster.name, (args[4] as ClusterResponse).name)
+        assertEquals(userId, args[5])
     }
 
     @Test
     fun `delete throws 404 when missing`() {
         val id = UUID.randomUUID()
-        given(repository.existsById(id)).willReturn(false)
+        given(repository.findById(id)).willReturn(Optional.empty())
 
         val exception = assertThrows(ResponseStatusException::class.java) { service.delete(id) }
 
@@ -195,13 +220,14 @@ class ClusterServiceTest {
 
     @Test
     fun `delete throws 409 when cluster is still linked to a stage`() {
-        val id = UUID.randomUUID()
-        given(repository.existsById(id)).willReturn(true)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val cluster = persistedCluster()
+        given(repository.findById(cluster.id!!)).willReturn(Optional.of(cluster))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(repository.flush()).willThrow(DataIntegrityViolationException::class.java)
 
-        val exception = assertThrows(ResponseStatusException::class.java) { service.delete(id) }
+        val exception = assertThrows(ResponseStatusException::class.java) { service.delete(cluster.id!!) }
 
         assertEquals(409, exception.statusCode.value())
+        org.mockito.Mockito.verifyNoInteractions(auditRecorder)
     }
 }

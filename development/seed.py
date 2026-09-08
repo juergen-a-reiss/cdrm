@@ -71,6 +71,8 @@ DB_TABLES = [
 # duplicate that naming logic here, and silently miss every one if it ever drifted).
 ARGOCD_MANAGED_BY_LABEL = "app.kubernetes.io/managed-by"
 ARGOCD_MANAGED_BY_VALUE = "cdrm-seed"
+ARGOCD_NAMESPACE = "argocd"
+GENERATE_APPLICATIONS_SCRIPT = Path(__file__).parent / "argocd" / "generate-applications.py"
 
 # Matches development/argocd/setup-gitops-repo.sh.
 GITEA_USER = "cdrm"
@@ -515,6 +517,33 @@ def push_gitops_manifests(gitops_namespaces: dict[str, dict], stages: list[dict]
                 sys.exit(1)
 
 
+def apply_argocd_applications(clusters: list[dict]) -> None:
+    """Regenerates and applies the ArgoCD Applications for every GitOps-managed
+    namespace in seed/data.yaml (see argocd/generate-applications.py) — the counterpart
+    of reset_kubernetes_objects()'s deletion of the same Applications by
+    ARGOCD_MANAGED_BY_LABEL. Without this, --reset followed by a plain seed.py would
+    leave the GitOps demo's namespaces with nothing syncing them: --reset deletes the
+    Applications, but nothing recreated them again short of manually re-running
+    development/argocd/setup-argocd.sh.
+
+    Best-effort, like the deletion side: silently does nothing if ArgoCD was never
+    installed (no "argocd" namespace), so a plain ./seed.py still works fine for anyone
+    not running the GitOps demo at all."""
+    if not gitops_namespace_map(clusters):
+        return
+    if kubectl("get", "namespace", ARGOCD_NAMESPACE).returncode != 0:
+        return
+
+    print("Applying ArgoCD Applications for GitOps-managed namespaces...")
+    generate = subprocess.run(["python3", str(GENERATE_APPLICATIONS_SCRIPT)], capture_output=True, text=True)
+    if generate.returncode != 0:
+        print(f"  skipping ({generate.stderr.strip()})")
+        return
+    result = kubectl("apply", "-f", "-", input_text=generate.stdout)
+    for line in (result.stdout or result.stderr).splitlines():
+        print(f"  {line}")
+
+
 def reset_database() -> None:
     print("Resetting database...")
     if shutil.which("docker") is None:
@@ -663,6 +692,7 @@ def main() -> None:
     product_ids = seed_products(args.api_url, args.token, data["products"], stage_ids)
     workload_ids = seed_workloads(args.api_url, args.token, data["workloads"], product_ids)
     bootstrap_kubernetes_objects(data["clusters"], data["stages"], data["workloads"])
+    apply_argocd_applications(data["clusters"])
     seed_releases(args.api_url, args.token, data["releases"], workload_ids)
     
     print("Done.")

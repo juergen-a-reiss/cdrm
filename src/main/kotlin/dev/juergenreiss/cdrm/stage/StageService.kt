@@ -3,12 +3,14 @@
 
 package dev.juergenreiss.cdrm.stage
 
+import dev.juergenreiss.cdrm.audit.AuditEntityType
+import dev.juergenreiss.cdrm.audit.AuditRecorder
 import dev.juergenreiss.cdrm.cluster.ClusterRepository
 import dev.juergenreiss.cdrm.common.SortSpec
 import dev.juergenreiss.cdrm.common.sortedBySpec
+import dev.juergenreiss.cdrm.security.CurrentActorResolver
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
-import org.springframework.data.domain.AuditorAware
 import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -22,7 +24,8 @@ class StageService(
     private val repository: StageRepository,
     private val clusterRepository: ClusterRepository,
     private val stageClusterRepository: StageClusterRepository,
-    private val currentUser: AuditorAware<UUID>,
+    private val currentActorResolver: CurrentActorResolver,
+    private val auditRecorder: AuditRecorder,
 ) {
 
     private val log = LoggerFactory.getLogger(StageService::class.java)
@@ -63,13 +66,16 @@ class StageService(
         if (request.clusterIds != null) {
             updateClusterLinks(saved.id!!, request.clusterIds)
         }
+        val response = saved.toResponse()
+        auditRecorder.recordCreate(AuditEntityType.STAGE, saved.id!!.toString(), saved.name, null, response, userId)
         log.info("Created stage {} ('{}') by user {}", saved.id, saved.name, userId)
-        return saved.toResponse()
+        return response
     }
 
     @Transactional
     fun update(id: UUID, request: StageRequest): StageResponse {
         val stage = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        val before = stage.toResponse()
         stage.pipeline = request.pipeline
         stage.name = request.name
         stage.description = request.description
@@ -82,8 +88,10 @@ class StageService(
         if (request.clusterIds != null) {
             updateClusterLinks(saved.id!!, request.clusterIds)
         }
+        val after = saved.toResponse()
+        auditRecorder.recordUpdate(AuditEntityType.STAGE, saved.id!!.toString(), saved.name, null, before, after, saved.modifiedBy)
         log.info("Updated stage {} ('{}') by user {}", saved.id, saved.name, saved.modifiedBy)
-        return saved.toResponse()
+        return after
     }
 
     private fun updateClusterLinks(stageId: UUID, clusterIds: List<UUID>) {
@@ -110,7 +118,8 @@ class StageService(
 
     @Transactional
     fun delete(id: UUID) {
-        if (!repository.existsById(id)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val stage = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        val before = stage.toResponse()
         val userId = currentUserId()
         try {
             repository.deleteById(id)
@@ -118,11 +127,11 @@ class StageService(
         } catch (e: DataIntegrityViolationException) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "Stage is still referenced by one or more releases")
         }
+        auditRecorder.recordDelete(AuditEntityType.STAGE, id.toString(), before.name, null, before, userId)
         log.info("Deleted stage {} by user {}", id, userId)
     }
 
-    private fun currentUserId(): UUID =
-        currentUser.currentAuditor.orElseThrow { IllegalStateException("Current user could not be determined") }
+    private fun currentUserId(): UUID = currentActorResolver.resolve()
 
     private fun Stage.toResponse(): StageResponse {
         val linkedClusterIds = stageClusterRepository.findByStageId(id!!).map { it.clusterId }.toSet()

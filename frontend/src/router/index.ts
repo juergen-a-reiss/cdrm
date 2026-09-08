@@ -24,6 +24,7 @@ export const router = createRouter({
       name: 'release-history',
       component: () => import('../views/ReleaseHistoryDashboardView.vue'),
     },
+    { path: '/audit', name: 'audit', component: () => import('../views/AuditView.vue') },
     { path: '/configuration', name: 'configuration', component: () => import('../views/ConfigurationView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],

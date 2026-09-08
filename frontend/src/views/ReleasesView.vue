@@ -21,6 +21,7 @@ import { useWorkloadFilter } from '../composables/useWorkloadFilter'
 import { usePipelineFilter } from '../composables/usePipelineFilter'
 import { usePersistedRef } from '../composables/usePersistedRef'
 import { useToast } from '../composables/useToast'
+import { useUserDisplay } from '../composables/useUserDisplay'
 import { onChange, type ChangeMessage } from '../composables/useChangeSocket'
 import { releasesApi } from '../api/releases'
 import { workloadsApi } from '../api/workloads'
@@ -50,6 +51,8 @@ interface ReleaseRow {
   canDelete: boolean
   raw: ReleaseResponse
 }
+
+const { displayName, resolve: resolveUserDisplay } = useUserDisplay()
 
 const sortBy = usePersistedRef<SortByItem[]>('cdrm.sort.releases', [{ key: 'createdAt', order: 'desc' }])
 const { items, loading, error, reload } = useResourceList(() => releasesApi.list(sortParam(sortBy.value)))
@@ -144,6 +147,7 @@ async function loadHistory(id: string) {
   historyError.value[id] = null
   try {
     historyByRelease.value[id] = await releasesApi.history(id)
+    resolveUserDisplay(historyByRelease.value[id].map((entry) => entry.createdBy))
   } catch (e) {
     historyError.value[id] = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to load history'
   } finally {
@@ -330,29 +334,48 @@ async function onRedeployed() {
       </v-toolbar>
     </template>
     <template v-if="showActions" #item.actions="{ item }">
-      <!-- Each button's tooltip is on a wrapping, always-hoverable <span> rather than the
-           v-btn itself: a native `title` attribute never shows on a *disabled* element
-           (Chrome/Firefox don't fire hover events on disabled form controls), so a title
-           on the button itself is silently swallowed exactly when it's most needed —
-           explaining why the disabled action is disabled. -->
-      <span v-if="item.raw.hasNextStage && (canPromoteReleases || item.canPromote)" class="mr-2" :title="promoteTitle(item)">
+      <!-- Each action gets its own fixed-width slot, always rendered, with the v-if on
+           the v-btn *inside* it rather than on the slot itself — so an action that has
+           nothing to do here (no next stage to promote to, or this role/row has no
+           permission for it at all) leaves an empty gap instead of shifting every action
+           after it sideways. Each button's tooltip is on the slot rather than the v-btn:
+           a native `title` attribute never shows on a *disabled* element (Chrome/Firefox
+           don't fire hover events on disabled form controls), so a title on the button
+           itself is silently swallowed exactly when it's most needed — explaining why
+           the disabled action is disabled. No tooltip at all when the button itself is
+           absent: there's nothing to explain about a structurally-impossible action. -->
+      <span class="cdrm-action-slot" :title="item.raw.hasNextStage ? promoteTitle(item) : undefined">
         <v-btn
+          v-if="item.raw.hasNextStage"
           icon="mdi-arrow-up-bold-circle-outline"
           size="small"
           variant="text"
-          :disabled="!item.canPromote"
+          :disabled="!(canPromoteReleases || item.canPromote)"
           @click.stop="promoteRelease(item.raw)"
         />
       </span>
       <span
-        v-if="canRollbackReleases || item.canRollback"
-        class="mr-2"
-        :title="item.canRollback ? 'Roll back stage to this release' : 'Not allowed, or already the head release for this stage'"
+        class="cdrm-action-slot"
+        :title="
+          canRollbackReleases || item.canRollback
+            ? item.canRollback
+              ? 'Roll back stage to this release'
+              : 'Not allowed, or already the head release for this stage'
+            : undefined
+        "
       >
-        <v-btn icon="mdi-history" size="small" variant="text" :disabled="!item.canRollback" @click.stop="rollbackRelease(item.raw)" />
-      </span>
-      <span v-if="canRedeployReleases || item.canRedeploy" class="mr-2" :title="redeployTitle(item)">
         <v-btn
+          v-if="canRollbackReleases || item.canRollback"
+          icon="mdi-history"
+          size="small"
+          variant="text"
+          :disabled="!item.canRollback"
+          @click.stop="rollbackRelease(item.raw)"
+        />
+      </span>
+      <span class="cdrm-action-slot" :title="canRedeployReleases || item.canRedeploy ? redeployTitle(item) : undefined">
+        <v-btn
+          v-if="canRedeployReleases || item.canRedeploy"
           icon="mdi-cloud-upload-outline"
           size="small"
           variant="text"
@@ -361,17 +384,30 @@ async function onRedeployed() {
         />
       </span>
       <span
-        v-if="canManageReleases || item.canEdit"
-        class="mr-2"
-        :title="item.canEdit ? 'Edit release' : 'Not allowed to edit at this stage'"
+        class="cdrm-action-slot"
+        :title="canManageReleases || item.canEdit ? (item.canEdit ? 'Edit release' : 'Not allowed to edit at this stage') : undefined"
       >
-        <v-btn icon="mdi-pencil" size="small" variant="text" :disabled="!item.canEdit" @click.stop="openEdit(item.raw)" />
+        <v-btn
+          v-if="canManageReleases || item.canEdit"
+          icon="mdi-pencil"
+          size="small"
+          variant="text"
+          :disabled="!item.canEdit"
+          @click.stop="openEdit(item.raw)"
+        />
       </span>
       <span
-        v-if="canManageReleases || item.canDelete"
-        :title="item.canDelete ? 'Delete release' : 'Not allowed to delete at this stage'"
+        class="cdrm-action-slot"
+        :title="canManageReleases || item.canDelete ? (item.canDelete ? 'Delete release' : 'Not allowed to delete at this stage') : undefined"
       >
-        <v-btn icon="mdi-delete" size="small" variant="text" :disabled="!item.canDelete" @click.stop="removeRelease(item.raw)" />
+        <v-btn
+          v-if="canManageReleases || item.canDelete"
+          icon="mdi-delete"
+          size="small"
+          variant="text"
+          :disabled="!item.canDelete"
+          @click.stop="removeRelease(item.raw)"
+        />
       </span>
     </template>
     <template #expanded-row="{ item, columns }">
@@ -417,7 +453,7 @@ async function onRedeployed() {
                     {{ kubernetesStatusDisplay(entry.kubernetesStatus)!.label }}
                   </v-chip>
                 </td>
-                <td>{{ entry.createdBy }}</td>
+                <td>{{ displayName(entry.createdBy) }}</td>
               </tr>
             </tbody>
           </v-table>
@@ -430,3 +466,16 @@ async function onRedeployed() {
   <ReleaseFormDialog v-model="dialogOpen" :release="editingRelease" @saved="reload" />
   <ReleaseRedeployDialog v-model="redeployDialogOpen" :release="redeployingRelease" @saved="onRedeployed" />
 </template>
+
+<style scoped>
+/* Fixed-width slot per action icon (see the actions column's comment above) — a
+   Vuetify "small" icon button is ~32px square; a couple more px keeps the same visual
+   gap the old mr-2 (8px) gave between icons, without the gap collapsing when the icon
+   inside a slot is absent. */
+.cdrm-action-slot {
+  display: inline-block;
+  width: 40px;
+  text-align: center;
+  vertical-align: middle;
+}
+</style>

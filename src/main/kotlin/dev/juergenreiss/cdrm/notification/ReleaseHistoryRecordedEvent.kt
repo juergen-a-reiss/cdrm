@@ -16,7 +16,15 @@ import dev.juergenreiss.cdrm.release.ReleaseHistoryAction
 // fired on a *terminal* outcome (entry.deploymentFinished newly set), not on every
 // intermediate retry — an indefinitely-retrying failed deploy would otherwise notify
 // once per scheduler tick forever.
-enum class ReleaseHistoryNotificationKind { RECORDED, DEPLOYED, DEPLOY_FAILED }
+//
+// GITOPS_PUSHED: DeploymentSchedulerJob's git commit for a GitOps-managed row succeeded
+// (entry.deployedAt newly set, i.e. gitOpsStatus() -> PUSH_SUCCEEDED) — its own separate,
+// stable, user-visible milestone even though the row isn't terminal yet (kubernetesStatus
+// still needs DeploymentVerificationJob's later confirmation that ArgoCD, or a human,
+// actually synced and rolled it out). Without this, the UI only learns about a
+// GitOps-managed deploy once that verification completes — which can lag well behind the
+// commit itself by however long ArgoCD's own poll interval plus the rollout takes.
+enum class ReleaseHistoryNotificationKind { RECORDED, DEPLOYED, DEPLOY_FAILED, GITOPS_PUSHED }
 
 // Published right after a release_history row is created or reaches a reportable
 // state change. Two independent listeners consume it, both only after the enclosing
@@ -39,6 +47,7 @@ fun ReleaseHistoryRecordedEvent.cloudEventType(): String = when (kind) {
     ReleaseHistoryNotificationKind.RECORDED -> "dev.juergenreiss.cdrm.release-history.${entry.action.eventTypeSuffix()}"
     ReleaseHistoryNotificationKind.DEPLOYED -> "dev.juergenreiss.cdrm.release-history.deployed"
     ReleaseHistoryNotificationKind.DEPLOY_FAILED -> "dev.juergenreiss.cdrm.release-history.deploy-failed"
+    ReleaseHistoryNotificationKind.GITOPS_PUSHED -> "dev.juergenreiss.cdrm.release-history.gitops-pushed"
 }
 
 private fun ReleaseHistoryAction.eventTypeSuffix(): String = when (this) {

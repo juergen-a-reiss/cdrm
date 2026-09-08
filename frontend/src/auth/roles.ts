@@ -2,31 +2,14 @@
 // Licensed under the terms in the LICENSE file at the repository root.
 
 import { computed } from 'vue'
-import { authenticatedUser } from './authService'
+import { accessTokenClaims } from './accessTokenClaims'
 
-interface AccessTokenClaims {
-  resource_access?: Record<string, { roles?: string[] }>
-}
-
-function decodeAccessTokenClaims(accessToken: string): AccessTokenClaims {
-  const payload = accessToken.split('.')[1] ?? ''
-  const base64 = payload.replace(/-/g, '+').replace(/_/g, '/')
-  const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=')
-  return JSON.parse(atob(padded)) as AccessTokenClaims
-}
-
-const currentRoles = computed<string[]>(() => {
-  const user = authenticatedUser.value
-  if (!user) {
-    return []
-  }
-  try {
-    const claims = decodeAccessTokenClaims(user.access_token)
-    const clientId = import.meta.env.VITE_OIDC_CLIENT_ID
-    return claims.resource_access?.[clientId]?.roles ?? []
-  } catch {
-    return []
-  }
+// Every cdrm client role the caller holds — exported for UserProfileMenu, which shows
+// the raw list; everything else here just derives a yes/no permission from it.
+export const currentRoles = computed<string[]>(() => {
+  const clientId = import.meta.env.VITE_OIDC_CLIENT_ID
+  const resourceAccess = accessTokenClaims.value.resource_access as Record<string, { roles?: string[] }> | undefined
+  return resourceAccess?.[clientId]?.roles ?? []
 })
 
 function hasAnyRole(...roles: string[]): boolean {

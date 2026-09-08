@@ -1,0 +1,98 @@
+databaseChangeLog:
+  - changeSet:
+      id: 007-create-audit
+      author: juergen
+      changes:
+        # Covers cluster/stage/product/workload/config — never release (that's already
+        # fully covered by release_history). entity_id is a plain string (not uuid)
+        # since config's own id is its string key, not a UUID like every other entity's.
+        - createTable:
+            tableName: audit_entry
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: entity_type
+                  type: varchar(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: entity_id
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              # Human label snapshotted at write time (name, or config's key) — survives
+              # the entity itself later being deleted, same reasoning as
+              # release_history's denormalized productName/workloadName/stageName.
+              - column:
+                  name: entity_name
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              # Only set for WORKLOAD rows (the workload's owning product, for ReBAC's
+              # cdrm-products filter) — null for every other entity type.
+              - column:
+                  name: product_name
+                  type: varchar(255)
+              - column:
+                  name: action
+                  type: varchar(20)
+                  constraints:
+                    nullable: false
+              # Full entity snapshot after the action — null for DELETED (nothing to
+              # snapshot; see `changes` for what the last state was).
+              - column:
+                  name: new_state
+                  type: jsonb
+              # Field-level diff, computed uniformly for all three actions by treating
+              # "before" as absent for CREATED and "after" as absent for DELETED — see
+              # AuditDiff.
+              - column:
+                  name: changes
+                  type: jsonb
+              - column:
+                  name: created_at
+                  type: timestamp with time zone
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_by
+                  type: uuid
+                  constraints:
+                    nullable: false
+        - createIndex:
+            tableName: audit_entry
+            indexName: idx_audit_entry_created_at
+            columns:
+              - column:
+                  name: created_at
+        - createIndex:
+            tableName: audit_entry
+            indexName: idx_audit_entry_entity_type
+            columns:
+              - column:
+                  name: entity_type
+        - createIndex:
+            tableName: audit_entry
+            indexName: idx_audit_entry_entity_type_id
+            columns:
+              - column:
+                  name: entity_type
+              - column:
+                  name: entity_id
+        - createIndex:
+            tableName: audit_entry
+            indexName: idx_audit_entry_product_name
+            columns:
+              - column:
+                  name: product_name
+        - createIndex:
+            tableName: audit_entry
+            indexName: idx_audit_entry_created_by
+            columns:
+              - column:
+                  name: created_by

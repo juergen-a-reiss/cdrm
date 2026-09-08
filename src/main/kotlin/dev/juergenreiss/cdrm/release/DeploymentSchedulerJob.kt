@@ -77,6 +77,12 @@ class DeploymentSchedulerJob(
                     // the rollout before this is the "final go".
                     if (entry.deploymentFinished != null) {
                         eventPublisher.publishEvent(ReleaseHistoryRecordedEvent(entry, ReleaseHistoryNotificationKind.DEPLOYED))
+                    } else if (entry.gitOpsManaged) {
+                        // Not terminal yet, but gitOpsStatus() just became PUSH_SUCCEEDED —
+                        // its own stable, user-visible milestone. Without this, the UI
+                        // wouldn't learn about a successful GitOps push until the rollout
+                        // is later verified, which can lag well behind the commit itself.
+                        eventPublisher.publishEvent(ReleaseHistoryRecordedEvent(entry, ReleaseHistoryNotificationKind.GITOPS_PUSHED))
                     }
                 }
                 is DeployAttemptResult.Failed -> {

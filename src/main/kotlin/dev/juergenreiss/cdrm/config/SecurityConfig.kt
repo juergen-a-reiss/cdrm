@@ -64,6 +64,15 @@ class SecurityConfig(
                 // may read/edit the underlying config entries (see the Configuration view).
                 authorize("/menu-visibility", authenticated)
                 authorize("/config/**", hasRole("cdrm-devops"))
+                // Read-only, no role restriction here — AuditService itself applies
+                // ReBAC (cdrm-products/cdrm-workloads) to PRODUCT/WORKLOAD rows; every
+                // other entity type's audit trail is visible the same way that entity
+                // itself already generally is.
+                authorize("/audit/**", authenticated)
+                // Resolves any actor id to a display string per the current
+                // user.id.storage setting — a company-directory-style lookup, not a
+                // per-entity permission (see UserDisplayController).
+                authorize("/users/**", authenticated)
                 authorize(anyRequest, authenticated)
             }
             oauth2ResourceServer {

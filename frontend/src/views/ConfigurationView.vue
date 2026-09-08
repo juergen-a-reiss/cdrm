@@ -7,8 +7,9 @@
 import { onMounted, reactive, ref } from 'vue'
 import { configApi } from '../api/config'
 import { ApiError } from '../api/http'
-import type { AssignableMenuKey, MenuVisibilityConfig } from '../api/types'
+import type { AssignableMenuKey, MenuVisibilityConfig, UserDisplayFormat, UserIdStorageConfig, UserIdStorageMode } from '../api/types'
 import { useToast } from '../composables/useToast'
+import { useChangeReload } from '../composables/useChangeReload'
 
 const MENU_VISIBILITY_KEY = 'menu-visibility'
 
@@ -24,6 +25,7 @@ const MENU_ITEMS: { key: AssignableMenuKey; title: string }[] = [
   { key: 'workloads', title: 'Workloads' },
   { key: 'releases', title: 'Releases' },
   { key: 'release-history', title: 'Release History' },
+  { key: 'audit', title: 'Audit' },
 ]
 
 // checked[role][menuKey] — reactive so v-checkbox bindings below can mutate it directly.
@@ -75,6 +77,60 @@ async function save() {
 }
 
 onMounted(load)
+useChangeReload('dev.juergenreiss.cdrm.config.', load)
+
+const USER_ID_STORAGE_KEY = 'user-id-storage'
+
+const displayFormatOptions: { title: string; value: UserDisplayFormat }[] = [
+  { title: 'UUID', value: 'UUID' },
+  { title: 'Firstname Lastname, email', value: 'FIRSTNAME_LASTNAME_EMAIL' },
+  { title: 'Lastname, Firstname, email', value: 'LASTNAME_FIRSTNAME_EMAIL' },
+  { title: 'Email', value: 'EMAIL' },
+]
+
+const userIdStorageMode = ref<UserIdStorageMode>('USER_UUID')
+const userIdStorageDisplayFormat = ref<UserDisplayFormat>('UUID')
+const userIdStorageLoading = ref(false)
+const userIdStorageSaving = ref(false)
+const userIdStorageError = ref<string | null>(null)
+
+async function loadUserIdStorage() {
+  userIdStorageLoading.value = true
+  userIdStorageError.value = null
+  try {
+    const response = await configApi.get(USER_ID_STORAGE_KEY)
+    const config = response.value as UserIdStorageConfig
+    userIdStorageMode.value = config.mode
+    userIdStorageDisplayFormat.value = config.displayFormat
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      // Not configured yet — same default the backend itself falls back to.
+      userIdStorageMode.value = 'USER_UUID'
+      userIdStorageDisplayFormat.value = 'UUID'
+    } else {
+      userIdStorageError.value = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to load user ID storage setting'
+    }
+  } finally {
+    userIdStorageLoading.value = false
+  }
+}
+
+async function saveUserIdStorage() {
+  userIdStorageSaving.value = true
+  userIdStorageError.value = null
+  try {
+    const config: UserIdStorageConfig = { mode: userIdStorageMode.value, displayFormat: userIdStorageDisplayFormat.value }
+    await configApi.update(USER_ID_STORAGE_KEY, config)
+    await showToast('User ID storage setting saved')
+  } catch (e) {
+    userIdStorageError.value = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to save user ID storage setting'
+  } finally {
+    userIdStorageSaving.value = false
+  }
+}
+
+onMounted(loadUserIdStorage)
+useChangeReload('dev.juergenreiss.cdrm.config.', loadUserIdStorage)
 </script>
 
 <template>
@@ -108,6 +164,42 @@ onMounted(load)
   <div class="d-flex justify-end mt-4">
     <v-btn color="primary" :loading="saving" :disabled="loading" @click="save">Save</v-btn>
   </div>
+
+  <v-card class="mt-8" variant="outlined">
+    <v-card-title class="text-subtitle-1">User ID Storage</v-card-title>
+    <v-card-text>
+      <v-alert v-if="userIdStorageError" type="error" :text="userIdStorageError" class="mb-4" />
+      <p class="text-body-2 text-medium-emphasis mb-4">
+        Controls whether cdrm records who created or last modified each entity (clusters, stages, products,
+        workloads, releases, and configuration entries). "User UUID" is the existing behavior. "None" stores no
+        identifier at all — for a company that doesn't want to keep even a pseudonymous one; existing history is
+        left as-is, only future actions are affected.
+      </p>
+      <v-radio-group v-model="userIdStorageMode" inline hide-details :disabled="userIdStorageLoading" class="mb-4">
+        <v-radio label="User UUID" value="USER_UUID" />
+        <v-radio label="None" value="NONE" />
+      </v-radio-group>
+      <p v-if="userIdStorageMode === 'USER_UUID'" class="text-body-2 text-medium-emphasis mb-2">
+        How a user id is displayed in "By" columns throughout the app. Any format other than UUID requires
+        capturing each user's first name, last name, and email — captured only from users who act while this
+        setting is active, not retroactively.
+      </p>
+      <v-select
+        v-if="userIdStorageMode === 'USER_UUID'"
+        v-model="userIdStorageDisplayFormat"
+        :items="displayFormatOptions"
+        label="Display format"
+        :disabled="userIdStorageLoading"
+        hide-details
+        style="max-width: 360px"
+      />
+      <div class="d-flex justify-end mt-4">
+        <v-btn color="primary" :loading="userIdStorageSaving" :disabled="userIdStorageLoading" @click="saveUserIdStorage">
+          Save
+        </v-btn>
+      </div>
+    </v-card-text>
+  </v-card>
 </template>
 
 <style scoped>

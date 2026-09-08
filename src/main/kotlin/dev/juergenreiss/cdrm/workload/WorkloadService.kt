@@ -3,14 +3,16 @@
 
 package dev.juergenreiss.cdrm.workload
 
+import dev.juergenreiss.cdrm.audit.AuditEntityType
+import dev.juergenreiss.cdrm.audit.AuditRecorder
 import dev.juergenreiss.cdrm.common.SortSpec
 import dev.juergenreiss.cdrm.common.sortedBySpec
 import dev.juergenreiss.cdrm.product.ProductRepository
+import dev.juergenreiss.cdrm.security.CurrentActorResolver
 import dev.juergenreiss.cdrm.security.RebacContext
 import dev.juergenreiss.cdrm.stage.StageRepository
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
-import org.springframework.data.domain.AuditorAware
 import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -25,8 +27,9 @@ class WorkloadService(
     private val stageRepository: StageRepository,
     private val workloadStageRepository: WorkloadStageRepository,
     private val productRepository: ProductRepository,
-    private val currentUser: AuditorAware<UUID>,
+    private val currentActorResolver: CurrentActorResolver,
     private val rebac: RebacContext,
+    private val auditRecorder: AuditRecorder,
 ) {
 
     private val log = LoggerFactory.getLogger(WorkloadService::class.java)
@@ -86,8 +89,11 @@ class WorkloadService(
             )
         )
         workloadStageRepository.saveAll(stageIds.map { WorkloadStage(workloadId = saved.id!!, stageId = it) })
+        val response = saved.toResponse()
+        val productName = productRepository.findById(saved.productId).orElse(null)?.name
+        auditRecorder.recordCreate(AuditEntityType.WORKLOAD, saved.id!!.toString(), saved.name, productName, response, userId)
         log.info("Created workload {} ('{}') by user {}, linked to {} stage(s)", saved.id, saved.name, userId, stageIds.size)
-        return saved.toResponse()
+        return response
     }
 
     @Transactional
@@ -99,6 +105,7 @@ class WorkloadService(
             throw ResponseStatusException(HttpStatus.BAD_REQUEST, "No stages found for pipeline '${request.pipeline}'")
         }
         val workload = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        val before = workload.toResponse()
         // The stages this workload will be linked to after this update — the requested
         // set if it's changing, otherwise whatever it's already linked to — must all
         // belong to the workload's (possibly just-changed) pipeline. Unknown ids are left
@@ -123,8 +130,11 @@ class WorkloadService(
         if (request.stageIds != null) {
             updateStageLinks(saved.id!!, request.stageIds)
         }
+        val after = saved.toResponse()
+        val productName = productRepository.findById(saved.productId).orElse(null)?.name
+        auditRecorder.recordUpdate(AuditEntityType.WORKLOAD, saved.id!!.toString(), saved.name, productName, before, after, saved.modifiedBy)
         log.info("Updated workload {} ('{}') by user {}", saved.id, saved.name, saved.modifiedBy)
-        return saved.toResponse()
+        return after
     }
 
     // A product group is only an organizational aid for humans, never a deployment target —
@@ -179,7 +189,9 @@ class WorkloadService(
 
     @Transactional
     fun delete(id: UUID) {
-        if (!repository.existsById(id)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val workload = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        val before = workload.toResponse()
+        val productName = productRepository.findById(workload.productId).orElse(null)?.name
         val userId = currentUserId()
         try {
             repository.deleteById(id)
@@ -187,11 +199,11 @@ class WorkloadService(
         } catch (e: DataIntegrityViolationException) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "Workload is still referenced by one or more releases")
         }
+        auditRecorder.recordDelete(AuditEntityType.WORKLOAD, id.toString(), before.name, productName, before, userId)
         log.info("Deleted workload {} by user {}", id, userId)
     }
 
-    private fun currentUserId(): UUID =
-        currentUser.currentAuditor.orElseThrow { IllegalStateException("Current user could not be determined") }
+    private fun currentUserId(): UUID = currentActorResolver.resolve()
 
     private fun Workload.toResponse(): WorkloadResponse {
         val linkedStageIds = workloadStageRepository.findByWorkloadId(id!!).map { it.stageId }.toSet()

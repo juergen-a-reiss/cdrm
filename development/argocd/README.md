@@ -51,7 +51,9 @@ kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.pas
 ```
 
 Re-running `argocd/setup-argocd.sh` after changing `seed/data.yaml`'s `k8s_namespaces`
-re-applies the regenerated Applications — safe and idempotent.
+re-applies the regenerated Applications — safe and idempotent. `seed.py` itself (not
+just `setup-argocd.sh`) also (re-)applies them on every normal run, best-effort — see
+"Resetting" below.
 
 ## Why `host.minikube.internal`
 
@@ -71,3 +73,8 @@ namespaces themselves, same as any other bootstrapped namespace. It does not tou
 Gitea repo's content or ArgoCD's own installation — re-run `setup-gitops-repo.sh` /
 `setup-argocd.sh` if you want those reset too (`docker compose down -v` wipes Gitea's
 volume; `kubectl delete namespace argocd` removes the ArgoCD install).
+
+A plain `../seed.py` afterward recreates the Applications again on its own
+(`apply_argocd_applications()`, best-effort — same silent skip if ArgoCD isn't
+installed) — you don't need to re-run `setup-argocd.sh` just to get back to a synced
+state after a reset, only when `seed/data.yaml`'s `k8s_namespaces` themselves changed.

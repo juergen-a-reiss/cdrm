@@ -13,6 +13,7 @@ import PipelineFilterBar from '../components/PipelineFilterBar.vue'
 import { useResourceList } from '../composables/useResourceList'
 import { usePipelineFilter } from '../composables/usePipelineFilter'
 import { usePersistedRef } from '../composables/usePersistedRef'
+import { useChangeReload } from '../composables/useChangeReload'
 import { stagesApi } from '../api/stages'
 import { ApiError } from '../api/http'
 import type { StageResponse } from '../api/types'
@@ -22,6 +23,7 @@ import { sortParam } from '../utils/sortParam'
 const sortBy = usePersistedRef<SortByItem[]>('cdrm.sort.stages', [{ key: 'pipeline', order: 'asc' }])
 const { items, loading, error, reload } = useResourceList(() => stagesApi.list(sortParam(sortBy.value)))
 watch(sortBy, reload, { deep: true })
+useChangeReload('dev.juergenreiss.cdrm.stage.', reload)
 const { matches: matchesPipeline } = usePipelineFilter()
 
 const rows = computed(() => items.value.filter((stage) => matchesPipeline(stage.pipeline)))

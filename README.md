@@ -338,14 +338,70 @@ The ultimate management questions will be answered here:
 
 Here we see the release history details als a table view.
 
-## Release Notifications
+## Audit Log
 
-Every release-history-recording moment is forwarded to Kafka as a [CloudEvents](https://cloudevents.io) 1.0
-structured-mode JSON message (`content-type: application/cloudevents+json`), keyed by release id. This is a
-general-purpose topic, not release-specific: it's meant to carry every entity's change events (release-history
-today; clusters, stages, products, and workloads as they're wired up) plus this instance's own live-push
-relaying (see below) — enterprise integrations consuming it should filter by CloudEvents `type`, not assume the
-topic is release-only.
+Every create/update/delete of a Cluster, Stage, Product, Workload, or the menu-visibility
+Configuration entry is recorded in an audit log — who did it, when, the full entity state
+afterwards (`new_state`, null for a delete), and a field-level diff (`changes`): which
+fields changed, each as an `{old, new}` pair. A create reports every field as newly set
+(`old: null`); a delete reports every field as removed (`new: null`). This deliberately
+does **not** cover releases — a release's own lifecycle (create/promote/rollback/redeploy,
+plus deployment outcome) is already fully covered by the Release History above.
+
+The audit table is written to synchronously, in the same database transaction as the
+change itself — unlike the best-effort Kafka release notifications below, a failure to
+record an audit entry rolls back the whole operation rather than being silently logged.
+
+The **Audit** tab (just before Configuration in the nav) shows this as a sortable,
+filterable, paginated table — sorting/filtering/paging all happen in the backend, not in
+the browser, so the log can grow large without the UI needing to load it in full. It's
+desktop-only: hidden on mobile regardless of a role's menu-visibility whitelist, since
+it's a dense table rather than something worth cramming onto a phone screen. The API only
+ever exposes reading it (`GET /audit`); there is no write endpoint — an audit row can only
+ever be created by the application itself, from inside the same transaction as the change
+it's recording.
+
+ReBAC (`cdrm-products`/`cdrm-workloads`, see Access Control below) filters audit rows the
+same way it filters the underlying entities: Cluster/Stage/Config rows are always visible,
+Product rows are filtered by `cdrm-products`, and Workload rows are filtered by both
+`cdrm-products` (via the workload's owning product) and `cdrm-workloads`.
+
+## User ID Storage
+
+Controlled by a devops-only **User ID Storage** section on the Configuration screen (the config
+key `user-id-storage`), this decides whether — and how — cdrm records who created or last
+modified each Cluster, Stage, Product, Workload, Release, or Configuration entry (including who
+performed each Audit-logged action):
+
+- **User UUID** (the default, and the only behavior before this setting existed): the acting
+  user's Keycloak subject (a UUID) is stored as `created_by`/`modified_by` everywhere, exactly
+  as before.
+- **None**: no user identifier is stored at all — every `created_by`/`modified_by`, and every
+  audit row's `createdBy`, is instead a single fixed placeholder id
+  (`00000000-0000-0000-0000-00005eed0000`, the same marker
+  `development/generate-release-history.py` uses for its own seeded rows), shown in the UI as
+  "Anonymous". For a company that doesn't want to store even a pseudonymous identifier.
+
+When the mode is **User UUID**, a second setting controls how a stored user id is displayed
+wherever a "By" column shows one (Releases' history, the Release History Dashboard, and the
+Audit Log): **UUID** (the raw id, the default), **Firstname Lastname, email**, **Lastname,
+Firstname, email**, or **Email**. Choosing anything other than UUID requires knowing a user's
+name and email, which cdrm doesn't have by default — it's captured the moment such a user next
+performs a tracked action (from the `given_name`/`family_name`/`email` claims already in their
+JWT), not retroactively and not for users who never act. Switching *back* to UUID, or to None,
+never deletes what was already captured — only future lookups stop needing it.
+
+Switching either setting is entirely forward-looking: existing `created_by`/`modified_by` values
+and captured names/emails are left exactly as they are — only future actions are affected.
+
+## Change Notifications
+
+Every release-history-recording moment, and every create/update/delete of a Cluster, Stage, Product,
+Workload, or the Configuration entry, is forwarded to Kafka as a [CloudEvents](https://cloudevents.io) 1.0
+structured-mode JSON message (`content-type: application/cloudevents+json`), keyed by the changed entity's
+id. This is a general-purpose topic, not release-specific — it carries every entity's change events, plus
+this instance's own live-push relaying (see below) — enterprise integrations consuming it should filter by
+CloudEvents `type`, not assume the topic is release-only.
 
 - The four release-API actions themselves — create, promote, rollback, redeploy — as
   `dev.juergenreiss.cdrm.release-history.{created,promoted,rolled-back,redeployed}`.
@@ -353,6 +409,15 @@ topic is release-only.
   running on the stage, or didn't — as `dev.juergenreiss.cdrm.release-history.deployed` /
   `...deploy-failed`. Only fired once an outcome is final; an in-progress retry (e.g. GitOps push
   still being retried) does not notify again on every tick.
+- A GitOps-managed deploy's git push succeeding, as `dev.juergenreiss.cdrm.release-history.gitops-pushed`
+  — fired as soon as `gitOpsStatus` becomes `PUSH_SUCCEEDED`, independently of (and normally well before)
+  the `deployed`/`deploy-failed` outcome above, which still waits on `kubernetesStatus` verification
+  (ArgoCD, or a human, actually syncing and rolling it out).
+- Every create/update/delete of a Cluster/Stage/Product/Workload/Configuration entry — the same
+  occurrence the Audit Log above records — as
+  `dev.juergenreiss.cdrm.{cluster,stage,product,workload,config}.{created,updated,deleted}`
+  (Configuration only ever fires `created`/`updated`; there's no delete operation for it). The message's
+  `data` is the same Response DTO the REST API itself would return for that entity.
 
 Configuration:
 
@@ -367,19 +432,22 @@ Configuration:
 - `cdrm.notifications.source` (env `CDRM_NOTIFICATIONS_SOURCE`, default `urn:cdrm:release-service`) — the
   CloudEvents `source` attribute.
 
-This is a best-effort side channel, never a hard dependency: cdrm starts normally and every release
-action succeeds normally whether or not a Kafka broker is reachable. A send failure (or Kafka being
-down entirely) is only ever logged, never surfaced to the caller, and never affects `/actuator/health`.
+This is a best-effort side channel, never a hard dependency: cdrm starts normally and every action
+succeeds normally whether or not a Kafka broker is reachable. A send failure (or Kafka being down
+entirely) is only ever logged, never surfaced to the caller, and never affects `/actuator/health`.
 
 ## Live UI Updates (WebSocket)
 
-The frontend doesn't poll for changes — the backend pushes a small "release X changed" signal over a
+The frontend doesn't poll for changes — the backend pushes a small "X changed" signal over a
 STOMP-over-WebSocket connection (`/ws`, `/topic/changes`), and the affected view either patches the one
 row it has in memory (e.g. the plain Releases list) or, for views whose sorting/filtering/pagination is
-already done server-side (the Release History Dashboard), just triggers a fresh fetch. The message itself
-carries no entity data — only the same CloudEvents `type`/`subject` a Kafka consumer would see — so the
-frontend always refetches the real (permission-filtered) data through its normal REST calls; the channel
-needs no per-user authorization beyond "is this someone logged in".
+already done server-side (the Release History Dashboard), just triggers a fresh fetch. The plain
+Clusters/Stages/Products/Workloads/Configuration views all reload their whole (client-side-sorted) list on
+their own entity's change events — a create on one user's browser becomes visible on another's within
+moments, no manual refresh needed. The message itself carries no entity data — only the same CloudEvents
+`type`/`subject` a Kafka consumer would see — so the frontend always refetches the real (permission-filtered)
+data through its normal REST calls; the channel needs no per-user authorization beyond "is this someone
+logged in".
 
 Because cdrm runs as multiple stateless instances, an action handled by one instance still needs to reach
 browsers connected to *another* instance. Two producers feed the same broadcaster
@@ -430,121 +498,17 @@ The access to resources can be restricted by additional user attributes in the J
 supported:
 
 - `cdrm-products`: a list of product names. If set, the user will be allowed to see the configured products.
-  Restrictions in products will also apply in workloads and releases. There must be an exact match with the product
-  name.
+  Restrictions in products will also apply in workloads, releases, and the audit log. There must be an exact match
+  with the product name.
 - `cdrm-workloads`: a list of workload names. If set, the user will be allowed to see the configured workloads.
-  Restrictions in workloads will also apply in releases. There must be an exact match with the workload name.
+  Restrictions in workloads will also apply in releases and the audit log. There must be an exact match with the
+  workload name.
 - `cdrm-release-actions`: a list of release actions that are allowed for the user. The general format is the action name
   followed by a comma separated list of stages. For example: `promote: dev, qa` will allow the user to create release
   objects and promote to qa. Valid actions are: promote, rollback, redeploy, delete, edit.
 
 If an attribute is not set, then ReBAC does not apply for this user for this attribute.
 
-## How to run the cdrm: Docker
+## Going to production
 
-This section is mostly for the DevOps team:
-
-The backend and frontend ship as two separate images.
-
-- `Dockerfile` (repo root) — multi-stage build. Compiles the backend with `eclipse-temurin:26-jdk`
-  (dependency resolution and compilation are separate cached layers, so an ordinary source change doesn't re-download
-  anything), then extracts the boot jar into Spring Boot's layered-jar structure and copies each layer separately into
-  an `eclipse-temurin:26-jre` runtime image — the ~150 third-party dependency jars (~90 MB) end up in one layer that
-  stays byte-identical across code-only rebuilds, separate from our own compiled classes (under 1 MB). Needs
-  `OIDC_ISSUER_URI` and the Postgres datasource settings at runtime (see `application.yaml`); listens on `8080`.
-- `frontend/Dockerfile` — builds the Vue app with `node`, then serves the static `dist/` output with
-  `nginx:alpine` (`frontend/nginx.conf`). npm dependencies live in their own cached layer during the build stage
-  (installed before the source is copied in), but the runtime image doesn't ship any of them at all — only the built
-  `dist/` assets, since the browser just needs the bundled JS. Proxies
-  `/api/` to a `backend` host on port `8080` — resolved lazily per-request via nginx's `resolver`, so the container
-  stays up even if that host isn't reachable yet. Listens on `80`.
-
-Build locally from the repo root:
-
-```bash
-docker build -t cdrm-backend .
-docker build -t cdrm-frontend -f frontend/Dockerfile frontend
-```
-
-`.github/workflows/docker.yml` builds both images on every push and pull request against `master`, and additionally
-pushes them to `ghcr.io/<owner>/cdrm-backend` and `ghcr.io/<owner>/cdrm-frontend` on pushes to `master` and on `vX.Y.Z`
-tags (pull requests only build, to validate the Dockerfiles without needing registry credentials).
-
-## Production Setup
-
-Nothing environment-specific is hardcoded — `application.yaml` (always active) reads everything below from the
-environment, with sensible defaults where one makes sense. `application-dev.yaml` (active only under the `dev` Spring
-profile used by `./gradlew bootRun` locally) is what supplies convenience values for local development; none of it
-applies in production, where only `application.yaml`'s defaults (or lack thereof) are in effect.
-
-| Variable              | Required | Default              | Purpose                                                                    |
-|-----------------------|----------|-----------------------|-----------------------------------------------------------------------------|
-| `OIDC_ISSUER_URI`     | yes      | —                     | OpenID Connect issuer URL (see Access Control)                              |
-| `DB_URL`              | yes      | —                     | Postgres JDBC URL                                                           |
-| `DB_USERNAME`         | yes      | —                     | Postgres user                                                               |
-| `DB_PASSWORD`         | yes      | —                     | Postgres password                                                          |
-| `OIDC_CLIENT_ID`      | no       | `cdrm`                | OIDC client ID cdrm validates tokens against                                |
-| `KUBECONFIG`          | no       | `~/.kube/config`      | Kubeconfig file for direct Kubernetes deploys (see Kubernetes Clusters)     |
-| `GITOPS_GIT_USERNAME` | no       | *(unset — anonymous)* | Git username to push GitOps commits with (see Kubernetes Clusters)         |
-| `GITOPS_GIT_PASSWORD` | no       | *(unset — anonymous)* | Git password/token for `GITOPS_GIT_USERNAME`                               |
-| `GITOPS_WORKDIR`      | no       | OS temp directory     | Local working directory for GitOps repo clones                             |
-
-`KUBECONFIG` and the `GITOPS_*` credentials are read straight from the environment and never persisted to Postgres —
-same principle for both: the deployment target's credentials are the runtime environment's problem, not the
-database's. Whoever manages that environment (a mounted Kubernetes Secret, a file on the host, ...) owns provisioning
-and rotating them; cdrm itself never stores them anywhere.
-
-`GITOPS_GIT_USERNAME`/`GITOPS_GIT_PASSWORD` are only needed if any GitOps-managed namespace's repository requires
-authenticated pushes (a repo that accepts anonymous pushes, or a deployment with no GitOps-managed namespaces at all,
-needs neither). They're sent as an HTTP Basic `Authorization` header per git operation, so this currently only
-supports git remotes over `http://`/`https://` — not SSH.
-
-## Frontend Customization
-
-The frontend supports a dark/light mode toggle out of the box (a button in the app bar, remembered per browser via
-`localStorage`, defaulting to the OS/browser preference on first visit) — no configuration needed for that part.
-
-Reskinning cdrm for a company — colors, font, and the logo shown in the app bar — is a single CSS file:
-`frontend/src/styles/brand.css`. No component or TypeScript changes are needed for any of it; the file is loaded
-after Vuetify's own stylesheet, so its values simply win.
-
-| What                          | How                                                                             |
-|-------------------------------|----------------------------------------------------------------------------------|
-| Colors (light and dark theme) | Override the `--v-theme-*` variables (Vuetify's own RGB-triplet format, each needs `!important` — see `brand.css`'s comments for why) under the `.v-theme--light`/`.v-theme--dark` selectors |
-| Font                          | Set `--brand-font-family`. For a custom font file/webfont, add an `@font-face` (or a `<link>` in `frontend/index.html`) yourself and reference its family name here |
-| Logo (app bar)                | Set `--brand-logo-url` to any image URL — relative, absolute, or a `data:` URI |
-| Favicon (browser tab icon)    | Can't be done via CSS — browsers load `<link rel="icon">` directly, outside the CSS cascade. Replace the file at `frontend/public/favicon.svg` instead (same file `--brand-logo-url` points at by default, so replacing it alone reskins both) |
-
-Rebuild/redeploy the frontend after editing `brand.css` — it's a static asset baked in at `npm run build` time, not
-something read at runtime.
-
-### Example
-
-As an illustration (not an actual partnership or endorsement — just colors and a font pulled from
-[wsd.com](https://www.wsd.com/)'s own public stylesheet, to show a real-looking result rather than arbitrary values):
-
-```css
-:root {
-  --brand-logo-url: url('/favicon.svg');
-  --brand-font-family: 'Inter', sans-serif;
-}
-
-.v-theme--light {
-  --v-theme-primary: 26, 53, 82 !important;       /* #1a3552 */
-  --v-theme-on-primary: 255, 255, 255 !important;
-  --v-theme-secondary: 77, 98, 121 !important;    /* #4d6279 */
-  --v-theme-on-secondary: 255, 255, 255 !important;
-}
-
-.v-theme--dark {
-  --v-theme-primary: 179, 188, 197 !important;    /* #b3bcc5 */
-  --v-theme-on-primary: 0, 31, 63 !important;
-  --v-theme-secondary: 128, 143, 159 !important;  /* #808f9f */
-  --v-theme-on-secondary: 0, 0, 0 !important;
-}
-```
-
-Also add `frontend/public/favicon.svg` (and, since `--brand-logo-url` defaults to that same path, the app-bar logo
-updates with it) and, if using a webfont like Inter rather than a system font, a `<link>` to it in
-`frontend/index.html`.
-
+Read everything about production setup in [INSTALL.md](./docs/INSTALL.md)

@@ -63,13 +63,15 @@ class ReleaseNotificationPublisher(
     private fun publish(event: ReleaseHistoryRecordedEvent) {
         val entry = event.entry
         val type = event.cloudEventType()
-        // RECORDED's occurrence time is when the row was created; DEPLOYED/DEPLOY_FAILED
-        // instead reflect when the background job actually concluded that outcome —
-        // createdAt there could be minutes (SCHEDULED policy: much longer) in the past.
+        // RECORDED's occurrence time is when the row was created; DEPLOYED/DEPLOY_FAILED/
+        // GITOPS_PUSHED instead reflect when the background job actually concluded that
+        // outcome — createdAt there could be minutes (SCHEDULED policy: much longer) in
+        // the past.
         val time = when (event.kind) {
             ReleaseHistoryNotificationKind.RECORDED -> entry.createdAt
             ReleaseHistoryNotificationKind.DEPLOYED, ReleaseHistoryNotificationKind.DEPLOY_FAILED ->
                 entry.deploymentFinished ?: entry.deployedAt ?: entry.createdAt
+            ReleaseHistoryNotificationKind.GITOPS_PUSHED -> entry.deployedAt ?: entry.createdAt
         } ?: Instant.now()
         val cloudEvent = ReleaseHistoryCloudEvent(
             id = UUID.randomUUID().toString(),

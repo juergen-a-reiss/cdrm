@@ -48,7 +48,14 @@ export interface ClusterResponse {
 // Keys assignable in the "menu-visibility" config entry — must match the `key` of each
 // entry in App.vue's navItems. "configuration" is deliberately excluded: it's hardcoded
 // visible to cdrm-devops only (see the backend's MenuVisibilityService), never editable.
-export type AssignableMenuKey = 'clusters' | 'stages' | 'products' | 'workloads' | 'releases' | 'release-history'
+export type AssignableMenuKey =
+  | 'clusters'
+  | 'stages'
+  | 'products'
+  | 'workloads'
+  | 'releases'
+  | 'release-history'
+  | 'audit'
 
 export type MenuVisibilityConfig = Record<string, AssignableMenuKey[]>
 
@@ -334,4 +341,65 @@ export interface ReleaseHistoryFilterParams {
   actions?: ReleaseHistoryAction[]
   monthsBack?: number
   search?: string
+}
+
+// Never RELEASE — a release's own lifecycle is already fully covered by
+// release_history/ReleaseHistoryOverviewEntry; audit only exists for the entities that
+// had no history trail at all.
+export type AuditEntityType = 'CLUSTER' | 'STAGE' | 'PRODUCT' | 'WORKLOAD' | 'CONFIG'
+
+export type AuditAction = 'CREATED' | 'UPDATED' | 'DELETED'
+
+export interface AuditFieldChange {
+  old: unknown
+  new: unknown
+}
+
+export interface AuditEntryResponse {
+  id: string
+  entityType: AuditEntityType
+  entityId: string
+  entityName: string
+  // Only set for WORKLOAD rows (the workload's owning product).
+  productName: string | null
+  action: AuditAction
+  // Full entity snapshot after the action. Null for DELETED.
+  newState: Record<string, unknown> | null
+  // Field-level diff, keyed by field name. Every key of newState is "new" for CREATED,
+  // every key of the prior state is "removed" (new: null) for DELETED.
+  changes: Record<string, AuditFieldChange> | null
+  createdAt: string
+  createdBy: string
+}
+
+// One page of the audit log — sorted, filtered, and paginated by the backend (see
+// auditApi.findAll), not fetched in full. ReBAC (cdrm-products/cdrm-workloads) is also
+// applied backend-side, not here.
+export interface AuditPageResponse {
+  content: AuditEntryResponse[]
+  totalElements: number
+  page: number
+  size: number
+}
+
+export interface AuditFilterParams {
+  entityTypes?: AuditEntityType[]
+  actions?: AuditAction[]
+  search?: string
+}
+
+// NONE stores no user identifier at all (every created_by/modified_by, and every audit
+// row's createdBy, becomes a fixed placeholder instead of the real user) — for a company
+// that doesn't want to store even a pseudonymous identifier. USER_UUID is the existing,
+// unchanged default behavior.
+export type UserIdStorageMode = 'NONE' | 'USER_UUID'
+
+// Only meaningful when mode is USER_UUID — how a resolved user id is rendered wherever
+// a "By" column shows one (see usersApi.displayNames, which already applies this
+// server-side — the frontend never needs to format anything itself).
+export type UserDisplayFormat = 'UUID' | 'FIRSTNAME_LASTNAME_EMAIL' | 'LASTNAME_FIRSTNAME_EMAIL' | 'EMAIL'
+
+export interface UserIdStorageConfig {
+  mode: UserIdStorageMode
+  displayFormat: UserDisplayFormat
 }

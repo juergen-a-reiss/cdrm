@@ -13,11 +13,11 @@ import java.util.concurrent.Executor
 @EnableAsync
 class AsyncConfig {
 
-    // Small, dedicated pool for best-effort background work (currently just
-    // ReleaseNotificationPublisher) — deliberately bounded, unlike @Async's default
-    // executor (SimpleAsyncTaskExecutor, which starts a new unbounded thread per task),
-    // so a stuck Kafka broker can only ever tie up a handful of threads rather than one
-    // per release action under load.
+    // Small, dedicated pool for best-effort background work (ReleaseNotificationPublisher,
+    // WebSocketChangeNotifier, EntityChangeNotifier, EntityChangeKafkaPublisher) —
+    // deliberately bounded, unlike @Async's default executor (SimpleAsyncTaskExecutor,
+    // which starts a new unbounded thread per task), so a stuck Kafka broker can only
+    // ever tie up a handful of threads rather than one per action under load.
     @Bean("notificationExecutor")
     fun notificationExecutor(): Executor {
         val executor = ThreadPoolTaskExecutor()

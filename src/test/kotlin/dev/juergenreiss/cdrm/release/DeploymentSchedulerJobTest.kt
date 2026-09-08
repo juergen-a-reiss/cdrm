@@ -201,6 +201,33 @@ class DeploymentSchedulerJobTest {
     }
 
     @Test
+    fun `publishes GITOPS_PUSHED, not DEPLOYED, when a GitOps push succeeds for a Kubernetes workload still awaiting rollout verification`() {
+        val releaseId = UUID.randomUUID()
+        val workloadId = UUID.randomUUID()
+        val productId = UUID.randomUUID()
+        val stageId = UUID.randomUUID()
+
+        val pending = persistedHistoryEntry(releaseId = releaseId, stageId = stageId, createdAt = Instant.now(), gitOpsManaged = true)
+        given(releaseHistoryRepository.findPendingForUpdate()).willReturn(listOf(pending))
+        given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
+        val workload = persistedWorkload(workloadId, productId).apply { kubernetes = true }
+        given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
+        given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
+        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.Success)
+
+        job.processPendingDeployments()
+
+        assertNotNull(pending.deployedAt)
+        assertNull(pending.deploymentFinished)
+        verify(releaseHistoryRepository).save(pending)
+
+        val eventCaptor = org.mockito.ArgumentCaptor.forClass(ReleaseHistoryRecordedEvent::class.java)
+        verify(eventPublisher).publishEvent(eventCaptor.capture())
+        assertEquals(ReleaseHistoryNotificationKind.GITOPS_PUSHED, eventCaptor.value.kind)
+    }
+
+    @Test
     fun `leaves an entry pending and records the failure reason when the deployment attempt fails`() {
         val releaseId = UUID.randomUUID()
         val workloadId = UUID.randomUUID()

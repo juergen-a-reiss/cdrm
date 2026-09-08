@@ -14,6 +14,7 @@ import ProductTree from '../components/ProductTree.vue'
 import { useResourceList } from '../composables/useResourceList'
 import { useProductFilter } from '../composables/useProductFilter'
 import { usePersistedRef } from '../composables/usePersistedRef'
+import { useChangeReload } from '../composables/useChangeReload'
 import { productsApi } from '../api/products'
 import { ApiError } from '../api/http'
 import type { ProductResponse } from '../api/types'
@@ -34,6 +35,7 @@ interface ProductRow extends ProductResponse {
 const sortBy = usePersistedRef<SortByItem[]>('cdrm.sort.products', [{ key: 'name', order: 'asc' }])
 const { items, loading, error, reload } = useResourceList(() => productsApi.list(sortParam(sortBy.value)))
 watch(sortBy, reload, { deep: true })
+useChangeReload('dev.juergenreiss.cdrm.product.', reload)
 const { matches } = useProductFilter()
 const activeTab = usePersistedRef('cdrm.productsView.tab', 'table')
 

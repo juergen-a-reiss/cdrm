@@ -2,5 +2,3 @@
 
 3. Support Proxmox (both images and workloads on VMs).
 6. i18n, Localization
-10. notifications
-12. Auditing.

@@ -1,5 +1,8 @@
 package dev.juergenreiss.cdrm.stage
 
+import dev.juergenreiss.cdrm.audit.AuditEntityType
+import dev.juergenreiss.cdrm.audit.AuditRecorder
+import dev.juergenreiss.cdrm.testsupport.singleInvocationArgs
 import dev.juergenreiss.cdrm.cluster.Cluster
 import dev.juergenreiss.cdrm.cluster.ClusterRepository
 import dev.juergenreiss.cdrm.cluster.ClusterType
@@ -16,7 +19,7 @@ import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.junit.jupiter.MockitoExtension
 import org.springframework.dao.DataIntegrityViolationException
-import org.springframework.data.domain.AuditorAware
+import dev.juergenreiss.cdrm.security.CurrentActorResolver
 import org.springframework.web.server.ResponseStatusException
 import java.net.URI
 import java.time.Instant
@@ -36,13 +39,16 @@ class StageServiceTest {
     private lateinit var stageClusterRepository: StageClusterRepository
 
     @Mock
-    private lateinit var currentUser: AuditorAware<UUID>
+    private lateinit var currentActorResolver: CurrentActorResolver
+
+    @Mock
+    private lateinit var auditRecorder: AuditRecorder
 
     private lateinit var service: StageService
 
     @BeforeEach
     fun setUp() {
-        service = StageService(repository, clusterRepository, stageClusterRepository, currentUser)
+        service = StageService(repository, clusterRepository, stageClusterRepository, currentActorResolver, auditRecorder)
     }
 
     private fun persistedStage(
@@ -134,7 +140,7 @@ class StageServiceTest {
     @Test
     fun `create resolves current user as createdBy and modifiedBy`() {
         val userId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(userId))
+        given(currentActorResolver.resolve()).willReturn(userId)
         val captor = ArgumentCaptor.forClass(Stage::class.java)
         val saved = persistedStage(createdBy = userId, modifiedBy = userId)
         given(repository.save(captor.capture())).willReturn(saved)
@@ -146,11 +152,12 @@ class StageServiceTest {
         assertEquals(userId, captor.value.modifiedBy)
         assertEquals(saved.id, result.id)
         assertEquals(userId, result.createdBy)
+        verify(auditRecorder).recordCreate(AuditEntityType.STAGE, saved.id.toString(), "Draft", null, result, userId)
     }
 
     @Test
     fun `create throws when current user cannot be resolved`() {
-        given(currentUser.currentAuditor).willReturn(Optional.empty())
+        given(currentActorResolver.resolve()).willThrow(IllegalStateException("Current user could not be determined"))
 
         assertThrows(IllegalStateException::class.java) {
             service.create(StageRequest(pipeline = "pipeline", name = "Draft", description = null, order = 1, deploymentPolicy = DeploymentPolicy.IMMEDIATE))
@@ -165,7 +172,7 @@ class StageServiceTest {
         val stage = persistedStage(createdBy = originalUser, modifiedBy = originalUser)
         given(repository.findById(stage.id!!)).willReturn(Optional.of(stage))
         val newUser = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(newUser))
+        given(currentActorResolver.resolve()).willReturn(newUser)
         given(repository.save(stage)).willReturn(stage)
 
         val result = service.update(stage.id!!, StageRequest(pipeline = "pipeline", name = "Renamed", description = "new desc", order = 2, deploymentPolicy = DeploymentPolicy.IMMEDIATE))
@@ -176,6 +183,14 @@ class StageServiceTest {
         assertEquals(originalUser, stage.createdBy)
         assertEquals(newUser, stage.modifiedBy)
         assertEquals(newUser, result.modifiedBy)
+        val args = singleInvocationArgs(auditRecorder, "recordUpdate")
+        assertEquals(AuditEntityType.STAGE, args[0])
+        assertEquals(stage.id.toString(), args[1])
+        assertEquals("Renamed", args[2])
+        assertEquals(null, args[3])
+        assertEquals("Draft", (args[4] as StageResponse).name)
+        assertEquals(result, args[5])
+        assertEquals(newUser, args[6])
     }
 
     @Test
@@ -197,7 +212,7 @@ class StageServiceTest {
         val stage = persistedStage(id = stageId)
         given(repository.findById(stageId)).willReturn(Optional.of(stage))
         given(repository.save(stage)).willReturn(stage)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
 
         val keep = persistedCluster("keep")
         val add = persistedCluster("add")
@@ -242,7 +257,7 @@ class StageServiceTest {
         val stage = persistedStage(id = stageId)
         given(repository.findById(stageId)).willReturn(Optional.of(stage))
         given(repository.save(stage)).willReturn(stage)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
 
         service.update(
             stageId,
@@ -259,7 +274,7 @@ class StageServiceTest {
         val stage = persistedStage(id = stageId)
         given(repository.findById(stageId)).willReturn(Optional.of(stage))
         given(repository.save(stage)).willReturn(stage)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
 
         val known = persistedCluster("known")
         val unknownId = UUID.randomUUID()
@@ -286,19 +301,27 @@ class StageServiceTest {
 
     @Test
     fun `delete removes existing stage after resolving current user`() {
-        val id = UUID.randomUUID()
-        given(repository.existsById(id)).willReturn(true)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val stage = persistedStage()
+        given(repository.findById(stage.id!!)).willReturn(Optional.of(stage))
+        val userId = UUID.randomUUID()
+        given(currentActorResolver.resolve()).willReturn(userId)
 
-        service.delete(id)
+        service.delete(stage.id!!)
 
-        verify(repository).deleteById(id)
+        verify(repository).deleteById(stage.id!!)
+        val args = singleInvocationArgs(auditRecorder, "recordDelete")
+        assertEquals(AuditEntityType.STAGE, args[0])
+        assertEquals(stage.id.toString(), args[1])
+        assertEquals(stage.name, args[2])
+        assertEquals(null, args[3])
+        assertEquals(stage.name, (args[4] as StageResponse).name)
+        assertEquals(userId, args[5])
     }
 
     @Test
     fun `delete throws 404 when missing`() {
         val id = UUID.randomUUID()
-        given(repository.existsById(id)).willReturn(false)
+        given(repository.findById(id)).willReturn(Optional.empty())
 
         val exception = assertThrows(ResponseStatusException::class.java) { service.delete(id) }
 
@@ -308,24 +331,25 @@ class StageServiceTest {
 
     @Test
     fun `delete throws 409 when stage is still referenced by a release`() {
-        val id = UUID.randomUUID()
-        given(repository.existsById(id)).willReturn(true)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val stage = persistedStage()
+        given(repository.findById(stage.id!!)).willReturn(Optional.of(stage))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(repository.flush()).willThrow(DataIntegrityViolationException::class.java)
 
-        val exception = assertThrows(ResponseStatusException::class.java) { service.delete(id) }
+        val exception = assertThrows(ResponseStatusException::class.java) { service.delete(stage.id!!) }
 
         assertEquals(409, exception.statusCode.value())
+        org.mockito.Mockito.verifyNoInteractions(auditRecorder)
     }
 
     @Test
     fun `delete does not remove stage when current user cannot be resolved`() {
-        val id = UUID.randomUUID()
-        given(repository.existsById(id)).willReturn(true)
-        given(currentUser.currentAuditor).willReturn(Optional.empty())
+        val stage = persistedStage()
+        given(repository.findById(stage.id!!)).willReturn(Optional.of(stage))
+        given(currentActorResolver.resolve()).willThrow(IllegalStateException("Current user could not be determined"))
 
-        assertThrows(IllegalStateException::class.java) { service.delete(id) }
+        assertThrows(IllegalStateException::class.java) { service.delete(stage.id!!) }
 
-        verify(repository, never()).deleteById(id)
+        verify(repository, never()).deleteById(any())
     }
 }

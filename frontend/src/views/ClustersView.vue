@@ -11,6 +11,7 @@ import type { SortByItem } from '../components/ResourceTable.vue'
 import ClusterFormDialog from '../components/ClusterFormDialog.vue'
 import { useResourceList } from '../composables/useResourceList'
 import { usePersistedRef } from '../composables/usePersistedRef'
+import { useChangeReload } from '../composables/useChangeReload'
 import { clustersApi } from '../api/clusters'
 import { ApiError } from '../api/http'
 import type { ClusterResponse } from '../api/types'
@@ -20,6 +21,7 @@ import { sortParam } from '../utils/sortParam'
 const sortBy = usePersistedRef<SortByItem[]>('cdrm.sort.clusters', [{ key: 'name', order: 'asc' }])
 const { items, loading, error, reload } = useResourceList(() => clustersApi.list(sortParam(sortBy.value)))
 watch(sortBy, reload, { deep: true })
+useChangeReload('dev.juergenreiss.cdrm.cluster.', reload)
 
 const TYPE_LABELS: Record<string, string> = {
   K8S: 'Kubernetes',

@@ -3,14 +3,16 @@
 
 package dev.juergenreiss.cdrm.product
 
+import dev.juergenreiss.cdrm.audit.AuditEntityType
+import dev.juergenreiss.cdrm.audit.AuditRecorder
 import dev.juergenreiss.cdrm.common.SortSpec
 import dev.juergenreiss.cdrm.common.sortedBySpec
+import dev.juergenreiss.cdrm.security.CurrentActorResolver
 import dev.juergenreiss.cdrm.security.RebacContext
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.StageRepository
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
-import org.springframework.data.domain.AuditorAware
 import org.springframework.http.HttpStatus
 import org.springframework.scheduling.support.CronExpression
 import org.springframework.stereotype.Service
@@ -26,8 +28,9 @@ class ProductService(
     private val repository: ProductRepository,
     private val productStageRepository: ProductStageRepository,
     private val stageRepository: StageRepository,
-    private val currentUser: AuditorAware<UUID>,
+    private val currentActorResolver: CurrentActorResolver,
     private val rebac: RebacContext,
+    private val auditRecorder: AuditRecorder,
 ) {
 
     private val log = LoggerFactory.getLogger(ProductService::class.java)
@@ -70,13 +73,16 @@ class ProductService(
         if (request.stageDeploymentCrons != null) {
             updateStageCrons(saved.id!!, request.stageDeploymentCrons)
         }
+        val response = saved.toResponse()
+        auditRecorder.recordCreate(AuditEntityType.PRODUCT, saved.id!!.toString(), saved.name, null, response, userId)
         log.info("Created product {} ('{}') by user {}", saved.id, saved.name, userId)
-        return saved.toResponse()
+        return response
     }
 
     @Transactional
     fun update(id: UUID, request: ProductRequest): ProductResponse {
         val product = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        val before = product.toResponse()
         validateGroupInvariants(id = id, request = request)
         if (product.isGroup && !request.isGroup && repository.existsByProductGroupId(id)) {
             throw ResponseStatusException(
@@ -93,8 +99,10 @@ class ProductService(
         if (request.stageDeploymentCrons != null) {
             updateStageCrons(saved.id!!, request.stageDeploymentCrons)
         }
+        val after = saved.toResponse()
+        auditRecorder.recordUpdate(AuditEntityType.PRODUCT, saved.id!!.toString(), saved.name, null, before, after, saved.modifiedBy)
         log.info("Updated product {} ('{}') by user {}", saved.id, saved.name, saved.modifiedBy)
-        return saved.toResponse()
+        return after
     }
 
     // A product group only organizes the product catalog for humans — it can never be a
@@ -177,7 +185,8 @@ class ProductService(
 
     @Transactional
     fun delete(id: UUID) {
-        if (!repository.existsById(id)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val product = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        val before = product.toResponse()
         val userId = currentUserId()
         try {
             repository.deleteById(id)
@@ -185,11 +194,11 @@ class ProductService(
         } catch (e: DataIntegrityViolationException) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "Product is still referenced by one or more workloads")
         }
+        auditRecorder.recordDelete(AuditEntityType.PRODUCT, id.toString(), before.name, null, before, userId)
         log.info("Deleted product {} by user {}", id, userId)
     }
 
-    private fun currentUserId(): UUID =
-        currentUser.currentAuditor.orElseThrow { IllegalStateException("Current user could not be determined") }
+    private fun currentUserId(): UUID = currentActorResolver.resolve()
 
     private fun nextDeploymentAt(cron: String): Instant? =
         try {

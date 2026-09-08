@@ -36,7 +36,7 @@ import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.Spy
 import org.mockito.junit.jupiter.MockitoExtension
-import org.springframework.data.domain.AuditorAware
+import dev.juergenreiss.cdrm.security.CurrentActorResolver
 import org.springframework.data.domain.PageImpl
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Pageable
@@ -81,7 +81,7 @@ class ReleaseServiceTest {
     private lateinit var gitOpsResolver: dev.juergenreiss.cdrm.gitops.GitOpsResolver
 
     @Mock
-    private lateinit var currentUser: AuditorAware<UUID>
+    private lateinit var currentActorResolver: CurrentActorResolver
 
     @Mock
     private lateinit var eventPublisher: org.springframework.context.ApplicationEventPublisher
@@ -110,7 +110,7 @@ class ReleaseServiceTest {
             productStageRepository,
             deploymentExecutor,
             gitOpsResolver,
-            currentUser,
+            currentActorResolver,
             meterRegistry,
             rebac,
             eventPublisher,
@@ -244,7 +244,7 @@ class ReleaseServiceTest {
     fun `create starts the release at the lowest-order linked stage and deploys immediately`() {
         val workloadId = UUID.randomUUID()
         val userId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(userId))
+        given(currentActorResolver.resolve()).willReturn(userId)
         val product = persistedProduct()
         val workload = persistedWorkload(id = workloadId, productId = product.id!!)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
@@ -288,7 +288,7 @@ class ReleaseServiceTest {
     @Test
     fun `create passes the request's commitId through to the saved release and the response`() {
         val workloadId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val product = persistedProduct()
         val workload = persistedWorkload(id = workloadId, productId = product.id!!)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
@@ -317,7 +317,7 @@ class ReleaseServiceTest {
     @Test
     fun `create throws 400 when workload has no linked stages`() {
         val workloadId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         stubWorkloadVisible(workloadId)
         stubWorkloadStages(workloadId, emptyList())
 
@@ -333,7 +333,7 @@ class ReleaseServiceTest {
     @Test
     fun `create rejects an image reference that carries a URL scheme for a kubernetes workload`() {
         val workloadId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val product = persistedProduct()
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = true)))
         given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
@@ -350,7 +350,7 @@ class ReleaseServiceTest {
     @Test
     fun `create rejects an image reference with a space in it for a kubernetes workload`() {
         val workloadId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val product = persistedProduct()
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = true)))
         given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
@@ -365,7 +365,7 @@ class ReleaseServiceTest {
     @Test
     fun `create accepts a bare unqualified image reference for a kubernetes workload`() {
         val workloadId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val product = persistedProduct()
         val workload = persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = true)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
@@ -389,7 +389,7 @@ class ReleaseServiceTest {
     @Test
     fun `create accepts a non-image artifact reference for a non-kubernetes workload`() {
         val workloadId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val product = persistedProduct()
         val workload = persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = false)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
@@ -415,7 +415,7 @@ class ReleaseServiceTest {
     fun `create rejects a SCHEDULED stage with no configured deployment time`() {
         val workloadId = UUID.randomUUID()
         val productId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = productId)))
         given(productRepository.findById(productId)).willReturn(Optional.of(persistedProduct(id = productId)))
 
@@ -438,7 +438,7 @@ class ReleaseServiceTest {
     fun `create leaves deployedAt null for a SCHEDULED stage with a configured deployment time`() {
         val workloadId = UUID.randomUUID()
         val productId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = productId)))
         given(productRepository.findById(productId)).willReturn(Optional.of(persistedProduct(id = productId)))
 
@@ -464,7 +464,7 @@ class ReleaseServiceTest {
     @Test
     fun `create rejects a kubernetes workload with no cluster configured for the stage`() {
         val workloadId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val product = persistedProduct()
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = true)))
         given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
@@ -486,7 +486,7 @@ class ReleaseServiceTest {
     @Test
     fun `create throws 409 when another release hasn't even had its deploy attempt accepted yet at the same initial stage`() {
         val workloadId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val product = persistedProduct()
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(id = workloadId, productId = product.id!!)))
         given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
@@ -514,7 +514,7 @@ class ReleaseServiceTest {
     @Test
     fun `create supersedes (marks replaced) another release still awaiting cluster sync at the same initial stage`() {
         val workloadId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val product = persistedProduct()
         val workload = persistedWorkload(id = workloadId, productId = product.id!!)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
@@ -548,7 +548,7 @@ class ReleaseServiceTest {
     @Test
     fun `create leaves deployedAt null and records the failure reason when the immediate deployment attempt fails`() {
         val workloadId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val product = persistedProduct()
         val workload = persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = true)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
@@ -637,7 +637,7 @@ class ReleaseServiceTest {
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
         given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
         val userId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(userId))
+        given(currentActorResolver.resolve()).willReturn(userId)
         given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
         given(deploymentExecutor.attemptDeploy(workload, qa, release.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
@@ -685,7 +685,7 @@ class ReleaseServiceTest {
         val workload = persistedWorkload(id = workloadId, productId = product.id!!, kubernetes = true)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
         given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
         given(deploymentExecutor.attemptDeploy(workload, qa, release.image)).willReturn(DeployAttemptResult.Failed("cluster not reachable"))
         stubHistorySaveEchoesArgument()
@@ -838,7 +838,7 @@ class ReleaseServiceTest {
         val workload = persistedWorkload(id = workloadId, productId = product.id!!)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
         given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
         given(deploymentExecutor.attemptDeploy(workload, qa, release.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
@@ -909,7 +909,7 @@ class ReleaseServiceTest {
             persistedHistoryEntry(releaseId = headReleaseId, image = "registry.example.com/head", stageId = prod.id!!)
         )
 
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(deploymentExecutor.attemptDeploy(workload, prod, target.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
@@ -978,7 +978,7 @@ class ReleaseServiceTest {
         val releaseId = UUID.randomUUID()
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(deploymentExecutor.attemptDeploy(workload, dev, release.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
@@ -1030,7 +1030,7 @@ class ReleaseServiceTest {
         ).willReturn(
             persistedHistoryEntry(releaseId = releaseId, image = release.image, stageId = prod.id!!)
         )
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(deploymentExecutor.attemptDeploy(workload, prod, release.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
@@ -1066,7 +1066,7 @@ class ReleaseServiceTest {
         given(
             releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
         ).willReturn(failedEntry)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(deploymentExecutor.attemptDeploy(workload, prod, release.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
@@ -1302,7 +1302,7 @@ class ReleaseServiceTest {
         val release = persistedRelease(id = releaseId, workloadId = oldWorkloadId, currentStageId = oldStage.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
         given(repository.save(release)).willReturn(release)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val oldProduct = persistedProduct()
         given(workloadRepository.findById(oldWorkloadId)).willReturn(Optional.of(persistedWorkload(id = oldWorkloadId, productId = oldProduct.id!!)))
         given(productRepository.findById(oldProduct.id!!)).willReturn(Optional.of(oldProduct))
@@ -1340,7 +1340,7 @@ class ReleaseServiceTest {
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = stage.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
         given(repository.save(release)).willReturn(release)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         stubWorkloadStages(workloadId, listOf(stage))
         given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(stage))
         given(stageRepository.findById(stage.id!!)).willReturn(Optional.of(stage))

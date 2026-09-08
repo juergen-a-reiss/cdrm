@@ -3,11 +3,13 @@
 
 package dev.juergenreiss.cdrm.cluster
 
+import dev.juergenreiss.cdrm.audit.AuditEntityType
+import dev.juergenreiss.cdrm.audit.AuditRecorder
 import dev.juergenreiss.cdrm.common.SortSpec
 import dev.juergenreiss.cdrm.common.sortedBySpec
+import dev.juergenreiss.cdrm.security.CurrentActorResolver
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
-import org.springframework.data.domain.AuditorAware
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -18,7 +20,8 @@ import java.util.*
 @Transactional(readOnly = true)
 class ClusterService(
     private val repository: ClusterRepository,
-    private val currentUser: AuditorAware<UUID>,
+    private val currentActorResolver: CurrentActorResolver,
+    private val auditRecorder: AuditRecorder,
 ) {
 
     private val log = LoggerFactory.getLogger(ClusterService::class.java)
@@ -52,13 +55,16 @@ class ClusterService(
                 modifiedBy = userId,
             )
         )
+        val response = saved.toResponse()
+        auditRecorder.recordCreate(AuditEntityType.CLUSTER, saved.id!!.toString(), saved.name, null, response, userId)
         log.info("Created Cluster {} ('{}') by user {}", saved.id, saved.name, userId)
-        return saved.toResponse()
+        return response
     }
 
     @Transactional
     fun update(id: UUID, request: ClusterRequests): ClusterResponse {
         val cluster = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        val before = cluster.toResponse()
         cluster.name = request.name
         cluster.description = request.description
         cluster.clusterType = request.clusterType
@@ -67,13 +73,16 @@ class ClusterService(
         cluster.k8sGitOpsConfig = request.k8sGitOpsConfig
         cluster.modifiedBy = currentUserId()
         val saved = repository.save(cluster)
+        val after = saved.toResponse()
+        auditRecorder.recordUpdate(AuditEntityType.CLUSTER, saved.id!!.toString(), saved.name, null, before, after, saved.modifiedBy)
         log.info("Updated cluster {} ('{}') by user {}", saved.id, saved.name, saved.modifiedBy)
-        return saved.toResponse()
+        return after
     }
 
     @Transactional
     fun delete(id: UUID) {
-        if (!repository.existsById(id)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val cluster = repository.findById(id).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        val before = cluster.toResponse()
         val userId = currentUserId()
         try {
             repository.deleteById(id)
@@ -81,11 +90,11 @@ class ClusterService(
         } catch (e: DataIntegrityViolationException) {
             throw ResponseStatusException(HttpStatus.CONFLICT, "Cluster is still linked to one or more stages")
         }
+        auditRecorder.recordDelete(AuditEntityType.CLUSTER, id.toString(), before.name, null, before, userId)
         log.info("Deleted cluster {} by user {}", id, userId)
     }
 
-    private fun currentUserId(): UUID =
-        currentUser.currentAuditor.orElseThrow { IllegalStateException("Current user could not be determined") }
+    private fun currentUserId(): UUID = currentActorResolver.resolve()
 
     private fun Cluster.toResponse() = ClusterResponse(
         id = id!!,

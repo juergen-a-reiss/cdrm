@@ -11,6 +11,7 @@ import { useStageFilter } from '../composables/useStageFilter'
 import { useWorkloadFilter } from '../composables/useWorkloadFilter'
 import { usePipelineFilter } from '../composables/usePipelineFilter'
 import { usePersistedRef } from '../composables/usePersistedRef'
+import { useUserDisplay } from '../composables/useUserDisplay'
 import ProductFilterBar from '../components/ProductFilterBar.vue'
 import StageFilterBar from '../components/StageFilterBar.vue'
 import WorkloadFilterBar from '../components/WorkloadFilterBar.vue'
@@ -29,6 +30,8 @@ import { formatDeploymentStatus, gitOpsStatusDisplay, kubernetesStatusDisplay } 
 import type { GitOpsStatus, KubernetesStatus } from '../api/types'
 import { sortParam } from '../utils/sortParam'
 import { onChange, type ChangeMessage } from '../composables/useChangeSocket'
+
+const { displayName, resolve: resolveUserDisplay } = useUserDisplay()
 
 // Everything below — the table's rows, its total count, and the chart's aggregated
 // counts — comes from the backend already filtered, sorted, and (for the table)
@@ -74,7 +77,9 @@ let searchDebounceTimer: ReturnType<typeof setTimeout> | undefined
 watch(search, (value) => {
   clearTimeout(searchDebounceTimer)
   searchDebounceTimer = setTimeout(() => {
-    debouncedSearch.value = value
+    // Vuetify's clearable "x" sets the model to null, not '' — normalize here so
+    // debouncedSearch.value.trim() below never sees anything but a string.
+    debouncedSearch.value = value ?? ''
   }, 300)
 })
 
@@ -242,6 +247,7 @@ async function loadTable() {
     })
     rawEntries.value = result.content
     totalElements.value = result.totalElements
+    resolveUserDisplay(rawEntries.value.map((entry) => entry.createdBy))
   } catch (e) {
     tableError.value = e instanceof ApiError ? `${e.status}: ${e.message}` : 'Failed to load history'
   } finally {
@@ -413,6 +419,7 @@ onUnmounted(unsubscribeChanges)
           {{ kubernetesStatusDisplay(item.kubernetesStatus)!.label }}
         </v-chip>
       </template>
+      <template #item.createdBy="{ item }">{{ displayName(item.createdBy) }}</template>
     </ResourceTable>
   </v-card>
 </template>

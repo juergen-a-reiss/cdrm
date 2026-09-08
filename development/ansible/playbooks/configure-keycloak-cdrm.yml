@@ -93,14 +93,14 @@
         lastName: Owner - Platform
         attributes:
           cdrm-products: ["Platform"]
-          cdrm-release-actions: ["promote: development, qa"]
+          cdrm-release-actions: ["promote: frankfurt-development, frankfurt-qa"]
       - username: cdrm-productowner-platform-late
         role: cdrm-productowner
         firstName: Product
         lastName: Owner - Platform
         attributes:
           cdrm-products: ["Platform"]
-          cdrm-release-actions: ["promote: staging, production"]
+          cdrm-release-actions: ["promote: frankfurt-production"]
       - username: cdrm-productowner-payments
         role: cdrm-productowner
         firstName: Product

@@ -3,8 +3,10 @@
 
 package dev.juergenreiss.cdrm.config
 
+import dev.juergenreiss.cdrm.audit.AuditEntityType
+import dev.juergenreiss.cdrm.audit.AuditRecorder
+import dev.juergenreiss.cdrm.security.CurrentActorResolver
 import org.slf4j.LoggerFactory
-import org.springframework.data.domain.AuditorAware
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -16,7 +18,8 @@ import java.util.*
 @Transactional(readOnly = true)
 class ConfigService(
     private val repository: ConfigEntryRepository,
-    private val currentUser: AuditorAware<UUID>,
+    private val currentActorResolver: CurrentActorResolver,
+    private val auditRecorder: AuditRecorder,
 ) {
 
     private val log = LoggerFactory.getLogger(ConfigService::class.java)
@@ -32,6 +35,7 @@ class ConfigService(
         val userId = currentUserId()
         val serialized = objectMapper.writeValueAsString(request.value)
         val existing = repository.findById(key).orElse(null)
+        val before = existing?.toResponse()
         val saved = if (existing != null) {
             existing.value = serialized
             existing.modifiedBy = userId
@@ -39,12 +43,17 @@ class ConfigService(
         } else {
             repository.save(ConfigEntry(key = key, value = serialized, createdBy = userId, modifiedBy = userId))
         }
+        val after = saved.toResponse()
+        if (before != null) {
+            auditRecorder.recordUpdate(AuditEntityType.CONFIG, key, key, null, before, after, userId)
+        } else {
+            auditRecorder.recordCreate(AuditEntityType.CONFIG, key, key, null, after, userId)
+        }
         log.info("Updated config entry '{}' by user {}", key, userId)
-        return saved.toResponse()
+        return after
     }
 
-    private fun currentUserId(): UUID =
-        currentUser.currentAuditor.orElseThrow { IllegalStateException("Current user could not be determined") }
+    private fun currentUserId(): UUID = currentActorResolver.resolve()
 
     private fun ConfigEntry.toResponse() = ConfigResponse(
         key = key,

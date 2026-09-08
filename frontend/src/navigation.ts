@@ -21,5 +21,6 @@ export const NAV_ITEMS: NavItem[] = [
   { key: 'workloads', title: 'Workloads', to: '/workloads', icon: 'mdi-rocket-launch' },
   { key: 'releases', title: 'Releases', to: '/releases', icon: 'mdi-tag' },
   { key: 'release-history', title: 'Release History', to: '/release-history', icon: 'mdi-chart-bar' },
+  { key: 'audit', title: 'Audit', to: '/audit', icon: 'mdi-history' },
   { key: 'configuration', title: 'Configuration', to: '/configuration', icon: 'mdi-cog' },
 ]

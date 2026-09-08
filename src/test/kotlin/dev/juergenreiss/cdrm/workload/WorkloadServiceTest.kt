@@ -1,5 +1,8 @@
 package dev.juergenreiss.cdrm.workload
 
+import dev.juergenreiss.cdrm.audit.AuditEntityType
+import dev.juergenreiss.cdrm.audit.AuditRecorder
+import dev.juergenreiss.cdrm.testsupport.singleInvocationArgs
 import dev.juergenreiss.cdrm.product.Product
 import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.security.RebacContext
@@ -21,7 +24,7 @@ import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.junit.jupiter.MockitoExtension
 import org.springframework.dao.DataIntegrityViolationException
-import org.springframework.data.domain.AuditorAware
+import dev.juergenreiss.cdrm.security.CurrentActorResolver
 import org.springframework.data.domain.Sort
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
@@ -44,16 +47,19 @@ class WorkloadServiceTest {
     private lateinit var productRepository: ProductRepository
 
     @Mock
-    private lateinit var currentUser: AuditorAware<UUID>
+    private lateinit var currentActorResolver: CurrentActorResolver
 
     @Mock
     private lateinit var rebac: RebacContext
+
+    @Mock
+    private lateinit var auditRecorder: AuditRecorder
 
     private lateinit var service: WorkloadService
 
     @BeforeEach
     fun setUp() {
-        service = WorkloadService(repository, stageRepository, workloadStageRepository, productRepository, currentUser, rebac)
+        service = WorkloadService(repository, stageRepository, workloadStageRepository, productRepository, currentActorResolver, rebac, auditRecorder)
         // Default: any productId passed to create/update resolves to a plain, non-group
         // product — lenient so tests that never reach validateProduct() (e.g. the
         // validateTarget checks, which run first) aren't flagged for an unused stub.
@@ -93,7 +99,7 @@ class WorkloadServiceTest {
     @Test
     fun `create links the new workload to every existing stage`() {
         val userId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(userId))
+        given(currentActorResolver.resolve()).willReturn(userId)
 
         val dev = persistedStage(order = 1, name = "Dev")
         val qa = persistedStage(order = 2, name = "QA")
@@ -119,6 +125,7 @@ class WorkloadServiceTest {
         assertEquals(setOf(saved.id), linked.map { it.workloadId }.toSet())
 
         assertEquals(listOf("Dev", "QA", "Prod"), result.stages.map { it.name })
+        verify(auditRecorder).recordCreate(AuditEntityType.WORKLOAD, saved.id.toString(), "Release 1", "Product", result, userId)
     }
 
     @Test
@@ -148,7 +155,7 @@ class WorkloadServiceTest {
     @Test
     fun `create throws when current user cannot be resolved`() {
         given(stageRepository.findAll()).willReturn(listOf(persistedStage(order = 1)))
-        given(currentUser.currentAuditor).willReturn(Optional.empty())
+        given(currentActorResolver.resolve()).willThrow(IllegalStateException("Current user could not be determined"))
 
         assertThrows(IllegalStateException::class.java) {
             service.create(WorkloadRequest(name = "Release", productId = UUID.randomUUID(), description = null, kubernetes = false, pipeline = "pipeline"))
@@ -161,7 +168,7 @@ class WorkloadServiceTest {
         val existing = persistedWorkload(id = workloadId, name = "Release 1")
         given(repository.findById(workloadId)).willReturn(Optional.of(existing))
         given(repository.save(existing)).willReturn(existing)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
 
         val dev = persistedStage(order = 1, name = "Dev")
         val qa = persistedStage(order = 2, name = "QA")
@@ -179,7 +186,7 @@ class WorkloadServiceTest {
         given(stageRepository.findAllById(requestedIds.toSet())).willReturn(listOf(qa, prod))
         given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev, qa, prod))
 
-        service.update(
+        val result = service.update(
             workloadId,
             WorkloadRequest(name = "Release 1", productId = existing.productId, description = null, kubernetes = false, pipeline = "pipeline", stageIds = requestedIds)
         )
@@ -193,6 +200,13 @@ class WorkloadServiceTest {
         val addCaptor = ArgumentCaptor.forClass(List::class.java) as ArgumentCaptor<List<WorkloadStage>>
         verify(workloadStageRepository).saveAll(addCaptor.capture())
         assertEquals(listOf(prod.id), addCaptor.value.map { it.stageId })
+
+        val args = singleInvocationArgs(auditRecorder, "recordUpdate")
+        assertEquals(AuditEntityType.WORKLOAD, args[0])
+        assertEquals(workloadId.toString(), args[1])
+        assertEquals("Release 1", args[2])
+        assertEquals("Product", args[3])
+        assertEquals(result, args[5])
     }
 
     @Test
@@ -201,7 +215,7 @@ class WorkloadServiceTest {
         val existing = persistedWorkload(id = workloadId, name = "Release 1")
         given(repository.findById(workloadId)).willReturn(Optional.of(existing))
         given(repository.save(existing)).willReturn(existing)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(stageRepository.findAll()).willReturn(listOf(persistedStage(order = 1)))
         given(workloadStageRepository.findByWorkloadId(workloadId)).willReturn(emptyList())
         given(stageRepository.findAll(Sort.by("order"))).willReturn(emptyList())
@@ -221,7 +235,7 @@ class WorkloadServiceTest {
         val existing = persistedWorkload(id = workloadId, name = "Release 1")
         given(repository.findById(workloadId)).willReturn(Optional.of(existing))
         given(repository.save(existing)).willReturn(existing)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
 
         val dev = persistedStage(order = 1, name = "Dev")
         given(stageRepository.findAll()).willReturn(listOf(dev))
@@ -321,7 +335,7 @@ class WorkloadServiceTest {
         val existing = persistedWorkload(id = workloadId, name = "Release 1")
         given(repository.findById(workloadId)).willReturn(Optional.of(existing))
         given(repository.save(existing)).willReturn(existing)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
 
         val knownStage = persistedStage(order = 1, name = "Dev")
         val unknownId = UUID.randomUUID()
@@ -441,19 +455,26 @@ class WorkloadServiceTest {
 
     @Test
     fun `delete removes existing workload after resolving current user`() {
-        val id = UUID.randomUUID()
-        given(repository.existsById(id)).willReturn(true)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val workload = persistedWorkload()
+        given(repository.findById(workload.id!!)).willReturn(Optional.of(workload))
+        val userId = UUID.randomUUID()
+        given(currentActorResolver.resolve()).willReturn(userId)
 
-        service.delete(id)
+        service.delete(workload.id!!)
 
-        verify(repository).deleteById(id)
+        verify(repository).deleteById(workload.id!!)
+        val args = singleInvocationArgs(auditRecorder, "recordDelete")
+        assertEquals(AuditEntityType.WORKLOAD, args[0])
+        assertEquals(workload.id.toString(), args[1])
+        assertEquals(workload.name, args[2])
+        assertEquals("Product", args[3])
+        assertEquals(userId, args[5])
     }
 
     @Test
     fun `delete throws 404 when missing`() {
         val id = UUID.randomUUID()
-        given(repository.existsById(id)).willReturn(false)
+        given(repository.findById(id)).willReturn(Optional.empty())
 
         val exception = assertThrows(ResponseStatusException::class.java) { service.delete(id) }
 
@@ -463,14 +484,15 @@ class WorkloadServiceTest {
 
     @Test
     fun `delete throws 409 when workload is still referenced by a release`() {
-        val id = UUID.randomUUID()
-        given(repository.existsById(id)).willReturn(true)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val workload = persistedWorkload()
+        given(repository.findById(workload.id!!)).willReturn(Optional.of(workload))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(repository.flush()).willThrow(DataIntegrityViolationException::class.java)
 
-        val exception = assertThrows(ResponseStatusException::class.java) { service.delete(id) }
+        val exception = assertThrows(ResponseStatusException::class.java) { service.delete(workload.id!!) }
 
         assertEquals(409, exception.statusCode.value())
+        org.mockito.Mockito.verifyNoInteractions(auditRecorder)
     }
 
     @Test
@@ -507,7 +529,7 @@ class WorkloadServiceTest {
     @Test
     fun `create accepts kubernetes true with a kind and namespace set`() {
         val userId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(userId))
+        given(currentActorResolver.resolve()).willReturn(userId)
         given(stageRepository.findAll()).willReturn(listOf(persistedStage(order = 1)))
         given(stageRepository.findAll(Sort.by("order"))).willReturn(emptyList())
 

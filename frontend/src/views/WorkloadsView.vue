@@ -15,6 +15,7 @@ import { useResourceList } from '../composables/useResourceList'
 import { useProductFilter } from '../composables/useProductFilter'
 import { usePipelineFilter } from '../composables/usePipelineFilter'
 import { usePersistedRef } from '../composables/usePersistedRef'
+import { useChangeReload } from '../composables/useChangeReload'
 import { workloadsApi } from '../api/workloads'
 import { productsApi } from '../api/products'
 import { ApiError } from '../api/http'
@@ -41,7 +42,11 @@ interface WorkloadRow {
 const sortBy = usePersistedRef<SortByItem[]>('cdrm.sort.workloads', [{ key: 'name', order: 'asc' }])
 const { items, loading, error, reload } = useResourceList(() => workloadsApi.list(sortParam(sortBy.value)))
 watch(sortBy, reload, { deep: true })
-const { items: products } = useResourceList(productsApi.list)
+useChangeReload('dev.juergenreiss.cdrm.workload.', reload)
+const { items: products, reload: reloadProducts } = useResourceList(productsApi.list)
+// Only the product name lookup below depends on this list — a renamed product should
+// show up here too, not just on the Products tab itself.
+useChangeReload('dev.juergenreiss.cdrm.product.', reloadProducts)
 const { matches } = useProductFilter()
 const { matches: matchesPipeline } = usePipelineFilter()
 

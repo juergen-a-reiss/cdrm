@@ -6,10 +6,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useDisplay, useTheme } from 'vuetify'
-import { authenticatedUser, isAuthenticated, login, logout } from './auth/authService'
+import { isAuthenticated, login, logout } from './auth/authService'
 import { useMenuVisibility } from './composables/useMenuVisibility'
 import { NAV_ITEMS } from './navigation'
 import ToastHost from './components/ToastHost.vue'
+import UserProfileMenu from './components/UserProfileMenu.vue'
 import { THEME_STORAGE_KEY } from './plugins/vuetify'
 
 const theme = useTheme()
@@ -21,12 +22,17 @@ function toggleTheme() {
 }
 
 const { visibleKeys } = useMenuVisibility()
-const navItems = computed(() => NAV_ITEMS.filter((item) => visibleKeys.value.has(item.key)))
 
 // Below the mobile breakpoint the drawer becomes a temporary overlay (closed by
 // default, toggled by the nav icon) instead of permanently reserving screen width —
 // there's no room for both a fixed drawer and the actual page content on a phone.
 const { mobile } = useDisplay()
+
+// Audit is desktop-only regardless of the role's menu-visibility whitelist — it's a
+// dense server-paginated table, not something worth cramming onto a phone screen.
+const navItems = computed(() =>
+  NAV_ITEMS.filter((item) => visibleKeys.value.has(item.key) && !(item.key === 'audit' && mobile.value)),
+)
 const drawerOpen = ref(!mobile.value)
 watch(mobile, (isMobile) => {
   drawerOpen.value = !isMobile
@@ -68,7 +74,7 @@ function closeDrawerOnMobileNav() {
         />
         <v-btn v-if="!isAuthenticated" @click="login">Log in</v-btn>
         <template v-else>
-          <span v-if="!mobile" class="mr-4">{{ authenticatedUser?.profile.preferred_username }}</span>
+          <UserProfileMenu v-if="!mobile" />
           <v-btn @click="logout">Log out</v-btn>
         </template>
       </template>

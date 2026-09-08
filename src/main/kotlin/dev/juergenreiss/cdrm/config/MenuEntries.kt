@@ -12,5 +12,5 @@ package dev.juergenreiss.cdrm.config
 object MenuEntries {
     const val CONFIGURATION = "configuration"
 
-    val ASSIGNABLE = setOf("clusters", "stages", "products", "workloads", "releases", "release-history")
+    val ASSIGNABLE = setOf("clusters", "stages", "products", "workloads", "releases", "release-history", "audit")
 }

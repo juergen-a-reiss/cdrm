@@ -49,7 +49,7 @@ databaseChangeLog:
                   value: menu-visibility
               - column:
                   name: config_value
-                  value: '{"cdrm-devops":["clusters","stages","products","workloads","releases","release-history"],"cdrm-productowner":["clusters","stages","products","workloads","releases","release-history"],"cdrm-developer":["clusters","stages","products","workloads","releases","release-history"],"cdrm-manager":["clusters","stages","products","workloads","releases","release-history"]}'
+                  value: '{"cdrm-devops":["clusters","stages","products","workloads","releases","release-history","audit"],"cdrm-productowner":["clusters","stages","products","workloads","releases","release-history","audit"],"cdrm-developer":["clusters","stages","products","workloads","releases","release-history","audit"],"cdrm-manager":["clusters","stages","products","workloads","releases","release-history","audit"]}'
               - column:
                   name: created_at
                   valueDate: now()

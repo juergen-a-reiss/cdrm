@@ -10,6 +10,7 @@ import dev.juergenreiss.cdrm.notification.ReleaseHistoryRecordedEvent
 import dev.juergenreiss.cdrm.product.Product
 import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.product.ProductStageRepository
+import dev.juergenreiss.cdrm.security.CurrentActorResolver
 import dev.juergenreiss.cdrm.security.RebacContext
 import dev.juergenreiss.cdrm.security.ReleaseActionClaim
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
@@ -21,7 +22,6 @@ import dev.juergenreiss.cdrm.workload.WorkloadStageRepository
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
-import org.springframework.data.domain.AuditorAware
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.http.HttpStatus
@@ -56,7 +56,7 @@ class ReleaseService(
     private val productStageRepository: ProductStageRepository,
     private val deploymentExecutor: DeploymentExecutor,
     private val gitOpsResolver: GitOpsResolver,
-    private val currentUser: AuditorAware<UUID>,
+    private val currentActorResolver: CurrentActorResolver,
     private val meterRegistry: MeterRegistry,
     private val rebac: RebacContext,
     private val eventPublisher: ApplicationEventPublisher,
@@ -695,8 +695,7 @@ class ReleaseService(
         }
     }
 
-    private fun currentUserId(): UUID =
-        currentUser.currentAuditor.orElseThrow { IllegalStateException("Current user could not be determined") }
+    private fun currentUserId(): UUID = currentActorResolver.resolve()
 
     private fun orderedStagesFor(workloadId: UUID): List<Stage> {
         val linkedStageIds = workloadStageRepository.findByWorkloadId(workloadId).map { it.stageId }.toSet()

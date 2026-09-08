@@ -1,0 +1,26 @@
+databaseChangeLog:
+  - changeSet:
+      id: 008-create-known-user
+      author: juergen
+      changes:
+        # One row per Keycloak subject captured because the user.id.storage display
+        # format needed more than the bare UUID — see CurrentActorResolver, the only
+        # writer. Empty in the (default) UUID-format/none-storage case.
+        - createTable:
+            tableName: known_user
+            columns:
+              - column:
+                  name: id
+                  type: uuid
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: first_name
+                  type: varchar(255)
+              - column:
+                  name: last_name
+                  type: varchar(255)
+              - column:
+                  name: email
+                  type: varchar(255)

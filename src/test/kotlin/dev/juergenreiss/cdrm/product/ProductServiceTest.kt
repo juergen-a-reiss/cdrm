@@ -1,5 +1,8 @@
 package dev.juergenreiss.cdrm.product
 
+import dev.juergenreiss.cdrm.audit.AuditEntityType
+import dev.juergenreiss.cdrm.audit.AuditRecorder
+import dev.juergenreiss.cdrm.testsupport.singleInvocationArgs
 import dev.juergenreiss.cdrm.security.RebacContext
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.Stage
@@ -19,7 +22,7 @@ import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
 import org.mockito.junit.jupiter.MockitoExtension
 import org.springframework.dao.DataIntegrityViolationException
-import org.springframework.data.domain.AuditorAware
+import dev.juergenreiss.cdrm.security.CurrentActorResolver
 import org.springframework.web.server.ResponseStatusException
 import java.time.Instant
 import java.util.Optional
@@ -38,16 +41,19 @@ class ProductServiceTest {
     private lateinit var stageRepository: StageRepository
 
     @Mock
-    private lateinit var currentUser: AuditorAware<UUID>
+    private lateinit var currentActorResolver: CurrentActorResolver
 
     @Mock
     private lateinit var rebac: RebacContext
+
+    @Mock
+    private lateinit var auditRecorder: AuditRecorder
 
     private lateinit var service: ProductService
 
     @BeforeEach
     fun setUp() {
-        service = ProductService(repository, productStageRepository, stageRepository, currentUser, rebac)
+        service = ProductService(repository, productStageRepository, stageRepository, currentActorResolver, rebac, auditRecorder)
     }
 
     private fun persistedStage(deploymentPolicy: DeploymentPolicy, name: String = "Stage") = Stage(
@@ -82,18 +88,21 @@ class ProductServiceTest {
 
     @Test
     fun `create without stageDeploymentCrons saves no ProductStage rows`() {
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
-        given(repository.save(any())).willReturn(persistedProduct())
+        val userId = UUID.randomUUID()
+        given(currentActorResolver.resolve()).willReturn(userId)
+        val saved = persistedProduct()
+        given(repository.save(any())).willReturn(saved)
 
-        service.create(ProductRequest(name = "Product", description = null))
+        val result = service.create(ProductRequest(name = "Product", description = null))
 
         verify(productStageRepository, never()).save(any())
+        verify(auditRecorder).recordCreate(AuditEntityType.PRODUCT, saved.id.toString(), "Product", null, result, userId)
     }
 
     @Test
     fun `create with a valid cron for a SCHEDULED stage saves it`() {
         val userId = UUID.randomUUID()
-        given(currentUser.currentAuditor).willReturn(Optional.of(userId))
+        given(currentActorResolver.resolve()).willReturn(userId)
         val saved = persistedProduct()
         given(repository.save(any())).willReturn(saved)
 
@@ -114,7 +123,7 @@ class ProductServiceTest {
 
     @Test
     fun `create rejects a cron for a stage that is not SCHEDULED`() {
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val saved = persistedProduct()
         given(repository.save(any())).willReturn(saved)
 
@@ -137,7 +146,7 @@ class ProductServiceTest {
 
     @Test
     fun `create rejects an invalid cron expression`() {
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val saved = persistedProduct()
         given(repository.save(any())).willReturn(saved)
 
@@ -159,7 +168,7 @@ class ProductServiceTest {
 
     @Test
     fun `create rejects an unknown stage id`() {
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val saved = persistedProduct()
         given(repository.save(any())).willReturn(saved)
 
@@ -181,7 +190,7 @@ class ProductServiceTest {
 
     @Test
     fun `create rejects duplicate stage ids in the same request`() {
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val saved = persistedProduct()
         given(repository.save(any())).willReturn(saved)
 
@@ -210,7 +219,7 @@ class ProductServiceTest {
         val product = persistedProduct(id = productId)
         given(repository.findById(productId)).willReturn(Optional.of(product))
         given(repository.save(product)).willReturn(product)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
 
         val keepStage = persistedStage(DeploymentPolicy.SCHEDULED, name = "QA")
         val addStage = persistedStage(DeploymentPolicy.SCHEDULED, name = "Prod")
@@ -219,6 +228,9 @@ class ProductServiceTest {
         val existingKeep = ProductStage(productId = productId, stageId = keepStage.id!!, deploymentCron = "0 0 1 * * *")
         val existingRemove = ProductStage(productId = productId, stageId = removeStage.id!!, deploymentCron = "0 0 3 * * *")
         given(productStageRepository.findByProductId(productId)).willReturn(listOf(existingKeep, existingRemove))
+        // toResponse() needs this for the "before" snapshot too (taken ahead of
+        // updateStageCrons() changing anything) — its own stage ids, not the requested set.
+        given(stageRepository.findAllById(listOf(keepStage.id!!, removeStage.id!!))).willReturn(listOf(keepStage, removeStage))
 
         val requested = listOf(
             ProductStageCronRequest(stageId = keepStage.id!!, deploymentCron = "0 30 1 * * *"),
@@ -226,29 +238,42 @@ class ProductServiceTest {
         )
         given(stageRepository.findAllById(requested.map { it.stageId })).willReturn(listOf(keepStage, addStage))
 
-        service.update(productId, ProductRequest(name = "Product", description = null, stageDeploymentCrons = requested))
+        val result = service.update(productId, ProductRequest(name = "Product", description = null, stageDeploymentCrons = requested))
 
         verify(productStageRepository).deleteAll(listOf(existingRemove))
         verify(productStageRepository).save(existingKeep)
         assertEquals("0 30 1 * * *", existingKeep.deploymentCron)
         verify(productStageRepository).save(argThat<ProductStage> { it.stageId == addStage.id })
+        val args = singleInvocationArgs(auditRecorder, "recordUpdate")
+        assertEquals(AuditEntityType.PRODUCT, args[0])
+        assertEquals(productId.toString(), args[1])
+        assertEquals("Product", args[2])
+        assertEquals(null, args[3])
+        assertEquals(result, args[5])
     }
 
     @Test
     fun `delete removes existing product after resolving current user`() {
-        val id = UUID.randomUUID()
-        given(repository.existsById(id)).willReturn(true)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val product = persistedProduct()
+        given(repository.findById(product.id!!)).willReturn(Optional.of(product))
+        val userId = UUID.randomUUID()
+        given(currentActorResolver.resolve()).willReturn(userId)
 
-        service.delete(id)
+        service.delete(product.id!!)
 
-        verify(repository).deleteById(id)
+        verify(repository).deleteById(product.id!!)
+        val args = singleInvocationArgs(auditRecorder, "recordDelete")
+        assertEquals(AuditEntityType.PRODUCT, args[0])
+        assertEquals(product.id.toString(), args[1])
+        assertEquals(product.name, args[2])
+        assertEquals(null, args[3])
+        assertEquals(userId, args[5])
     }
 
     @Test
     fun `delete throws 404 when missing`() {
         val id = UUID.randomUUID()
-        given(repository.existsById(id)).willReturn(false)
+        given(repository.findById(id)).willReturn(Optional.empty())
 
         val exception = assertThrows(ResponseStatusException::class.java) { service.delete(id) }
 
@@ -258,14 +283,15 @@ class ProductServiceTest {
 
     @Test
     fun `delete throws 409 when product is still referenced by a workload`() {
-        val id = UUID.randomUUID()
-        given(repository.existsById(id)).willReturn(true)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        val product = persistedProduct()
+        given(repository.findById(product.id!!)).willReturn(Optional.of(product))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(repository.flush()).willThrow(DataIntegrityViolationException::class.java)
 
-        val exception = assertThrows(ResponseStatusException::class.java) { service.delete(id) }
+        val exception = assertThrows(ResponseStatusException::class.java) { service.delete(product.id!!) }
 
         assertEquals(409, exception.statusCode.value())
+        org.mockito.Mockito.verifyNoInteractions(auditRecorder)
     }
 
     @Test
@@ -274,7 +300,7 @@ class ProductServiceTest {
         val product = persistedProduct(id = productId)
         given(repository.findById(productId)).willReturn(Optional.of(product))
         given(repository.save(product)).willReturn(product)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
 
         service.update(productId, ProductRequest(name = "Product", description = null, stageDeploymentCrons = null))
 
@@ -332,7 +358,7 @@ class ProductServiceTest {
 
     @Test
     fun `create allows a product group with no crons`() {
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val saved = persistedProduct(isGroup = true)
         given(repository.save(any())).willReturn(saved)
 
@@ -388,7 +414,7 @@ class ProductServiceTest {
 
     @Test
     fun `create with a valid productGroupId saves the group link`() {
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         val group = persistedProduct(name = "Core Products", isGroup = true)
         given(repository.findById(group.id!!)).willReturn(Optional.of(group))
         val saved = persistedProduct(productGroupId = group.id)
@@ -453,7 +479,7 @@ class ProductServiceTest {
         given(repository.findById(groupId)).willReturn(Optional.of(group))
         given(repository.existsByProductGroupId(groupId)).willReturn(false)
         given(repository.save(group)).willReturn(group)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
 
         val result = service.update(groupId, ProductRequest(name = "Core Products", description = null, isGroup = false))
 
@@ -468,7 +494,7 @@ class ProductServiceTest {
         val group = persistedProduct(name = "Core Products", isGroup = true)
         given(repository.findById(group.id!!)).willReturn(Optional.of(group))
         given(repository.save(product)).willReturn(product)
-        given(currentUser.currentAuditor).willReturn(Optional.of(UUID.randomUUID()))
+        given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
 
         val result = service.update(productId, ProductRequest(name = "Product", description = null, productGroupId = group.id))
 
