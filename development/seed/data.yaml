@@ -45,6 +45,7 @@ clusters:
       - namespace: frankfurt-dev-website
       - namespace: frankfurt-qa-website
       - namespace: frankfurt-prod-website
+
       - namespace: paris-qa-platform
         use_git_ops: true
         file_expression: "environments/{namespace}/{workload}.yaml"
@@ -112,77 +113,186 @@ stages:
 products:
   # Purely organizational — groups a product listed later in this file must be listed
   # after their group (seed_products resolves product_group by name as it goes).
-  - name: Core Products
-    description: Top-level grouping for core platform and payment services
+
+  # Level 1
+  - name: core-saas-products-group
+    description: Core SaaS Products
     is_group: true
-  - name: Platform
-    description: Core platform services
-    product_group: Core Products
-    stage_deployment_crons:
-      - stage: frankfurt-production
-        cron: "0 0 2 * * *"
-      - stage: paris-production
-        cron: "* * * * * *"
-  - name: Payments
-    description: Payment processing services
-    product_group: Core Products
+
+  # Level 2
+  - name: platform-group
+    description: Platform Services. Everything that is needed to provide the client services.
+    is_group: true
+    product_group: core-saas-products-group
+  - name: billing
+    description: Billing Services.
+    product_group: core-saas-products-group
     stage_deployment_crons:
       - stage: frankfurt-production
         cron: "0 0 3 * * *"
       - stage: paris-production
         cron: "* * * * * *"
-  - name: Mobile
+  - name: reporting-benchmarking
+    product_group: core-saas-products-group
+    stage_deployment_crons:
+      - stage: frankfurt-production
+        cron: "0 0 3 * * *"
+      - stage: paris-production
+        cron: "* * * * * *"
+
+  # Level 3 - platform-group subgroups
+  - name: platform
+    description: Core Platform Services
+    product_group: platform-group
+    stage_deployment_crons:
+      - stage: frankfurt-production
+        cron: "0 0 2 * * *"
+      - stage: paris-production
+        cron: "* * * * * *"
+  - name: platform-interfaces
+    description: 
+    product_group: platform-group
+    stage_deployment_crons:
+      - stage: frankfurt-production
+        cron: "0 0 2 * * *"
+      - stage: paris-production
+        cron: "* * * * * *"
+
+  - name: mobile
     description: Mobile backend services
     # No production deployment time configured yet on purpose — demonstrates the
     # "release can't be promoted into an unconfigured SCHEDULED stage" behavior.
 
+  - name: other-business-1
+    description: Other Business 1
+    stage_deployment_crons:
+      - stage: frankfurt-production
+        cron: "0 0 3 * * *"
+      - stage: paris-production
+        cron: "* * * * * *"
+  - name: other-business-2
+    description: Other Business 2
+    stage_deployment_crons:
+      - stage: frankfurt-production
+        cron: "0 0 3 * * *"
+      - stage: paris-production
+        cron: "* * * * * *"
+            
+
 workloads:
   - name: platform-api
-    product: Platform
+    product: platform
     description: Platform API workload
     kubernetes: true
     kubernetes_kind: DEPLOYMENT
     kubernetes_namespace: platform
-    pipeline: frankfurt  
+    pipeline: frankfurt
   - name: platform-worker
-    product: Platform
+    product: platform
     description: Platform background worker workload
     kubernetes: true
     kubernetes_kind: DEPLOYMENT
     kubernetes_namespace: platform
     pipeline: frankfurt
+  - name: platform-admin-backend
+    product: platform
+    description: Platform admin backend
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: platform
+    pipeline: frankfurt
+  - name: platform-jobs
+    product: platform
+    description: Platform Jobs
+    kubernetes: true
+    kubernetes_kind: STATEFUL_SET
+    kubernetes_namespace: platform
+    pipeline: frankfurt
+
+  - name: platform-interface-client-1
+    product: platform-interfaces
+    description: Platform Interface for Client 1
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: platform
+    pipeline: frankfurt
+  - name: platform-interface-client-2
+    product: platform-interfaces
+    description: Platform Interface for Client 2
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: platform
+    pipeline: frankfurt
+
   - name: payments-gateway
-    product: Payments
+    product: billing
     description: Payment gateway workload
     kubernetes: true
     kubernetes_kind: STATEFUL_SET
     kubernetes_namespace: website
     pipeline: frankfurt
-
-  - name: platform-interface-emea
-    product: Platform
-    description: Platform interface
-    kubernetes: true
-    kubernetes_kind: DEPLOYMENT
-    kubernetes_namespace: platform
-    pipeline: paris
-  - name: website-portal-france
-    product: Payments
-    description: Payment gateway workload
-    kubernetes: true
-    kubernetes_kind: DEPLOYMENT
-    kubernetes_namespace: website
-    pipeline: paris
-
-  - name: payments-ledger
-    product: Payments
-    description: Payment ledger workload
+  - name: billing-event-consumer
+    product: billing
+    description: Billing Event Consumer
     kubernetes: true
     kubernetes_kind: DEPLOYMENT
     kubernetes_namespace: website
     pipeline: frankfurt
+  - name: billing-aggregator
+    product: billing
+    description: Billing aggregator
+    kubernetes: true
+    kubernetes_kind: STATEFUL_SET
+    kubernetes_namespace: website
+    pipeline: frankfurt
+  - name: billing-jobs
+    product: billing
+    description: Billing Jobs
+    kubernetes: true
+    kubernetes_kind: STATEFUL_SET
+    kubernetes_namespace: website
+    pipeline: frankfurt
+
+  - name: benchmarking-service
+    product: reporting-benchmarking
+    description: Client Benchmarking
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: platform
+    pipeline: paris
+  - name: platform-usage-service
+    product: reporting-benchmarking
+    description: Platform Usage View
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: platform
+    pipeline: paris
+  - name: client-dashboard
+    product: reporting-benchmarking
+    description: Client Dashboard
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: platform
+    pipeline: paris
+
+  - name: website-portal-france
+    product: other-business-1
+    description: Some other business
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: website
+    pipeline: paris
+
+  - name: website-portal-italy
+    product: other-business-2
+    description: Some other business
+    kubernetes: true
+    kubernetes_kind: DEPLOYMENT
+    kubernetes_namespace: website
+    pipeline: paris
+
   - name: mobile-backend
-    product: Mobile
+    product: mobile
     description: Mobile backend-for-frontend workload
     kubernetes: true
     kubernetes_kind: DEPLOYMENT
@@ -193,18 +303,52 @@ releases:
   - workload: platform-api
     image: nginx:1.30-alpine
     description: Initial release
-  - workload: platform-interface-emea
-    image: nginx:1.30-alpine
-    description: Initial release 
   - workload: platform-worker
     image: nginx:1.30-alpine
+    description: Initial release 
+  - workload: platform-admin-backend
+    image: nginx:1.30-alpine
     description: Initial release
+  - workload: platform-jobs
+    image: nginx:1.30-alpine
+    description: Initial release
+
+  - workload: platform-interface-client-1
+    image: nginx:1.30-alpine
+    description: Initial release
+  - workload: platform-interface-client-2
+    image: nginx:1.30-alpine
+    description: Initial release
+
   - workload: payments-gateway
     image: nginx:1.30-alpine
     description: Initial release
-  - workload: payments-ledger
+  - workload: billing-event-consumer
     image: nginx:1.30-alpine
     description: Initial release
+  - workload: billing-aggregator
+    image: nginx:1.30-alpine
+    description: Initial release
+  - workload: billing-jobs
+    image: nginx:1.30-alpine
+    description: Initial release
+
+  - workload: benchmarking-service
+    image: nginx:1.30-alpine
+    description: Initial release
+  - workload: platform-usage-service
+    image: nginx:1.30-alpine
+    description: Initial release
+  - workload: client-dashboard
+    image: nginx:1.30-alpine
+    description: Initial release
+  - workload: website-portal-france
+    image: nginx:1.30-alpine
+    description: Initial release
+  - workload: website-portal-italy
+    image: nginx:1.30-alpine
+    description: Initial release
+
   - workload: mobile-backend
     image: nginx:1.30-alpine
     description: Initial release

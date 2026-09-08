@@ -22,6 +22,7 @@ import { usePipelineFilter } from '../composables/usePipelineFilter'
 import { usePersistedRef } from '../composables/usePersistedRef'
 import { useToast } from '../composables/useToast'
 import { useUserDisplay } from '../composables/useUserDisplay'
+import { useChangeReload } from '../composables/useChangeReload'
 import { onChange, type ChangeMessage } from '../composables/useChangeSocket'
 import { releasesApi } from '../api/releases'
 import { workloadsApi } from '../api/workloads'
@@ -57,7 +58,11 @@ const { displayName, resolve: resolveUserDisplay } = useUserDisplay()
 const sortBy = usePersistedRef<SortByItem[]>('cdrm.sort.releases', [{ key: 'createdAt', order: 'desc' }])
 const { items, loading, error, reload } = useResourceList(() => releasesApi.list(sortParam(sortBy.value)))
 watch(sortBy, reload, { deep: true })
-const { items: workloads } = useResourceList(workloadsApi.list)
+const { items: workloads, reload: reloadWorkloads } = useResourceList(workloadsApi.list)
+// Only the name/product/pipeline lookups below depend on this list — a renamed
+// workload (or one reassigned to a different product/pipeline) should show up here too,
+// not just on the Workloads tab itself.
+useChangeReload('dev.juergenreiss.cdrm.workload.', reloadWorkloads)
 const { matches: matchesProduct } = useProductFilter()
 const { matches: matchesStage } = useStageFilter()
 const { matches: matchesWorkload } = useWorkloadFilter()

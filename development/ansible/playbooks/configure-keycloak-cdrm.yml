@@ -86,27 +86,27 @@
         firstName: Product
         lastName: Owner - Platform
         attributes:
-          cdrm-products: ["Platform"]
+          cdrm-products: ["platform"]
       - username: cdrm-productowner-platform-early
         role: cdrm-productowner
         firstName: Product
         lastName: Owner - Platform
         attributes:
-          cdrm-products: ["Platform"]
+          cdrm-products: ["platform"]
           cdrm-release-actions: ["promote: frankfurt-development, frankfurt-qa"]
       - username: cdrm-productowner-platform-late
         role: cdrm-productowner
         firstName: Product
         lastName: Owner - Platform
         attributes:
-          cdrm-products: ["Platform"]
+          cdrm-products: ["platform"]
           cdrm-release-actions: ["promote: frankfurt-production"]
       - username: cdrm-productowner-payments
         role: cdrm-productowner
         firstName: Product
         lastName: Owner - Payments
         attributes:
-          cdrm-products: ["Payments"]
+          cdrm-products: ["billing"]
       - username: cdrm-developer-platform-api
         role: cdrm-developer
         firstName: Mr.
@@ -124,13 +124,13 @@
         firstName: The
         lastName: Manager - dev and qa
         attributes:
-          cdrm-products: ["Platform"]
+          cdrm-products: ["platform"]
       - username: cdrm-manager-payments
         role: cdrm-manager
         firstName: The
         lastName: Manager - all stages
         attributes:
-          cdrm-products: ["Payments"]
+          cdrm-products: ["billing"]
 
   tasks:
     - name: Obtain admin access token
