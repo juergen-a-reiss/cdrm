@@ -12,6 +12,40 @@ export type ClusterType = 'K8S' | 'PROXMOX'
 // GitOpsTemplateEngine for exactly what it can reference and must return).
 export type GitOpsNamespaceMode = 'SIMPLE' | 'TEMPLATE'
 
+// Powers the TEMPLATE-mode script editor's "Test" button — script is whatever is
+// currently in the editor's buffer (not what's saved on the cluster); workloadId/stageId
+// stand in for a real deploy's (workload, stage) pair to supply the rest of the context
+// variables (see the backend's GitOpsTemplateContext); repositoryUrl is whatever the
+// form currently resolves for this namespace (its own gitRepo override, or the cluster's
+// default).
+export interface GitOpsTemplateTestRequest {
+  script: string
+  repositoryUrl: string
+  clusterName: string
+  workloadId: string
+  stageId: string
+  releaseBinary: string
+}
+
+export interface GitOpsTemplateTestEdit {
+  gitBranch: string
+  filePath: string
+  yamlKeyPath: string
+  value: string
+  branchExists: boolean
+  fileExists: boolean
+  yamlKeyPathExists: boolean
+}
+
+// success=false means the script itself failed or returned no edits (reason explains
+// why, edits is then empty); success=true means it returned at least one edit, each
+// annotated with whether it would actually apply against the real git repository.
+export interface GitOpsTemplateTestResponse {
+  success: boolean
+  reason: string | null
+  edits: GitOpsTemplateTestEdit[]
+}
+
 export interface K8sNamespaceGitopsConfig {
   namespace: string
   useGitOps: boolean

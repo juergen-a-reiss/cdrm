@@ -24,6 +24,28 @@ object YamlPathEditor {
         }
     }
 
+    // Read-only counterpart of setValue — used by the "Test" template action (see
+    // GitOpsTemplateTestService) to report whether a computed edit's yamlKeyPath would
+    // actually resolve in the target file, without writing anything. A malformed path
+    // (parseSegment) or a missing/wrong-shaped intermediate (navigate) is reported as
+    // "doesn't exist" rather than propagating the exception — this is advisory feedback
+    // for a devops user iterating on a script, not an operation that must succeed.
+    fun pathExists(root: Map<String, Any?>, path: String): Boolean {
+        return try {
+            val segments = path.split(".").map(::parseSegment)
+            var current: Any = root
+            for ((index, segment) in segments.withIndex()) {
+                if (index == segments.lastIndex) {
+                    return existsAt(current, segment)
+                }
+                current = navigate(current, segment)
+            }
+            false
+        } catch (e: IllegalArgumentException) {
+            false
+        }
+    }
+
     private data class Segment(val key: String, val index: Int?)
 
     private fun parseSegment(raw: String): Segment {
@@ -43,6 +65,13 @@ object YamlPathEditor {
             ?: throw IllegalArgumentException("Expected a list at '${segment.key}', found ${value.javaClass.simpleName}")
         return list.getOrNull(segment.index)
             ?: throw IllegalArgumentException("Index ${segment.index} out of bounds at '${segment.key}'")
+    }
+
+    private fun existsAt(current: Any, segment: Segment): Boolean {
+        val map = current as? Map<String, Any?> ?: return false
+        if (segment.index == null) return map.containsKey(segment.key)
+        val list = map[segment.key] as? List<Any?> ?: return false
+        return segment.index in list.indices
     }
 
     @Suppress("UNCHECKED_CAST")

@@ -29,6 +29,21 @@ sealed interface GitCommitResult {
     data object LockBusy : GitCommitResult
 }
 
+// One edit from a template "Test" run (see GitOpsTemplateTestService), annotated with
+// whether it would actually apply — never written, just read against the target repo.
+data class GitOpsEditCheck(
+    val edit: GitOpsEdit,
+    val branchExists: Boolean,
+    val fileExists: Boolean,
+    val yamlKeyPathExists: Boolean,
+)
+
+sealed interface GitOpsEditCheckOutcome {
+    data class Success(val checks: List<GitOpsEditCheck>) : GitOpsEditCheckOutcome
+    data class Failed(val reason: String) : GitOpsEditCheckOutcome
+    data object LockBusy : GitOpsEditCheckOutcome
+}
+
 // Commits a GitOpsTarget's edit(s) into a GitOps repo instead of patching Kubernetes
 // directly (see GitOpsResolver) — ArgoCD (or similar) reconciles the cluster from what
 // this pushes. Looks up how to authenticate with a given target's repositoryUrl in
@@ -118,6 +133,63 @@ class GitCommitClient(
             GitCommitResult.Failed(e.message ?: "git operation failed")
         }
     }
+
+    // Read-only counterpart of commit() — used by the template "Test" UI action to check
+    // whether a script's computed edits would actually apply, without writing or pushing
+    // anything. Shares commit()'s git_lock (the checkout/reset/clean below mutates the
+    // same on-disk clone a concurrent commit() would) and repo lookup, but never adds,
+    // commits, or pushes.
+    fun checkEdits(repositoryUrl: String, edits: List<GitOpsEdit>): GitOpsEditCheckOutcome {
+        if (edits.isEmpty()) return GitOpsEditCheckOutcome.Success(emptyList())
+        return try {
+            lockTransaction.execute {
+                jdbcTemplate.queryForObject("select id from git_lock where id = 1 for update nowait", Int::class.java)
+                doCheckEdits(repositoryUrl, edits)
+            } ?: GitOpsEditCheckOutcome.Failed("git lock transaction returned no result")
+        } catch (e: CannotAcquireLockException) {
+            log.info("GitOps lock busy — another git operation is in progress, will retry ({})", repositoryUrl)
+            GitOpsEditCheckOutcome.LockBusy
+        }
+    }
+
+    private fun doCheckEdits(repositoryUrl: String, edits: List<GitOpsEdit>): GitOpsEditCheckOutcome {
+        val repoConfig = properties.find(repositoryUrl)
+        return try {
+            val dir = ensureClone(repositoryUrl, repoConfig)
+            val results = mutableListOf<GitOpsEditCheck>()
+            for ((branch, branchEdits) in edits.groupBy { it.branch }) {
+                if (!remoteBranchExists(dir, repoConfig, branch)) {
+                    results += branchEdits.map { GitOpsEditCheck(it, branchExists = false, fileExists = false, yamlKeyPathExists = false) }
+                    continue
+                }
+                checkout(dir, branch, repoConfig)
+                for ((filePath, fileEdits) in branchEdits.groupBy { it.filePath }) {
+                    val file = File(dir, filePath)
+                    if (!file.isFile) {
+                        results += fileEdits.map { GitOpsEditCheck(it, branchExists = true, fileExists = false, yamlKeyPathExists = false) }
+                        continue
+                    }
+                    @Suppress("UNCHECKED_CAST")
+                    val root = Yaml().load(file.readText()) as? Map<String, Any?>
+                    results += fileEdits.map {
+                        GitOpsEditCheck(
+                            it,
+                            branchExists = true,
+                            fileExists = true,
+                            yamlKeyPathExists = root != null && YamlPathEditor.pathExists(root, it.yamlKeyPath),
+                        )
+                    }
+                }
+            }
+            GitOpsEditCheckOutcome.Success(results)
+        } catch (e: GitCommitException) {
+            log.error("GitOps template test failed for {}: {}", repositoryUrl, e.message)
+            GitOpsEditCheckOutcome.Failed(e.message ?: "git operation failed")
+        }
+    }
+
+    private fun remoteBranchExists(dir: File, repoConfig: GitOpsRepositoryConfig?, branch: String): Boolean =
+        git(dir, repoConfig, "rev-parse", "--verify", "-q", "refs/remotes/origin/$branch", allowFailure = true).exitCode == 0
 
     private fun ensureClone(repositoryUrl: String, repoConfig: GitOpsRepositoryConfig?): File {
         val dir = File(workDir, sha256(repositoryUrl))

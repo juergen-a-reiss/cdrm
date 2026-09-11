@@ -4,6 +4,7 @@
 package dev.juergenreiss.cdrm.gitops
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -243,5 +244,79 @@ class GitCommitClientTest {
         val result = busyClient.commit(target(edit(value = "new:2.0")), "test commit")
 
         assertEquals(GitCommitResult.LockBusy, result)
+    }
+
+    @Test
+    fun `checkEdits reports an existing branch, file and yaml key path as all true, without writing anything`() {
+        val outcome = client.checkEdits(bareRepoUrl, listOf(edit(value = "new:2.0")))
+
+        val checks = (outcome as GitOpsEditCheckOutcome.Success).checks
+        assertEquals(1, checks.size)
+        assertTrue(checks[0].branchExists)
+        assertTrue(checks[0].fileExists)
+        assertTrue(checks[0].yamlKeyPathExists)
+        assertFalse(cloneAndReadFile("main").contains("new:2.0"))
+    }
+
+    @Test
+    fun `checkEdits reports a nonexistent branch, with file and yaml key path both false`() {
+        val outcome = client.checkEdits(bareRepoUrl, listOf(edit(branch = "no-such-branch", value = "new:2.0")))
+
+        val check = (outcome as GitOpsEditCheckOutcome.Success).checks.single()
+        assertFalse(check.branchExists)
+        assertFalse(check.fileExists)
+        assertFalse(check.yamlKeyPathExists)
+    }
+
+    @Test
+    fun `checkEdits reports an existing branch but a nonexistent file, with yaml key path false`() {
+        val outcome = client.checkEdits(bareRepoUrl, listOf(edit(filePath = "does/not/exist.yaml", value = "new:2.0")))
+
+        val check = (outcome as GitOpsEditCheckOutcome.Success).checks.single()
+        assertTrue(check.branchExists)
+        assertFalse(check.fileExists)
+        assertFalse(check.yamlKeyPathExists)
+    }
+
+    @Test
+    fun `checkEdits reports an existing branch and file but a nonexistent yaml key path`() {
+        val outcome = client.checkEdits(bareRepoUrl, listOf(edit(yamlKeyPath = "spec.nonexistent.image", value = "new:2.0")))
+
+        val check = (outcome as GitOpsEditCheckOutcome.Success).checks.single()
+        assertTrue(check.branchExists)
+        assertTrue(check.fileExists)
+        assertFalse(check.yamlKeyPathExists)
+    }
+
+    @Test
+    fun `checkEdits handles multiple edits across files and branches independently`() {
+        val outcome = client.checkEdits(
+            bareRepoUrl,
+            listOf(
+                edit(branch = "main", filePath = "environments/p-qa-platform/workload.yaml", value = "a:1.0"),
+                edit(branch = "main", filePath = "does/not/exist.yaml", value = "b:1.0"),
+                edit(branch = "release", filePath = "environments/p-qa-platform/other.yaml", value = "c:1.0"),
+            ),
+        )
+
+        val checks = (outcome as GitOpsEditCheckOutcome.Success).checks
+        assertEquals(3, checks.size)
+        assertTrue(checks.all { it.branchExists })
+        assertEquals(2, checks.count { it.fileExists })
+    }
+
+    @Test
+    fun `checkEdits returns LockBusy without touching git when the git_lock row can't be acquired`() {
+        val busyJdbcTemplate = mock(JdbcTemplate::class.java)
+        `when`(busyJdbcTemplate.queryForObject("select id from git_lock where id = 1 for update nowait", Int::class.java))
+            .thenThrow(org.springframework.dao.CannotAcquireLockException("lock not available"))
+        val transactionManager = mock(PlatformTransactionManager::class.java)
+        val transactionStatus = mock(TransactionStatus::class.java)
+        `when`(transactionManager.getTransaction(org.mockito.ArgumentMatchers.any(TransactionDefinition::class.java))).thenReturn(transactionStatus)
+        val busyClient = GitCommitClient(tempDir.resolve("workdir-check-busy").toString(), GitOpsProperties(), busyJdbcTemplate, transactionManager)
+
+        val outcome = busyClient.checkEdits(bareRepoUrl, listOf(edit(value = "new:2.0")))
+
+        assertEquals(GitOpsEditCheckOutcome.LockBusy, outcome)
     }
 }
