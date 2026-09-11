@@ -25,11 +25,22 @@
 # development/argocd/generate-applications.py substitutes host.minikube.internal for
 # ArgoCD's own in-cluster Application manifests, since pods can't resolve "localhost" as
 # the host machine.
+#
+# An entry's mode picks between cdrm's two GitOps config styles (K8sNamespaceGitopsMode):
+# "simple" (the default — a single file_expression/yaml_expression pair, one edit per
+# deploy) or "template" — a JS template_script_file evaluated per deploy (see
+# GitOpsTemplateEngine), returning its own list of {gitBranch, filePath, yamlKeyPath,
+# value} edits, so a single deploy can touch several keys and several files in one
+# commit. paris-prod-website below is the template example; every other GitOps-managed
+# namespace here stays on the simpler mode. template_extra_files bootstraps any file a
+# template touches beyond the workload's own manifest (see push_gitops_manifests()) —
+# GitCommitClient only edits files that already exist in the repo, it never creates one.
 
 clusters:
-  # Only the paris pipeline's namespaces (the "p-" prefixed ones) are GitOps-managed;
-  # frankfurt's "f-" namespaces are not. Production commits to its own "release" branch;
-  # every other paris namespace uses the cluster-wide "main".
+  # Only the paris pipeline's namespaces are GitOps-managed; frankfurt's are not.
+  # paris-prod-website also overrides which repo it commits to (gitops-demo-2, see
+  # application-dev.yaml's cdrm.gitops.repositories) — every other GitOps-managed
+  # namespace here uses the cluster-wide default (gitops-demo).
   - name: minikube
     description: "Local Minicube"
     cluster_type: "K8S"
@@ -63,9 +74,14 @@ clusters:
         git_branch: "paris-qa"
       - namespace: paris-prod-website
         use_git_ops: true
+        mode: template
         file_expression: "environments/{namespace}/{workload}.yaml"
-        yaml_expression: "spec.template.spec.containers[0].image"
         git_branch: "paris-production"
+        git_repo: "http://localhost:3000/cdrm/gitops-demo-2.git"
+        template_script_file: "paris-prod-website-template.js"
+        template_extra_files:
+          release-log.yaml: |
+            lastRelease: none
 
 stages:
   - name: frankfurt-development

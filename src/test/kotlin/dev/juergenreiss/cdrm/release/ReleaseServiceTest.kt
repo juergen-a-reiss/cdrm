@@ -258,7 +258,7 @@ class ReleaseServiceTest {
         val saved = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!)
         given(repository.save(any())).willReturn(saved)
         given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
-        given(deploymentExecutor.attemptDeploy(workload, dev, saved.image)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, dev, product, saved.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
         val result = service.create(
@@ -301,7 +301,7 @@ class ReleaseServiceTest {
 
         val saved = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!).apply { commitId = "abc123" }
         given(repository.save(any())).willReturn(saved)
-        given(deploymentExecutor.attemptDeploy(workload, dev, saved.image)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, dev, product, saved.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
         val result = service.create(
@@ -378,7 +378,7 @@ class ReleaseServiceTest {
         val saved = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!, image = "nginx:30")
         given(repository.save(any())).willReturn(saved)
         given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
-        given(deploymentExecutor.attemptDeploy(workload, dev, "nginx:30")).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, dev, product, "nginx:30")).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
         val result = service.create(ReleaseRequest(image = "nginx:30", description = null, commitId = "no-id", workloadId = workloadId))
@@ -403,7 +403,7 @@ class ReleaseServiceTest {
         val saved = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!, image = artifact)
         given(repository.save(any())).willReturn(saved)
         given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
-        given(deploymentExecutor.attemptDeploy(workload, dev, artifact)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, dev, product, artifact)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
         val result = service.create(ReleaseRequest(image = artifact, description = null, commitId = "no-id", workloadId = workloadId))
@@ -532,7 +532,7 @@ class ReleaseServiceTest {
             .willReturn(inFlight)
         val saved = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!)
         given(repository.save(any())).willReturn(saved)
-        given(deploymentExecutor.attemptDeploy(workload, dev, saved.image)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, dev, product, saved.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
         service.create(
@@ -561,7 +561,7 @@ class ReleaseServiceTest {
         val saved = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!)
         given(repository.save(any())).willReturn(saved)
         given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
-        given(deploymentExecutor.attemptDeploy(workload, dev, saved.image)).willReturn(DeployAttemptResult.Failed("cluster not reachable"))
+        given(deploymentExecutor.attemptDeploy(workload, dev, product, saved.image)).willReturn(DeployAttemptResult.Failed("cluster not reachable"))
         stubHistorySaveEchoesArgument()
 
         val result = service.create(
@@ -639,7 +639,7 @@ class ReleaseServiceTest {
         val userId = UUID.randomUUID()
         given(currentActorResolver.resolve()).willReturn(userId)
         given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
-        given(deploymentExecutor.attemptDeploy(workload, qa, release.image)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, qa, product, release.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
         val result = service.promote(releaseId)
@@ -687,7 +687,7 @@ class ReleaseServiceTest {
         given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
         given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
-        given(deploymentExecutor.attemptDeploy(workload, qa, release.image)).willReturn(DeployAttemptResult.Failed("cluster not reachable"))
+        given(deploymentExecutor.attemptDeploy(workload, qa, product, release.image)).willReturn(DeployAttemptResult.Failed("cluster not reachable"))
         stubHistorySaveEchoesArgument()
 
         val result = service.promote(releaseId)
@@ -840,7 +840,7 @@ class ReleaseServiceTest {
         given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
         given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
-        given(deploymentExecutor.attemptDeploy(workload, qa, release.image)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, qa, product, release.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
         given(releaseHistoryRepository.findFirstByReleaseIdAndStageIdOrderByCreatedAtDesc(releaseId, dev.id!!)).willReturn(
             persistedHistoryEntry(releaseId = releaseId, stageId = dev.id!!, deployedAt = Instant.now(), deploymentFinished = Instant.now())
@@ -910,7 +910,7 @@ class ReleaseServiceTest {
         )
 
         given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
-        given(deploymentExecutor.attemptDeploy(workload, prod, target.image)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, prod, product, target.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
         val result = service.rollback(targetReleaseId)
@@ -979,7 +979,7 @@ class ReleaseServiceTest {
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
         given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
-        given(deploymentExecutor.attemptDeploy(workload, dev, release.image)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, dev, product, release.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
         val result = service.redeploy(releaseId, RedeployRequest(stageId = dev.id!!))
@@ -1031,7 +1031,7 @@ class ReleaseServiceTest {
             persistedHistoryEntry(releaseId = releaseId, image = release.image, stageId = prod.id!!)
         )
         given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
-        given(deploymentExecutor.attemptDeploy(workload, prod, release.image)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, prod, product, release.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
         val result = service.redeploy(releaseId, RedeployRequest(stageId = prod.id!!))
@@ -1067,7 +1067,7 @@ class ReleaseServiceTest {
             releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
         ).willReturn(failedEntry)
         given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
-        given(deploymentExecutor.attemptDeploy(workload, prod, release.image)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, prod, product, release.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
         val result = service.redeploy(releaseId, RedeployRequest(stageId = prod.id!!))
@@ -1315,7 +1315,7 @@ class ReleaseServiceTest {
         stubWorkloadStages(newWorkloadId, listOf(newStage))
         given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(newStage))
         given(stageRepository.findById(newStage.id!!)).willReturn(Optional.of(newStage))
-        given(deploymentExecutor.attemptDeploy(newWorkload, newStage, release.image)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(newWorkload, newStage, product, release.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
 
         val result = service.update(

@@ -4,10 +4,11 @@
 -->
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ApiError } from '../api/http'
 import { clustersApi } from '../api/clusters'
-import type { ClusterResponse, ClusterType, K8sGitopsConfig } from '../api/types'
+import { gitOpsApi } from '../api/gitops'
+import type { ClusterResponse, ClusterType, GitOpsNamespaceMode, K8sGitopsConfig } from '../api/types'
 
 const props = defineProps<{
   modelValue: boolean
@@ -27,11 +28,21 @@ const typeOptions: { title: string; value: ClusterType }[] = [
 interface NamespaceRow {
   namespace: string
   gitOps: boolean
+  mode: GitOpsNamespaceMode
   fileExpression: string
   yamlExpression: string
   // Empty means "use the cluster-wide branch" (gitBranch below).
   gitBranch: string
+  // Empty means "use the cluster-wide repo" (gitRepo below).
+  gitRepo: string
+  // Only used (and required) when mode is 'TEMPLATE'.
+  templateScript: string
 }
+
+const modeOptions: { title: string; value: GitOpsNamespaceMode }[] = [
+  { title: 'Simple (file + YAML key)', value: 'SIMPLE' },
+  { title: 'Advanced (JS template)', value: 'TEMPLATE' },
+]
 
 const name = ref('')
 const description = ref('')
@@ -41,6 +52,27 @@ const namespaceRows = ref<NamespaceRow[]>([])
 const gitOpsEnabled = ref(false)
 const gitRepo = ref('')
 const gitBranch = ref('main')
+// The only git repos cdrm is configured to authenticate with (see GitOpsProperties on
+// the backend) — a plain text field here could reference a repo cdrm has no credentials
+// for at all, so both this and each namespace's own override below are a dropdown over
+// this list rather than free text.
+const repositoryOptions = ref<string[]>([])
+onMounted(async () => {
+  try {
+    repositoryOptions.value = await gitOpsApi.repositories()
+  } catch {
+    // Leave it empty — the selects below just show no options; save() still validates
+    // a value was picked for a GitOps-managed cluster/namespace.
+  }
+})
+
+// Keeps an already-saved value selectable even if it's no longer in
+// repositoryOptions (a repo removed from cdrm.gitops.repositories after a cluster/
+// namespace already referenced it) — otherwise the select would silently show empty
+// for an existing cluster instead of the value it actually still has.
+function selectableOptions(current: string): string[] {
+  return current && !repositoryOptions.value.includes(current) ? [...repositoryOptions.value, current] : repositoryOptions.value
+}
 // Which namespace's GitOps settings are currently shown below the picker — editing one
 // namespace at a time instead of expanding every row inline is what keeps this usable
 // once a cluster has more than a handful of namespaces.
@@ -70,9 +102,12 @@ function parseNamespaceRows(k8sNamespaces: string | null, gitOpsConfig: K8sGitop
       return {
         namespace,
         gitOps: g?.useGitOps ?? false,
+        mode: g?.mode ?? 'SIMPLE',
         fileExpression: g?.fileExpression ?? '',
         yamlExpression: g?.yamlExpression ?? '',
         gitBranch: g?.gitBranch ?? '',
+        gitRepo: g?.gitRepo ?? '',
+        templateScript: g?.templateScript ?? '',
       }
     }),
   )
@@ -108,7 +143,16 @@ watch(clusterType, (type) => {
 })
 
 function addNamespace() {
-  namespaceRows.value.push({ namespace: '', gitOps: false, fileExpression: '', yamlExpression: '', gitBranch: '' })
+  namespaceRows.value.push({
+    namespace: '',
+    gitOps: false,
+    mode: 'SIMPLE',
+    fileExpression: '',
+    yamlExpression: '',
+    gitBranch: '',
+    gitRepo: '',
+    templateScript: '',
+  })
   selectedNamespaceIndex.value = namespaceRows.value.length - 1
 }
 
@@ -134,6 +178,13 @@ async function save() {
     error.value = 'Git branch is required when managed by GitOps'
     return
   }
+  const templateRowMissingScript = namespaceRows.value.find(
+    (row) => gitOpsEnabled.value && row.gitOps && row.mode === 'TEMPLATE' && !row.templateScript.trim(),
+  )
+  if (templateRowMissingScript) {
+    error.value = `Template script is required for namespace '${templateRowMissingScript.namespace || '(unnamed)'}'`
+    return
+  }
   saving.value = true
   error.value = null
   try {
@@ -153,9 +204,12 @@ async function save() {
                 {
                   namespace: row.namespace,
                   useGitOps: true,
+                  mode: row.mode,
                   fileExpression: row.fileExpression.trim() || null,
                   yamlExpression: row.yamlExpression.trim() || null,
                   gitBranch: row.gitBranch.trim() || null,
+                  gitRepo: row.gitRepo.trim() || null,
+                  templateScript: row.templateScript.trim() || null,
                 },
               ]),
           ),
@@ -196,11 +250,13 @@ async function save() {
 
         <template v-if="clusterType === 'K8S'">
           <v-switch v-model="gitOpsEnabled" label="Managed by GitOps" color="primary" density="compact" hide-details class="mt-2" />
-          <v-text-field
+          <v-select
             v-if="gitOpsEnabled"
             v-model="gitRepo"
+            :items="selectableOptions(gitRepo)"
             label="Git repository"
-            placeholder="git@github.com:org/gitops-repo.git"
+            hint="Only repos cdrm is configured to authenticate with (see cdrm.gitops.repositories) show up here."
+            persistent-hint
             required
             class="mt-2"
           />
@@ -254,23 +310,53 @@ async function save() {
               class="mt-2"
             />
             <template v-if="gitOpsEnabled && selectedRow.gitOps">
-              <v-text-field
-                v-model="selectedRow.fileExpression"
-                label="File path"
-                placeholder="environments/{namespace}/{workload}.yaml"
+              <v-btn-toggle v-model="selectedRow.mode" mandatory density="compact" color="primary" variant="outlined" class="mt-2">
+                <v-btn v-for="option in modeOptions" :key="option.value" :value="option.value">{{ option.title }}</v-btn>
+              </v-btn-toggle>
+
+              <template v-if="selectedRow.mode === 'SIMPLE'">
+                <v-text-field
+                  v-model="selectedRow.fileExpression"
+                  label="File path"
+                  placeholder="environments/{namespace}/{workload}.yaml"
+                  class="mt-2"
+                />
+                <v-text-field
+                  v-model="selectedRow.yamlExpression"
+                  label="YAML key path"
+                  placeholder="spec.template.spec.containers[0].image"
+                  class="mt-2"
+                />
+              </template>
+              <template v-else>
+                <v-textarea
+                  v-model="selectedRow.templateScript"
+                  label="Template script (JavaScript)"
+                  placeholder="return [{ gitBranch: 'main', filePath: `environments/${namespace}/${workloadName}.yaml`, yamlKeyPath: 'spec.template.spec.containers[0].image', value: releaseBinary }]"
+                  hint="Available: gitRepoName, clusterName, namespace, productName, stageName, workloadName, releaseBinary, targetStage. Must return an array of {gitBranch, filePath, yamlKeyPath, value} objects — all four required, all strings."
+                  persistent-hint
+                  rows="8"
+                  style="font-family: monospace"
+                  class="mt-2"
+                />
+              </template>
+
+              <v-select
+                v-model="selectedRow.gitRepo"
+                :items="selectableOptions(selectedRow.gitRepo)"
+                label="Repo override"
+                :placeholder="`defaults to '${gitRepo}'`"
+                hint="Leave blank to use the cluster-wide repo above. Applies to both modes above."
+                persistent-hint
+                clearable
                 class="mt-2"
               />
               <v-text-field
-                v-model="selectedRow.yamlExpression"
-                label="YAML key path"
-                placeholder="spec.template.spec.containers[0].image"
-                class="mt-2"
-              />
-              <v-text-field
+                v-if="selectedRow.mode === 'SIMPLE'"
                 v-model="selectedRow.gitBranch"
                 label="Branch override"
                 :placeholder="`defaults to '${gitBranch}'`"
-                hint="Leave blank to use the cluster-wide branch above."
+                hint="Leave blank to use the cluster-wide branch above. Not used in Advanced mode — the template returns its own branch per edit."
                 persistent-hint
                 class="mt-2"
               />

@@ -51,11 +51,15 @@ cdrm:
   security:
     client-id: ${OIDC_CLIENT_ID:cdrm}
   gitops:
-    # Credentials to push GitOps commits (see GitCommitClient) — optional: a repo that
-    # allows anonymous push, or no GitOps-managed namespaces at all, needs neither set.
-    # application-dev.yaml overrides both to the local Gitea demo's credentials.
-    git-username: ${GITOPS_GIT_USERNAME:}
-    git-password: ${GITOPS_GIT_PASSWORD:}
+    # The git repos cdrm is allowed to push GitOps commits to, and how to authenticate
+    # with each (see GitOpsProperties) — empty here on purpose: a repo that allows
+    # anonymous push, or no GitOps-managed namespaces at all, needs no entry. Configured
+    # entirely via env vars in production — Spring's relaxed binding maps indexed names
+    # like CDRM_GITOPS_REPOSITORIES_0_URL / _0_AUTH (NONE/BASIC/SSH_KEY) / _0_USERNAME /
+    # _0_PASSWORD / _0_SSH_PRIVATE_KEY_PATH / _0_SSH_KNOWN_HOSTS_PATH onto
+    # repositories[0]'s fields, _1_* onto repositories[1], and so on.
+    # application-dev.yaml lists the two local Gitea demo repos directly instead.
+    repositories: []
     # Local working directory for GitOps repo clones — the default (OS temp dir) is
     # fine even in production since GitCommitClient re-clones/fetches on every use.
     work-dir: ${GITOPS_WORKDIR:${java.io.tmpdir}/cdrm-gitops}

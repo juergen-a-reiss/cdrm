@@ -71,6 +71,7 @@ class ClusterGitopsConfigIntegrationTest {
                     fileExpression = "environments/{namespace}/{workload}.yaml",
                     yamlExpression = "spec.template.spec.containers[0].image",
                     gitBranch = "release",
+                    gitRepo = "git@github.com:example/gitops-2.git",
                 ),
             ),
         )
@@ -86,11 +87,44 @@ class ClusterGitopsConfigIntegrationTest {
         val ns = reloadedConfig.namespaces["dev-platform"]!!
         assertEquals("dev-platform", ns.namespace)
         assertTrue(ns.useGitOps)
+        assertEquals(GitOpsNamespaceMode.SIMPLE, ns.mode)
         assertEquals("environments/{namespace}/{workload}.yaml", ns.fileExpression)
         assertEquals("spec.template.spec.containers[0].image", ns.yamlExpression)
         assertNull(ns.gitBranch)
+        assertNull(ns.gitRepo)
+        assertNull(ns.templateScript)
         val prodNs = reloadedConfig.namespaces["prod-platform"]!!
         assertEquals("release", prodNs.gitBranch)
+        assertEquals("git@github.com:example/gitops-2.git", prodNs.gitRepo)
+    }
+
+    @Test
+    fun `round-trips a TEMPLATE-mode namespace, including its script, through the jsonb column`() {
+        val script = "return [{gitBranch: 'main', filePath: namespace + '.yaml', yamlKeyPath: 'image', value: releaseBinary}]"
+        val config = K8sGitopsConfig(
+            useGitOps = true,
+            gitRepo = "git@github.com:example/gitops.git",
+            namespaces = mutableMapOf(
+                "dev-platform" to K8sNamespaceGitopsConfig(
+                    namespace = "dev-platform",
+                    useGitOps = true,
+                    mode = GitOpsNamespaceMode.TEMPLATE,
+                    fileExpression = null,
+                    yamlExpression = null,
+                    templateScript = script,
+                ),
+            ),
+        )
+        val saved = repository.saveAndFlush(newCluster(config))
+        repository.flush()
+
+        val reloaded = repository.findById(saved.id!!).orElseThrow()
+
+        val ns = reloaded.k8sGitOpsConfig!!.namespaces["dev-platform"]!!
+        assertEquals(GitOpsNamespaceMode.TEMPLATE, ns.mode)
+        assertEquals(script, ns.templateScript)
+        assertNull(ns.fileExpression)
+        assertNull(ns.yamlExpression)
     }
 
     @Test

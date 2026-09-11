@@ -2,6 +2,8 @@ package dev.juergenreiss.cdrm.release
 
 import dev.juergenreiss.cdrm.notification.ReleaseHistoryNotificationKind
 import dev.juergenreiss.cdrm.notification.ReleaseHistoryRecordedEvent
+import dev.juergenreiss.cdrm.product.Product
+import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.product.ProductStage
 import dev.juergenreiss.cdrm.product.ProductStageRepository
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
@@ -43,6 +45,9 @@ class DeploymentSchedulerJobTest {
     private lateinit var stageRepository: StageRepository
 
     @Mock
+    private lateinit var productRepository: ProductRepository
+
+    @Mock
     private lateinit var productStageRepository: ProductStageRepository
 
     @Mock
@@ -56,8 +61,8 @@ class DeploymentSchedulerJobTest {
     @BeforeEach
     fun setUp() {
         job = DeploymentSchedulerJob(
-            releaseHistoryRepository, releaseRepository, workloadRepository, stageRepository, productStageRepository, deploymentExecutor,
-            eventPublisher,
+            releaseHistoryRepository, releaseRepository, workloadRepository, stageRepository, productRepository, productStageRepository,
+            deploymentExecutor, eventPublisher,
         )
     }
 
@@ -81,6 +86,16 @@ class DeploymentSchedulerJobTest {
         workloadId = workloadId,
         currentStageId = UUID.randomUUID(),
         commitId = "no-id",
+        createdAt = Instant.now(),
+        modifiedAt = Instant.now(),
+        createdBy = UUID.randomUUID(),
+        modifiedBy = UUID.randomUUID(),
+    )
+
+    private fun persistedProduct(id: UUID) = Product(
+        id = id,
+        name = "product-$id",
+        description = null,
         createdAt = Instant.now(),
         modifiedAt = Instant.now(),
         createdBy = UUID.randomUUID(),
@@ -134,12 +149,14 @@ class DeploymentSchedulerJobTest {
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         val workload = persistedWorkload(workloadId, productId)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        val product = persistedProduct(productId)
+        given(productRepository.findById(productId)).willReturn(Optional.of(product))
         val stage = persistedStage(stageId, DeploymentPolicy.SCHEDULED)
         given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
         given(productStageRepository.findByProductIdAndStageId(productId, stageId)).willReturn(
             ProductStage(productId = productId, stageId = stageId, deploymentCron = "0 0 0 * * *")
         )
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, stage, product, pending.image)).willReturn(DeployAttemptResult.Success)
 
         job.processPendingDeployments()
 
@@ -162,6 +179,7 @@ class DeploymentSchedulerJobTest {
         given(releaseHistoryRepository.findPendingForUpdate()).willReturn(listOf(pending))
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(workloadId, productId)))
+        given(productRepository.findById(productId)).willReturn(Optional.of(persistedProduct(productId)))
         given(stageRepository.findById(stageId)).willReturn(Optional.of(persistedStage(stageId, DeploymentPolicy.SCHEDULED)))
         // Cron fires once a year on Jan 1st — the next occurrence is always well in the future.
         given(productStageRepository.findByProductIdAndStageId(productId, stageId)).willReturn(
@@ -186,9 +204,11 @@ class DeploymentSchedulerJobTest {
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         val workload = persistedWorkload(workloadId, productId)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        val product = persistedProduct(productId)
+        given(productRepository.findById(productId)).willReturn(Optional.of(product))
         val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
         given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, stage, product, pending.image)).willReturn(DeployAttemptResult.Success)
 
         job.processPendingDeployments()
 
@@ -212,9 +232,11 @@ class DeploymentSchedulerJobTest {
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         val workload = persistedWorkload(workloadId, productId).apply { kubernetes = true }
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        val product = persistedProduct(productId)
+        given(productRepository.findById(productId)).willReturn(Optional.of(product))
         val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
         given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.Success)
+        given(deploymentExecutor.attemptDeploy(workload, stage, product, pending.image)).willReturn(DeployAttemptResult.Success)
 
         job.processPendingDeployments()
 
@@ -239,9 +261,11 @@ class DeploymentSchedulerJobTest {
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         val workload = persistedWorkload(workloadId, productId)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        val product = persistedProduct(productId)
+        given(productRepository.findById(productId)).willReturn(Optional.of(product))
         val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
         given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.Failed("cluster not reachable"))
+        given(deploymentExecutor.attemptDeploy(workload, stage, product, pending.image)).willReturn(DeployAttemptResult.Failed("cluster not reachable"))
 
         job.processPendingDeployments()
 
@@ -264,9 +288,11 @@ class DeploymentSchedulerJobTest {
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         val workload = persistedWorkload(workloadId, productId)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        val product = persistedProduct(productId)
+        given(productRepository.findById(productId)).willReturn(Optional.of(product))
         val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
         given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.Failed("git push failed"))
+        given(deploymentExecutor.attemptDeploy(workload, stage, product, pending.image)).willReturn(DeployAttemptResult.Failed("git push failed"))
 
         job.processPendingDeployments()
 
@@ -295,9 +321,11 @@ class DeploymentSchedulerJobTest {
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         val workload = persistedWorkload(workloadId, productId)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        val product = persistedProduct(productId)
+        given(productRepository.findById(productId)).willReturn(Optional.of(product))
         val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
         given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.Failed("git push failed"))
+        given(deploymentExecutor.attemptDeploy(workload, stage, product, pending.image)).willReturn(DeployAttemptResult.Failed("git push failed"))
 
         job.processPendingDeployments()
 
@@ -324,9 +352,11 @@ class DeploymentSchedulerJobTest {
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         val workload = persistedWorkload(workloadId, productId)
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(workload))
+        val product = persistedProduct(productId)
+        given(productRepository.findById(productId)).willReturn(Optional.of(product))
         val stage = persistedStage(stageId, DeploymentPolicy.IMMEDIATE)
         given(stageRepository.findById(stageId)).willReturn(Optional.of(stage))
-        given(deploymentExecutor.attemptDeploy(workload, stage, pending.image)).willReturn(DeployAttemptResult.GitLockBusy)
+        given(deploymentExecutor.attemptDeploy(workload, stage, product, pending.image)).willReturn(DeployAttemptResult.GitLockBusy)
 
         job.processPendingDeployments()
 
@@ -369,6 +399,7 @@ class DeploymentSchedulerJobTest {
         given(releaseHistoryRepository.findPendingForUpdate()).willReturn(listOf(pending))
         given(releaseRepository.findById(releaseId)).willReturn(Optional.of(persistedRelease(releaseId, workloadId)))
         given(workloadRepository.findById(workloadId)).willReturn(Optional.of(persistedWorkload(workloadId, productId)))
+        given(productRepository.findById(productId)).willReturn(Optional.of(persistedProduct(productId)))
         given(stageRepository.findById(stageId)).willReturn(Optional.of(persistedStage(stageId, DeploymentPolicy.SCHEDULED)))
         given(productStageRepository.findByProductIdAndStageId(productId, stageId)).willReturn(null)
 

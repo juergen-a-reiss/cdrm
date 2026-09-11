@@ -5,6 +5,7 @@ package dev.juergenreiss.cdrm.release
 
 import dev.juergenreiss.cdrm.notification.ReleaseHistoryNotificationKind
 import dev.juergenreiss.cdrm.notification.ReleaseHistoryRecordedEvent
+import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.product.ProductStageRepository
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.StageRepository
@@ -32,6 +33,7 @@ class DeploymentSchedulerJob(
     private val releaseRepository: ReleaseRepository,
     private val workloadRepository: WorkloadRepository,
     private val stageRepository: StageRepository,
+    private val productRepository: ProductRepository,
     private val productStageRepository: ProductStageRepository,
     private val deploymentExecutor: DeploymentExecutor,
     private val eventPublisher: ApplicationEventPublisher,
@@ -59,10 +61,11 @@ class DeploymentSchedulerJob(
             val release = releaseRepository.findById(entry.releaseId).orElse(null) ?: continue
             val workload = workloadRepository.findById(release.workloadId).orElse(null) ?: continue
             val stage = stageRepository.findById(entry.stageId).orElse(null) ?: continue
+            val product = productRepository.findById(workload.productId).orElse(null) ?: continue
 
             if (!isDue(entry, workload.productId, stage.deploymentPolicy, now)) continue
 
-            when (val result = deploymentExecutor.attemptDeploy(workload, stage, release.image)) {
+            when (val result = deploymentExecutor.attemptDeploy(workload, stage, product, release.image)) {
                 is DeployAttemptResult.Success -> {
                     entry.deployedAt = now
                     entry.deployError = null

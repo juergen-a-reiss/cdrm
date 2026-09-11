@@ -549,13 +549,13 @@ class ReleaseService(
                 pipeline = stage.pipeline,
                 action = action,
                 deployedAt = null,
-                gitOpsManaged = gitOpsResolver.resolve(workload, stage) != null,
+                gitOpsManaged = gitOpsResolver.isManaged(workload, stage),
                 kubernetesManaged = workload.kubernetes,
                 createdBy = userId,
             )
         )
         if (stage.deploymentPolicy == DeploymentPolicy.IMMEDIATE) {
-            when (val result = deploymentExecutor.attemptDeploy(workload, stage, release.image)) {
+            when (val result = deploymentExecutor.attemptDeploy(workload, stage, product, release.image)) {
                 is DeployAttemptResult.Success -> {
                     entry.deployedAt = Instant.now()
                     // Nothing to verify for a non-Kubernetes workload — DeploymentVerificationJob

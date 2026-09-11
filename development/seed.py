@@ -74,10 +74,17 @@ ARGOCD_MANAGED_BY_VALUE = "cdrm-seed"
 ARGOCD_NAMESPACE = "argocd"
 GENERATE_APPLICATIONS_SCRIPT = Path(__file__).parent / "argocd" / "generate-applications.py"
 
-# Matches development/argocd/setup-gitops-repo.sh.
+# Matches development/argocd/setup-gitops-repo.sh — every repo it creates lives on the
+# same local Gitea instance, under the same user, so seed.py's own git operations (unlike
+# cdrm's backend, which supports NONE/BASIC/SSH_KEY per repo via
+# cdrm.gitops.repositories) always authenticate as this one user regardless of which
+# repo (seed/data.yaml's git_repo, cluster-wide or per-namespace) it's talking to.
 GITEA_USER = "cdrm"
 GITEA_PASSWORD = "cdrm"
-GITEA_REPO_URL = f"http://{GITEA_USER}:{GITEA_PASSWORD}@localhost:3000/{GITEA_USER}/gitops-demo.git"
+
+
+def with_gitea_credentials(repo_url: str) -> str:
+    return repo_url.replace("http://", f"http://{GITEA_USER}:{GITEA_PASSWORD}@", 1)
 
 # The cdrm-devops test user start.sh's Ansible playbook creates (see
 # development/README.md's Keycloak section) — used to fetch a token automatically when
@@ -159,14 +166,31 @@ def cluster_namespace_names(cluster: dict) -> list[str]:
     return [entry["namespace"] for entry in (cluster.get("k8s_namespaces") or [])]
 
 
-def build_gitops_config(cluster: dict) -> dict | None:
+def load_template_script(entry: dict, seed_dir: Path) -> str | None:
+    """Reads a namespace entry's template_script_file (relative to the seed data
+    directory, e.g. seed/paris-prod-website-template.js) for mode: template entries."""
+    script_file = entry.get("template_script_file")
+    if not script_file:
+        return None
+    path = seed_dir / script_file
+    if not path.is_file():
+        print(f"Error: template_script_file '{script_file}' not found at {path}", file=sys.stderr)
+        sys.exit(1)
+    return path.read_text()
+
+
+def build_gitops_config(cluster: dict, seed_dir: Path) -> dict | None:
     """cdrm's K8sGitopsConfig for a cluster — one K8sNamespaceGitopsConfig entry per
-    k8s_namespaces entry with use_git_ops: true, carrying that namespace's own
-    file_expression/yaml_expression and (optionally) its own git_branch override. A
-    namespace without use_git_ops (or with it false) is left out of the map entirely, so
-    it keeps deploying via cdrm's direct Kubernetes patch instead of a git commit.
-    gitops.git_branch is the cluster-wide default branch; an entry's own git_branch
-    overrides it for just that namespace (left null here otherwise)."""
+    k8s_namespaces entry with use_git_ops: true, in either mode: "simple" (the default —
+    file_expression/yaml_expression, one edit per deploy) or "template" (template_script_file,
+    a JS script returning its own list of edits — see GitOpsTemplateEngine), plus
+    (optionally) its own git_branch/git_repo override. A namespace without use_git_ops (or
+    with it false) is left out of the map entirely, so it keeps deploying via cdrm's direct
+    Kubernetes patch instead of a git commit. gitops.git_branch/git_repo are the
+    cluster-wide defaults; an entry's own git_branch/git_repo overrides them for just that
+    namespace (left null here otherwise) — every git_repo used, cluster-wide or
+    per-namespace, must match one of the backend's configured cdrm.gitops.repositories
+    entries (see application-dev.yaml)."""
     gitops = cluster.get("gitops")
     if not gitops:
         return None
@@ -174,9 +198,12 @@ def build_gitops_config(cluster: dict) -> dict | None:
         entry["namespace"]: {
             "namespace": entry["namespace"],
             "useGitOps": True,
+            "mode": (entry.get("mode") or "simple").upper(),
             "fileExpression": entry.get("file_expression"),
             "yamlExpression": entry.get("yaml_expression"),
             "gitBranch": entry.get("git_branch"),
+            "gitRepo": entry.get("git_repo"),
+            "templateScript": load_template_script(entry, seed_dir),
         }
         for entry in (cluster.get("k8s_namespaces") or [])
         if entry.get("use_git_ops")
@@ -189,7 +216,7 @@ def build_gitops_config(cluster: dict) -> dict | None:
     }
 
 
-def seed_clusters(api_url: str, token: str, clusters: list[dict]) -> dict[str, str]:
+def seed_clusters(api_url: str, token: str, clusters: list[dict], seed_dir: Path) -> dict[str, str]:
     print("Seeding clusters...")
     print(clusters)
     ids = {}
@@ -201,7 +228,7 @@ def seed_clusters(api_url: str, token: str, clusters: list[dict]) -> dict[str, s
             "clusterType": cluster.get("cluster_type"),
             "url": cluster.get("url"),
             "k8sNamespaces": ",".join(namespace_names) if namespace_names else None,
-            "k8sGitOpsConfig": build_gitops_config(cluster),
+            "k8sGitOpsConfig": build_gitops_config(cluster, seed_dir),
         }
         result = post(api_url, token, "/clusters", body)
         ids[cluster["name"]] = result["id"]
@@ -424,11 +451,11 @@ def bootstrap_kubernetes_objects(clusters: list[dict], stages: list[dict], workl
 
 
 def git_env() -> dict[str, str]:
-    """Every git call here already carries explicit credentials in the repo URL
-    (GITEA_REPO_URL) — if those are ever wrong, the command should just fail with a
-    clear, captured error, not hang (or pop up a GUI askpass prompt, which some desktop
-    git/credential-helper setups do even when the URL has embedded credentials) waiting
-    for interactive input this non-interactive script can never provide."""
+    """Every git call here already carries explicit credentials in the repo URL (see
+    with_gitea_credentials()) — if those are ever wrong, the command should just fail
+    with a clear, captured error, not hang (or pop up a GUI askpass prompt, which some
+    desktop git/credential-helper setups do even when the URL has embedded credentials)
+    waiting for interactive input this non-interactive script can never provide."""
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
     env.pop("GIT_ASKPASS", None)
@@ -458,9 +485,11 @@ def push_gitops_manifests(gitops_namespaces: dict[str, dict], stages: list[dict]
     if not gitops_namespaces:
         return
 
-    # One clone, but files land on whichever branch their own namespace resolves to
-    # (K8sNamespaceGitopsConfig.gitBranch override, else the cluster-wide default).
-    files_by_branch: dict[str, dict[str, str]] = {}
+    # Files grouped by which repo AND branch they land on — a namespace's own
+    # git_repo/git_branch overrides its cluster's default for each independently (see
+    # K8sNamespaceGitopsConfig), so two namespaces sharing a cluster can still land in
+    # different repos.
+    files_by_repo_branch: dict[str, dict[str, dict[str, str]]] = {}
     for workload in workloads:
         if not workload.get("kubernetes"):
             continue
@@ -470,51 +499,71 @@ def push_gitops_manifests(gitops_namespaces: dict[str, dict], stages: list[dict]
             entry = gitops_namespaces.get(namespace)
             if entry is None:
                 continue
-            branch = entry.get("git_branch") or entry["_cluster_gitops"].get("git_branch", "main")
+            cluster_gitops = entry["_cluster_gitops"]
+            repo = entry.get("git_repo") or cluster_gitops["git_repo"]
+            branch = entry.get("git_branch") or cluster_gitops.get("git_branch", "main")
             file_path = entry["file_expression"].replace("{namespace}", namespace).replace("{workload}", workload["name"])
             manifest = workload_manifest(workload, namespace)
-            files_by_branch.setdefault(branch, {})[file_path] = manifest
+            files_by_repo_branch.setdefault(repo, {}).setdefault(branch, {})[file_path] = manifest
 
-    if not files_by_branch:
+    # template_extra_files bootstraps any file a namespace's template script touches
+    # beyond a workload's own manifest (e.g. a shared release log) — GitCommitClient
+    # only edits files that already exist in the repo, it never creates one.
+    for namespace, entry in gitops_namespaces.items():
+        extra_files = entry.get("template_extra_files")
+        if not extra_files:
+            continue
+        cluster_gitops = entry["_cluster_gitops"]
+        repo = entry.get("git_repo") or cluster_gitops["git_repo"]
+        branch = entry.get("git_branch") or cluster_gitops.get("git_branch", "main")
+        for filename, content in extra_files.items():
+            file_path = f"environments/{namespace}/{filename}"
+            files_by_repo_branch.setdefault(repo, {}).setdefault(branch, {})[file_path] = content
+
+    if not files_by_repo_branch:
         return
 
-    print("Pushing GitOps-managed manifests to the demo repo...")
-    with tempfile.TemporaryDirectory() as tmp:
-        clone = subprocess.run(["git", *GIT_NO_CREDENTIAL_HELPER, "clone", GITEA_REPO_URL, tmp], capture_output=True, text=True, env=git_env())
-        if clone.returncode != 0:
-            print(f"Error cloning GitOps repo: {clone.stderr}", file=sys.stderr)
-            print("Has development/argocd/setup-gitops-repo.sh been run?", file=sys.stderr)
-            sys.exit(1)
+    print("Pushing GitOps-managed manifests to the demo repo(s)...")
+    for repo, files_by_branch in files_by_repo_branch.items():
+        with tempfile.TemporaryDirectory() as tmp:
+            clone = subprocess.run(
+                ["git", *GIT_NO_CREDENTIAL_HELPER, "clone", with_gitea_credentials(repo), tmp],
+                capture_output=True, text=True, env=git_env(),
+            )
+            if clone.returncode != 0:
+                print(f"Error cloning GitOps repo '{repo}': {clone.stderr}", file=sys.stderr)
+                print("Has development/argocd/setup-gitops-repo.sh been run?", file=sys.stderr)
+                sys.exit(1)
 
-        # Captured once, before the loop below can switch it to anything else — a
-        # branch this run needs that doesn't exist in the repo yet (e.g. one just
-        # renamed or newly added in seed/data.yaml) gets created fresh off this, not off
-        # whatever branch a previous loop iteration happened to leave checked out
-        # (which would otherwise carry that other branch's files along with it).
-        default_branch = git_run("symbolic-ref", "--short", "HEAD", cwd=tmp).stdout.strip()
+            # Captured once, before the loop below can switch it to anything else — a
+            # branch this run needs that doesn't exist in the repo yet (e.g. one just
+            # renamed or newly added in seed/data.yaml) gets created fresh off this, not
+            # off whatever branch a previous loop iteration happened to leave checked
+            # out (which would otherwise carry that other branch's files along with it).
+            default_branch = git_run("symbolic-ref", "--short", "HEAD", cwd=tmp).stdout.strip()
 
-        for branch, files in files_by_branch.items():
-            checkout = git_run("checkout", branch, cwd=tmp)
-            if checkout.returncode != 0:
-                checkout = git_run("checkout", "-b", branch, default_branch, cwd=tmp)
+            for branch, files in files_by_branch.items():
+                checkout = git_run("checkout", branch, cwd=tmp)
                 if checkout.returncode != 0:
-                    print(f"Error creating branch '{branch}' off '{default_branch}': {checkout.stderr}", file=sys.stderr)
+                    checkout = git_run("checkout", "-b", branch, default_branch, cwd=tmp)
+                    if checkout.returncode != 0:
+                        print(f"Error creating branch '{branch}' off '{default_branch}' in '{repo}': {checkout.stderr}", file=sys.stderr)
+                        sys.exit(1)
+                    print(f"  created new branch '{branch}' off '{default_branch}' in '{repo}'")
+                for file_path, content in files.items():
+                    full_path = Path(tmp) / file_path
+                    full_path.parent.mkdir(parents=True, exist_ok=True)
+                    full_path.write_text(content)
+                    print(f"  {file_path} ({repo}#{branch})")
+                git_run("add", "-A", cwd=tmp)
+                commit = git_run("commit", "-m", "cdrm seed: bootstrap workload manifests", cwd=tmp)
+                if commit.returncode != 0 and "nothing to commit" not in commit.stdout:
+                    print(f"Error committing to '{repo}#{branch}': {commit.stderr}", file=sys.stderr)
                     sys.exit(1)
-                print(f"  created new branch '{branch}' off '{default_branch}'")
-            for file_path, content in files.items():
-                full_path = Path(tmp) / file_path
-                full_path.parent.mkdir(parents=True, exist_ok=True)
-                full_path.write_text(content)
-                print(f"  {file_path} ({branch})")
-            git_run("add", "-A", cwd=tmp)
-            commit = git_run("commit", "-m", "cdrm seed: bootstrap workload manifests", cwd=tmp)
-            if commit.returncode != 0 and "nothing to commit" not in commit.stdout:
-                print(f"Error committing to branch '{branch}': {commit.stderr}", file=sys.stderr)
-                sys.exit(1)
-            push = git_run("push", "origin", branch, cwd=tmp)
-            if push.returncode != 0:
-                print(f"Error pushing branch '{branch}': {push.stderr}", file=sys.stderr)
-                sys.exit(1)
+                push = git_run("push", "origin", branch, cwd=tmp)
+                if push.returncode != 0:
+                    print(f"Error pushing '{repo}#{branch}': {push.stderr}", file=sys.stderr)
+                    sys.exit(1)
 
 
 def apply_argocd_applications(clusters: list[dict]) -> None:
@@ -627,41 +676,64 @@ def gitops_branches(clusters: list[dict]) -> set[str]:
     return branches
 
 
+def gitops_repos(clusters: list[dict]) -> set[str]:
+    """Every repo push_gitops_manifests() could have written to: each GitOps cluster's
+    own default (gitops.git_repo) plus every namespace's override (git_repo)."""
+    repos: set[str] = set()
+    for cluster in clusters:
+        gitops = cluster.get("gitops")
+        if not gitops:
+            continue
+        repos.add(gitops["git_repo"])
+        for entry in cluster.get("k8s_namespaces") or []:
+            if entry.get("use_git_ops") and entry.get("git_repo"):
+                repos.add(entry["git_repo"])
+    return repos
+
+
 def reset_gitops_repo(clusters: list[dict]) -> None:
-    """Removes environments/ from every branch push_gitops_manifests() could have
-    written to, so a stale namespace/workload from a previous seed.py run (e.g. one
-    since renamed or removed in data.yaml) doesn't linger in the repo — and doesn't keep
-    getting synced by whatever ArgoCD Application still points at it. Best-effort:
-    silently does nothing if the repo isn't reachable (setup-gitops-repo.sh never run)."""
+    """Removes environments/ from every (repo, branch) combination push_gitops_manifests()
+    could have written to, so a stale namespace/workload from a previous seed.py run
+    (e.g. one since renamed or removed in data.yaml) doesn't linger in a repo — and
+    doesn't keep getting synced by whatever ArgoCD Application still points at it.
+    Tries every branch against every repo rather than tracking exactly which repo got
+    which branch — harmless (and simpler) since a branch that never existed on a given
+    repo is already handled gracefully below. Best-effort per repo: silently skips one
+    that isn't reachable (setup-gitops-repo.sh never run for it)."""
     branches = gitops_branches(clusters)
-    if not branches:
+    repos = gitops_repos(clusters)
+    if not branches or not repos:
         return
 
-    print("Resetting the GitOps demo repo...")
-    with tempfile.TemporaryDirectory() as tmp:
-        clone = subprocess.run(["git", *GIT_NO_CREDENTIAL_HELPER, "clone", GITEA_REPO_URL, tmp], capture_output=True, text=True, env=git_env())
-        if clone.returncode != 0:
-            print("  skipping (repo not reachable — has development/argocd/setup-gitops-repo.sh been run?)")
-            return
+    print("Resetting the GitOps demo repo(s)...")
+    for repo in sorted(repos):
+        with tempfile.TemporaryDirectory() as tmp:
+            clone = subprocess.run(
+                ["git", *GIT_NO_CREDENTIAL_HELPER, "clone", with_gitea_credentials(repo), tmp],
+                capture_output=True, text=True, env=git_env(),
+            )
+            if clone.returncode != 0:
+                print(f"  {repo}: skipping (not reachable — has development/argocd/setup-gitops-repo.sh been run?)")
+                continue
 
-        for branch in sorted(branches):
-            checkout = git_run("checkout", branch, cwd=tmp)
-            if checkout.returncode != 0:
-                print(f"  {branch}: branch does not exist, skipping")
-                continue
-            if not (Path(tmp) / "environments").is_dir():
-                print(f"  {branch}: nothing to remove")
-                continue
-            git_run("rm", "-r", "-q", "environments", cwd=tmp)
-            commit = git_run("commit", "-m", "cdrm reset: remove seeded workload manifests", cwd=tmp)
-            if commit.returncode != 0 and "nothing to commit" not in commit.stdout:
-                print(f"Error committing removal on branch '{branch}': {commit.stderr}", file=sys.stderr)
-                sys.exit(1)
-            push = git_run("push", "origin", branch, cwd=tmp)
-            if push.returncode != 0:
-                print(f"Error pushing branch '{branch}': {push.stderr}", file=sys.stderr)
-                sys.exit(1)
-            print(f"  {branch}: removed environments/")
+            for branch in sorted(branches):
+                checkout = git_run("checkout", branch, cwd=tmp)
+                if checkout.returncode != 0:
+                    print(f"  {repo}#{branch}: branch does not exist, skipping")
+                    continue
+                if not (Path(tmp) / "environments").is_dir():
+                    print(f"  {repo}#{branch}: nothing to remove")
+                    continue
+                git_run("rm", "-r", "-q", "environments", cwd=tmp)
+                commit = git_run("commit", "-m", "cdrm reset: remove seeded workload manifests", cwd=tmp)
+                if commit.returncode != 0 and "nothing to commit" not in commit.stdout:
+                    print(f"Error committing removal on '{repo}#{branch}': {commit.stderr}", file=sys.stderr)
+                    sys.exit(1)
+                push = git_run("push", "origin", branch, cwd=tmp)
+                if push.returncode != 0:
+                    print(f"Error pushing '{repo}#{branch}': {push.stderr}", file=sys.stderr)
+                    sys.exit(1)
+                print(f"  {repo}#{branch}: removed environments/")
 
 
 def main() -> None:
@@ -687,7 +759,7 @@ def main() -> None:
     if not args.token:
         args.token = fetch_token(args.keycloak_url)
 
-    cluster_ids = seed_clusters(args.api_url, args.token, data["clusters"])
+    cluster_ids = seed_clusters(args.api_url, args.token, data["clusters"], args.data.parent)
     stage_ids = seed_stages(args.api_url, args.token, data["stages"], cluster_ids)
     product_ids = seed_products(args.api_url, args.token, data["products"], stage_ids)
     workload_ids = seed_workloads(args.api_url, args.token, data["workloads"], product_ids)

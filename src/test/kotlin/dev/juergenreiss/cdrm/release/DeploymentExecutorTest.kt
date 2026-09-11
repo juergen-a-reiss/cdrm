@@ -2,18 +2,19 @@ package dev.juergenreiss.cdrm.release
 
 import dev.juergenreiss.cdrm.gitops.GitCommitClient
 import dev.juergenreiss.cdrm.gitops.GitCommitResult
+import dev.juergenreiss.cdrm.gitops.GitOpsEdit
+import dev.juergenreiss.cdrm.gitops.GitOpsResolution
 import dev.juergenreiss.cdrm.gitops.GitOpsResolver
 import dev.juergenreiss.cdrm.gitops.GitOpsTarget
 import dev.juergenreiss.cdrm.kubernetes.KubernetesDeploymentClient
 import dev.juergenreiss.cdrm.kubernetes.KubernetesDeploymentException
+import dev.juergenreiss.cdrm.product.Product
 import dev.juergenreiss.cdrm.stage.DeploymentPolicy
 import dev.juergenreiss.cdrm.stage.Stage
 import dev.juergenreiss.cdrm.workload.KubernetesKind
 import dev.juergenreiss.cdrm.workload.Workload
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -83,9 +84,19 @@ class DeploymentExecutorTest {
         modifiedBy = UUID.randomUUID(),
     )
 
+    private fun product() = Product(
+        id = UUID.randomUUID(),
+        name = "product",
+        description = null,
+        createdAt = Instant.now(),
+        modifiedAt = Instant.now(),
+        createdBy = UUID.randomUUID(),
+        modifiedBy = UUID.randomUUID(),
+    )
+
     @Test
     fun `returns Success without calling the client for a non-kubernetes workload`() {
-        val result = executor.attemptDeploy(workload(kubernetes = false), stage(), "image:1.0")
+        val result = executor.attemptDeploy(workload(kubernetes = false), stage(), product(), "image:1.0")
 
         assertEquals(DeployAttemptResult.Success, result)
         verifyNoInteractions(kubernetesDeploymentClient)
@@ -93,7 +104,12 @@ class DeploymentExecutorTest {
 
     @Test
     fun `returns Failed and increments the failure counter when the stage has no kubernetes context configured`() {
-        val result = executor.attemptDeploy(workload(kubernetes = true), stage(kubernetesContext = null), "image:1.0")
+        val workload = workload(kubernetes = true)
+        val stage = stage(kubernetesContext = null)
+        val product = product()
+        given(gitOpsResolver.resolve(workload, stage, product, "image:1.0")).willReturn(GitOpsResolution.NotManaged)
+
+        val result = executor.attemptDeploy(workload, stage, product, "image:1.0")
 
         assertTrue(result is DeployAttemptResult.Failed)
         verifyNoInteractions(kubernetesDeploymentClient)
@@ -104,8 +120,10 @@ class DeploymentExecutorTest {
     fun `returns Success and patches the image on success`() {
         val stage = stage(kubernetesContext = "my-context")
         val workload = workload(kubernetes = true)
+        val product = product()
+        given(gitOpsResolver.resolve(workload, stage, product, "image:1.0")).willReturn(GitOpsResolution.NotManaged)
 
-        val result = executor.attemptDeploy(workload, stage, "image:1.0")
+        val result = executor.attemptDeploy(workload, stage, product, "image:1.0")
 
         assertEquals(DeployAttemptResult.Success, result)
         verify(kubernetesDeploymentClient).patchImage("my-context", "platform", KubernetesKind.DEPLOYMENT, "workload", "image:1.0")
@@ -115,8 +133,10 @@ class DeploymentExecutorTest {
     fun `prepends the stage's namespace prefix when deploying`() {
         val stage = stage(kubernetesContext = "minikube", namespacePrefix = "dev-")
         val workload = workload(kubernetes = true)
+        val product = product()
+        given(gitOpsResolver.resolve(workload, stage, product, "image:1.0")).willReturn(GitOpsResolution.NotManaged)
 
-        val result = executor.attemptDeploy(workload, stage, "image:1.0")
+        val result = executor.attemptDeploy(workload, stage, product, "image:1.0")
 
         assertEquals(DeployAttemptResult.Success, result)
         verify(kubernetesDeploymentClient).patchImage("minikube", "dev-platform", KubernetesKind.DEPLOYMENT, "workload", "image:1.0")
@@ -126,10 +146,12 @@ class DeploymentExecutorTest {
     fun `returns 'cluster not reachable' and increments the failure counter when the client throws`() {
         val stage = stage(kubernetesContext = "my-context")
         val workload = workload(kubernetes = true)
+        val product = product()
+        given(gitOpsResolver.resolve(workload, stage, product, "image:1.0")).willReturn(GitOpsResolution.NotManaged)
         willThrow(KubernetesDeploymentException("boom")).given(kubernetesDeploymentClient)
             .patchImage("my-context", "platform", KubernetesKind.DEPLOYMENT, "workload", "image:1.0")
 
-        val result = executor.attemptDeploy(workload, stage, "image:1.0")
+        val result = executor.attemptDeploy(workload, stage, product, "image:1.0")
 
         assertEquals(DeployAttemptResult.Failed("cluster not reachable"), result)
         assertEquals(1.0, meterRegistry.get("cdrm.deploy.failed").counter().count())
@@ -139,22 +161,27 @@ class DeploymentExecutorTest {
     fun `commits via GitCommitClient instead of patching when the namespace is GitOps-managed`() {
         val stage = stage(kubernetesContext = "my-context")
         val workload = workload(kubernetes = true)
+        val product = product()
         val target = GitOpsTarget(
             repositoryUrl = "http://localhost:3000/cdrm/gitops-demo.git",
-            branch = "main",
-            filePath = "environments/platform/workload.yaml",
-            yamlKeyPath = "spec.template.spec.containers[0].image",
+            edits = listOf(
+                GitOpsEdit(
+                    branch = "main",
+                    filePath = "environments/platform/workload.yaml",
+                    yamlKeyPath = "spec.template.spec.containers[0].image",
+                    value = "image:1.0",
+                )
+            ),
         )
-        given(gitOpsResolver.resolve(workload, stage)).willReturn(target)
+        given(gitOpsResolver.resolve(workload, stage, product, "image:1.0")).willReturn(GitOpsResolution.Resolved(target))
         // No ArgumentMatchers here on purpose: eq()/any() return null as a Mockito-stack
         // placeholder, which NPEs against a Kotlin-declared non-null parameter (unlike a
         // Java-inherited platform type) — plain equals-based stubbing with the exact
         // expected commit message sidesteps that entirely.
-        given(
-            gitCommitClient.commitImageChange(target, "image:1.0", "cdrm: deploy image:1.0 for workload 'workload' at stage 'Prod'")
-        ).willReturn(GitCommitResult.Success)
+        given(gitCommitClient.commit(target, "cdrm: deploy image:1.0 for workload 'workload' at stage 'Prod'"))
+            .willReturn(GitCommitResult.Success)
 
-        val result = executor.attemptDeploy(workload, stage, "image:1.0")
+        val result = executor.attemptDeploy(workload, stage, product, "image:1.0")
 
         assertEquals(DeployAttemptResult.Success, result)
         verifyNoInteractions(kubernetesDeploymentClient)
@@ -164,21 +191,42 @@ class DeploymentExecutorTest {
     fun `returns the GitCommitClient's error and increments the failure counter when the commit fails`() {
         val stage = stage(kubernetesContext = "my-context")
         val workload = workload(kubernetes = true)
+        val product = product()
         val target = GitOpsTarget(
             repositoryUrl = "http://localhost:3000/cdrm/gitops-demo.git",
-            branch = "main",
-            filePath = "environments/platform/workload.yaml",
-            yamlKeyPath = "spec.template.spec.containers[0].image",
+            edits = listOf(
+                GitOpsEdit(
+                    branch = "main",
+                    filePath = "environments/platform/workload.yaml",
+                    yamlKeyPath = "spec.template.spec.containers[0].image",
+                    value = "image:1.0",
+                )
+            ),
         )
-        given(gitOpsResolver.resolve(workload, stage)).willReturn(target)
-        given(
-            gitCommitClient.commitImageChange(target, "image:1.0", "cdrm: deploy image:1.0 for workload 'workload' at stage 'Prod'")
-        ).willReturn(GitCommitResult.Failed("git push failed: connection refused"))
+        given(gitOpsResolver.resolve(workload, stage, product, "image:1.0")).willReturn(GitOpsResolution.Resolved(target))
+        given(gitCommitClient.commit(target, "cdrm: deploy image:1.0 for workload 'workload' at stage 'Prod'"))
+            .willReturn(GitCommitResult.Failed("git push failed: connection refused"))
 
-        val result = executor.attemptDeploy(workload, stage, "image:1.0")
+        val result = executor.attemptDeploy(workload, stage, product, "image:1.0")
 
         assertEquals(DeployAttemptResult.Failed("git push failed: connection refused"), result)
         assertEquals(1.0, meterRegistry.get("cdrm.deploy.failed").counter().count())
         verifyNoInteractions(kubernetesDeploymentClient)
+    }
+
+    @Test
+    fun `returns Failed without touching Kubernetes when the template script fails`() {
+        val stage = stage(kubernetesContext = "my-context")
+        val workload = workload(kubernetes = true)
+        val product = product()
+        given(gitOpsResolver.resolve(workload, stage, product, "image:1.0"))
+            .willReturn(GitOpsResolution.TemplateFailed("template script failed: boom"))
+
+        val result = executor.attemptDeploy(workload, stage, product, "image:1.0")
+
+        assertEquals(DeployAttemptResult.Failed("template script failed: boom"), result)
+        assertEquals(1.0, meterRegistry.get("cdrm.deploy.failed").counter().count())
+        verifyNoInteractions(kubernetesDeploymentClient)
+        verifyNoInteractions(gitCommitClient)
     }
 }

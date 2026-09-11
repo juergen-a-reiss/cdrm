@@ -41,6 +41,9 @@ class SecurityConfig(
                 authorize(HttpMethod.PUT, "/clusters/**", hasRole("cdrm-devops"))
                 authorize(HttpMethod.DELETE, "/clusters/**", hasRole("cdrm-devops"))
                 authorize("/clusters/**", authenticated)
+                // Just the configured repo URLs (no credentials) for the cluster-editing
+                // screen's dropdown — same access level as writing a cluster itself.
+                authorize("/gitops/**", hasRole("cdrm-devops"))
                 authorize(HttpMethod.POST, "/stages/**", hasRole("cdrm-devops"))
                 authorize(HttpMethod.PUT, "/stages/**", hasRole("cdrm-devops"))
                 authorize(HttpMethod.DELETE, "/stages/**", hasRole("cdrm-devops"))

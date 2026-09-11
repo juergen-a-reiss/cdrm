@@ -78,7 +78,7 @@ def applications(data: dict) -> list[dict]:
         gitops = cluster.get("gitops")
         if not gitops:
             continue
-        repo_url = gitops["git_repo"].replace("localhost", IN_CLUSTER_HOST)
+        default_repo_url = gitops["git_repo"]
         default_branch = gitops.get("git_branch", "main")
         for entry in cluster.get("k8s_namespaces") or []:
             if not entry.get("use_git_ops"):
@@ -92,6 +92,7 @@ def applications(data: dict) -> list[dict]:
                 print(f"Error: namespace '{namespace}' has use_git_ops: true but no file_expression", file=sys.stderr)
                 sys.exit(1)
             path = file_expression.replace("{namespace}", namespace).rsplit("/", 1)[0]
+            repo_url = (entry.get("git_repo") or default_repo_url).replace("localhost", IN_CLUSTER_HOST)
             apps.append(
                 {
                     "apiVersion": "argoproj.io/v1alpha1",

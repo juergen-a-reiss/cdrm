@@ -37,6 +37,12 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-websocket")
     implementation("tools.jackson.module:jackson-module-kotlin")
     implementation("tools.jackson.core:jackson-databind")
+    // Sandboxed JS execution for a namespace's optional GitOps "template" mode (see
+    // GitOpsTemplateEngine) — js-community is the Apache-licensed, plain-OpenJDK-
+    // compatible packaging (no GraalVM-branded JDK needed; runs interpreted, which is
+    // plenty fast for a script invoked once per deploy).
+    implementation("org.graalvm.polyglot:polyglot:24.1.2")
+    implementation("org.graalvm.polyglot:js-community:24.1.2")
     developmentOnly("org.springframework.boot:spring-boot-devtools")
     runtimeOnly("io.micrometer:micrometer-registry-prometheus")
     runtimeOnly("org.postgresql:postgresql")

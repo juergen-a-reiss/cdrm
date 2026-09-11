@@ -83,12 +83,38 @@ is explicitly supported by the application. In the Cluster View:
 - There are configuration options per cluster, overwrites per namespace and per workload, even per workload and stage to
   locate the place in the git repo where the image is configured in your environment. The configuration syntax is a
   template code that returns a list of files with instructions what to change.
+- A namespace can also override which git *repository* it commits to, not just the file/branch within it — the cluster's
+  own `gitRepo` is just the default every namespace falls back to when it doesn't set its own.
 
 A **deploy** in a GitOps scenario is a commit into the git repository. The deployment in such a case is always
 "immediate". The GitOps tool's config must be used to deploy to k8s either immediate or scheduled.
 
+#### GitOps Repository Configuration
+
+cdrm doesn't commit to an arbitrary URL a cluster/namespace happens to have typed in — every repo it's willing to push
+to, and how to authenticate with it, is configured server-side as a list (`cdrm.gitops.repositories`), entirely via env
+vars in production (Spring's relaxed binding maps indexed names like `CDRM_GITOPS_REPOSITORIES_0_URL`,
+`_0_AUTH`, `_0_USERNAME`, `_0_PASSWORD`, `_0_SSH_PRIVATE_KEY_PATH`, `_0_SSH_KNOWN_HOSTS_PATH` onto `repositories[0]`'s
+fields, `_1_*` onto `repositories[1]`, and so on). A cluster's or namespace's `gitRepo` is just a URL string that must
+match one of these entries by exact string equality — the Cluster View's "Git repository" field is a dropdown sourced
+from this list (`GET /gitops/repositories`, devops-only, URLs only — never credentials) rather than free text, so it's
+not possible to reference a repo cdrm has no credentials for.
+
+Each entry's `auth` is one of:
+
+- `NONE` — no credential at all; fine for a repo that allows anonymous push (e.g. the local dev Gitea demo).
+- `BASIC` — HTTP Basic auth (`username`/`password`, or a token as the username) — for an `http(s)://` repo.
+- `SSH_KEY` — a private key file already present on disk (`sshPrivateKeyPath`, mounted by whoever deploys cdrm — never
+  the key material itself in an env var) — for a `git@host:path`/`ssh://` repo, the way a real, non-dev environment is
+  expected to authenticate. `sshKnownHostsPath` optionally points at a specific `known_hosts` file; left unset, ssh's
+  own default host-key checking applies.
+
+A `gitRepo` that doesn't match any configured entry (e.g. one removed from the list after a cluster already referenced
+it) falls back to an anonymous push rather than failing the deploy outright.
+
 See `development/argocd/README.md` for a runnable local demo of this — ArgoCD installed into minikube, managing the
-seed data's paris pipeline namespaces from a local Gitea repo.
+seed data's paris pipeline namespaces from two local Gitea repos (one is the cluster-wide default; `paris-prod-website`
+overrides to the other, demonstrating the per-namespace repo override end to end).
 
 #### Proxmox Clusters
 
@@ -311,8 +337,9 @@ cluster sync or mid-rollout can be superseded this way — one that already fini
   * Lane 2: only a real Kubernetes rollout failure sets it — we wait for the cluster to come up again, or for the workload to appear.
 
 All GitOps commits across the whole application (and every instance of it, if scaled out)
-are strictly serialized through a single database-backed lock, so two deploys can never
-interleave commits to the same clone. A request that can't acquire it right away fails
+are strictly serialized through a single database-backed lock — one lock for every
+configured repository, not one per repo, so a push to one repo also blocks a concurrent
+push to a completely unrelated one. A request that can't acquire it right away fails
 fast with HTTP 429 rather than queuing — retrying shortly after succeeds once whichever
 other git operation was in progress has completed.
 

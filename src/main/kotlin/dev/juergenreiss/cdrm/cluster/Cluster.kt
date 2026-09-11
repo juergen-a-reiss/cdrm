@@ -60,6 +60,11 @@ class Cluster(
 
 open class K8sGitopsConfig(
     var useGitOps: Boolean = true,
+    // The default repo to commit to — must match (by exact URL) one of the repos
+    // configured via cdrm.gitops.repositories (see GitOpsRepositoryConfig), which is
+    // where credentials for it actually live; this column only ever stores the URL
+    // itself. A namespace can override this via its own gitRepo (see
+    // K8sNamespaceGitopsConfig) when null there, this one applies.
     var gitRepo: String,
     // The default branch to commit to. A namespace can override this via its own
     // gitBranch (see K8sNamespaceGitopsConfig) when null there, this one applies.
@@ -67,14 +72,32 @@ open class K8sGitopsConfig(
     var namespaces: MutableMap<String, K8sNamespaceGitopsConfig> = mutableMapOf(),
 )
 
+// SIMPLE: fileExpression/yamlExpression, substituted with {namespace}/{workload} and
+// set to the new release's image — exactly one file, one YAML key, one value per
+// deploy. TEMPLATE: templateScript computes an arbitrary list of (branch, file, YAML
+// key, value) edits instead — see GitOpsTemplateEngine for what it can reference and
+// must return.
+enum class GitOpsNamespaceMode { SIMPLE, TEMPLATE }
+
 open class K8sNamespaceGitopsConfig(
     var namespace: String,
     var useGitOps: Boolean = true,
+    var mode: GitOpsNamespaceMode = GitOpsNamespaceMode.SIMPLE,
     var fileExpression: String?,
     var yamlExpression: String?,
     // Null means "use the cluster-wide K8sGitopsConfig.gitBranch" — only set this to
-    // commit this namespace's changes to a different branch.
+    // commit this namespace's changes to a different branch. Only consulted for
+    // mode=SIMPLE — a TEMPLATE script returns its own branch per edit instead.
     var gitBranch: String? = null,
+    // Null means "use the cluster-wide K8sGitopsConfig.gitRepo" — only set this to
+    // commit this namespace's changes to a different repo entirely (see
+    // GitOpsResolver). Same "must match a configured repository" rule as the
+    // cluster-wide one above. Applies to both modes — the template still commits to
+    // this one resolved repo, it just can't also switch repos per edit.
+    var gitRepo: String? = null,
+    // GraalVM JS source, wrapped and invoked as a function body (so a plain top-level
+    // `return [...]` works) — only used, and only required, when mode=TEMPLATE.
+    var templateScript: String? = null,
 )
 
 // Serializes K8sGitopsConfig to/from the jsonb k8s_gitops_config column. Does the

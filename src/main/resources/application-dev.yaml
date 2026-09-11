@@ -11,10 +11,20 @@ spring:
 
 cdrm:
   gitops:
-    # Matches development/argocd/setup-gitops-repo.sh's local Gitea demo user — needed to
-    # push GitOps commits (see GitCommitClient); anonymous read alone isn't enough.
-    git-username: cdrm
-    git-password: cdrm
+    # Matches development/argocd/setup-gitops-repo.sh, which creates both of these
+    # repos under the same local Gitea demo user — needed to push GitOps commits (see
+    # GitCommitClient); anonymous read alone isn't enough. Two repos so the local setup
+    # actually exercises a namespace overriding gitRepo away from its cluster's default
+    # (see seed/data.yaml) rather than only ever having one repo to fall back to.
+    repositories:
+      - url: http://localhost:3000/cdrm/gitops-demo.git
+        auth: BASIC
+        username: cdrm
+        password: cdrm
+      - url: http://localhost:3000/cdrm/gitops-demo-2.git
+        auth: BASIC
+        username: cdrm
+        password: cdrm
   notifications:
     kafka:
       # A single general-purpose topic, not release-specific — it carries every

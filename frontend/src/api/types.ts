@@ -5,13 +5,29 @@ export type DeploymentPolicy = 'IMMEDIATE' | 'SCHEDULED'
 
 export type ClusterType = 'K8S' | 'PROXMOX'
 
+// SIMPLE: fileExpression/yamlExpression, substituted with {namespace}/{workload} and set
+// to the new release's image — exactly one file, one YAML key, one value per deploy.
+// TEMPLATE: templateScript computes an arbitrary list of (branch, file, YAML key, value)
+// edits instead, in a sandboxed GraalVM JS engine (see the backend's
+// GitOpsTemplateEngine for exactly what it can reference and must return).
+export type GitOpsNamespaceMode = 'SIMPLE' | 'TEMPLATE'
+
 export interface K8sNamespaceGitopsConfig {
   namespace: string
   useGitOps: boolean
+  mode: GitOpsNamespaceMode
   fileExpression: string | null
   yamlExpression: string | null
-  // Null means "use the cluster-wide K8sGitopsConfig.gitBranch".
+  // Null means "use the cluster-wide K8sGitopsConfig.gitBranch". Only consulted for
+  // mode=SIMPLE — a TEMPLATE script returns its own branch per edit instead.
   gitBranch: string | null
+  // Null means "use the cluster-wide K8sGitopsConfig.gitRepo". Must be one of
+  // gitOpsApi.repositories()'s urls, same as the cluster-wide one. Applies to both
+  // modes — the template still commits to this one resolved repo.
+  gitRepo: string | null
+  // GraalVM JS source, wrapped and invoked as a function body (so a plain top-level
+  // `return [...]` works) — only used, and only required, when mode=TEMPLATE.
+  templateScript: string | null
 }
 
 export interface K8sGitopsConfig {

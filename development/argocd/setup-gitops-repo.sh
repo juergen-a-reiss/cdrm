@@ -1,8 +1,11 @@
 #!/bin/bash
 # Bootstraps the local Gitea instance (see docker-compose.yaml's gitea service) for the
-# GitOps demo: a "cdrm" user, a "gitops-demo" repo, and a "release" branch (the paris
-# pipeline's production namespaces, per seed/data.yaml, commit to "release" instead of
-# the default "main" — see K8sGitopsConfig.gitBranch / K8sNamespaceGitopsConfig.gitBranch).
+# GitOps demo: a "cdrm" user and two repos, "gitops-demo" and "gitops-demo-2" — two so
+# the local setup actually exercises a namespace overriding gitRepo away from its
+# cluster's default (see seed/data.yaml, application-dev.yaml's
+# cdrm.gitops.repositories). seed.py itself creates whatever branches a namespace's own
+# git_branch (or the cluster-wide default) needs, the first time something is pushed to
+# them — nothing to pre-create here.
 #
 # Idempotent — safe to re-run. Requires gitea to be running (./up.sh, with gitea in
 # development/components).
@@ -13,7 +16,7 @@ GITEA_CONTAINER="gitea"
 GITEA_URL="http://localhost:3000"
 GITEA_USER="cdrm"
 GITEA_PASSWORD="cdrm"
-REPO_NAME="gitops-demo"
+REPO_NAMES=("gitops-demo" "gitops-demo-2")
 
 if ! docker ps --filter "name=^${GITEA_CONTAINER}$" --filter "status=running" --format "{{.Names}}" | grep -q "^${GITEA_CONTAINER}$"; then
   echo "Gitea is not running. Start it first with: ./up.sh (with 'gitea' listed in development/components)"
@@ -38,22 +41,16 @@ else
     --admin --must-change-password=false
 fi
 
-if curl -sf -u "${GITEA_USER}:${GITEA_PASSWORD}" "${GITEA_URL}/api/v1/repos/${GITEA_USER}/${REPO_NAME}" > /dev/null 2>&1; then
-  echo "Repo '${GITEA_USER}/${REPO_NAME}' already exists."
-else
-  echo "Creating repo '${GITEA_USER}/${REPO_NAME}'..."
-  curl -sf -u "${GITEA_USER}:${GITEA_PASSWORD}" -X POST "${GITEA_URL}/api/v1/user/repos" \
-    -H "Content-Type: application/json" \
-    -d "{\"name\": \"${REPO_NAME}\", \"private\": false, \"auto_init\": true, \"default_branch\": \"main\"}" > /dev/null
-fi
+for REPO_NAME in "${REPO_NAMES[@]}"; do
+  if curl -sf -u "${GITEA_USER}:${GITEA_PASSWORD}" "${GITEA_URL}/api/v1/repos/${GITEA_USER}/${REPO_NAME}" > /dev/null 2>&1; then
+    echo "Repo '${GITEA_USER}/${REPO_NAME}' already exists."
+  else
+    echo "Creating repo '${GITEA_USER}/${REPO_NAME}'..."
+    curl -sf -u "${GITEA_USER}:${GITEA_PASSWORD}" -X POST "${GITEA_URL}/api/v1/user/repos" \
+      -H "Content-Type: application/json" \
+      -d "{\"name\": \"${REPO_NAME}\", \"private\": false, \"auto_init\": true, \"default_branch\": \"main\"}" > /dev/null
+  fi
+  echo "  Repo URL: ${GITEA_URL}/${GITEA_USER}/${REPO_NAME}.git"
+done
 
-if curl -sf -u "${GITEA_USER}:${GITEA_PASSWORD}" "${GITEA_URL}/api/v1/repos/${GITEA_USER}/${REPO_NAME}/branches/release" > /dev/null 2>&1; then
-  echo "Branch 'release' already exists."
-else
-  echo "Creating branch 'release' (from 'main')..."
-  curl -sf -u "${GITEA_USER}:${GITEA_PASSWORD}" -X POST "${GITEA_URL}/api/v1/repos/${GITEA_USER}/${REPO_NAME}/branches" \
-    -H "Content-Type: application/json" \
-    -d '{"new_branch_name": "release", "old_branch_name": "main"}' > /dev/null
-fi
-
-echo "Done. Repo URL: ${GITEA_URL}/${GITEA_USER}/${REPO_NAME}.git (user ${GITEA_USER} / password ${GITEA_PASSWORD})"
+echo "Done. User ${GITEA_USER} / password ${GITEA_PASSWORD}"
