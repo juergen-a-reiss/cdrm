@@ -42,7 +42,7 @@ const { matches } = useProductFilter()
 const activeTab = usePersistedRef('cdrm.productsView.tab', 'table')
 
 function openDetail(product: ProductResponse) {
-  router.push({ name: 'product-detail', params: { id: product.id } })
+  router.push({ name: 'product-detail', params: { name: product.name } })
 }
 
 function groupName(product: ProductResponse): string | null {

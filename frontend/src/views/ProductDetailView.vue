@@ -11,7 +11,7 @@ import type { ProductDeploymentOverviewResponse } from '../api/types'
 import LiveStatusCell from '../components/LiveStatusCell.vue'
 import { formatDeploymentStatus, gitOpsStatusDisplay, kubernetesStatusDisplay } from '../utils/releaseHistoryStatus'
 
-const props = defineProps<{ id: string }>()
+const props = defineProps<{ name: string }>()
 
 const overview = ref<ProductDeploymentOverviewResponse | null>(null)
 const loading = ref(false)
@@ -25,7 +25,16 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    overview.value = await productsApi.deploymentOverview(props.id)
+    // The route only carries the product's name (see router/index.ts), so resolve it to
+    // an id before hitting the UUID-keyed deployment-overview endpoint.
+    const products = await productsApi.list()
+    const product = products.find((p) => p.name === props.name)
+    if (!product) {
+      error.value = `Product "${props.name}" not found`
+      overview.value = null
+      return
+    }
+    overview.value = await productsApi.deploymentOverview(product.id)
     if (!overview.value.stages.some((stage) => stage.stageId === activeStageId.value)) {
       activeStageId.value = overview.value.stages[0]?.stageId ?? null
     }
@@ -36,7 +45,7 @@ async function load() {
   }
 }
 
-watch(() => props.id, load, { immediate: true })
+watch(() => props.name, load, { immediate: true })
 
 const headers = [
   { title: 'Workload', key: 'workloadName' },

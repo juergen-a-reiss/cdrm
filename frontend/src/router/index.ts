@@ -18,7 +18,7 @@ export const router = createRouter({
     { path: '/stages', name: 'stages', component: () => import('../views/StagesView.vue') },
     { path: '/products', name: 'products', component: () => import('../views/ProductsView.vue') },
     {
-      path: '/products/:id',
+      path: '/products/:name',
       name: 'product-detail',
       component: () => import('../views/ProductDetailView.vue'),
       props: true,
