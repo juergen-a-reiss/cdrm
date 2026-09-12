@@ -5,6 +5,7 @@
 
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
 import ResourceTable from '../components/ResourceTable.vue'
 import type { SortByItem } from '../components/ResourceTable.vue'
@@ -65,10 +66,33 @@ const { items: workloads, reload: reloadWorkloads } = useResourceList(workloadsA
 useChangeReload('dev.juergenreiss.cdrm.workload.', reloadWorkloads)
 const { matches: matchesProduct } = useProductFilter()
 const { matches: matchesStage } = useStageFilter()
-const { matches: matchesWorkload } = useWorkloadFilter()
+const { matches: matchesWorkload, selectedWorkloadIds } = useWorkloadFilter()
 const { matches: matchesPipeline } = usePipelineFilter()
 const { showToast } = useToast()
 const headOnly = ref(false)
+const pendingOnly = ref(false)
+
+// Lets another view (e.g. the workload detail view's "View releases"/"View pending
+// releases" links) jump straight to a pre-filtered list instead of the user re-applying
+// the same filters by hand — ?workloadId=<id>&headOnly=true[&pendingOnly=true]. A
+// watcher rather than onMounted-only, since this route has no dynamic segment:
+// navigating here again while already on the page reuses the same component instance
+// instead of remounting it — so headOnly/pendingOnly must be set from the query every
+// time, not just turned on, or a later link that omits one would leave it stuck from an
+// earlier visit. Keyed off workloadId's presence: that's the signal this navigation came
+// from one of those links at all, as opposed to a plain in-app link to /releases (which
+// should leave whatever filters were already showing alone).
+const route = useRoute()
+watch(
+  () => route.query,
+  (query) => {
+    if (typeof query.workloadId !== 'string') return
+    selectedWorkloadIds.value = [query.workloadId]
+    headOnly.value = query.headOnly === 'true'
+    pendingOnly.value = query.pendingOnly === 'true'
+  },
+  { immediate: true },
+)
 
 const workloadNameById = computed(() => new Map(workloads.value.map((workload) => [workload.id, workload.name])))
 const workloadProductIdById = computed(() => new Map(workloads.value.map((workload) => [workload.id, workload.productId])))
@@ -84,7 +108,8 @@ const rows = computed<ReleaseRow[]>(() =>
         matchesStage(release.currentStage.id) &&
         matchesWorkload(release.workloadId) &&
         (pipeline === undefined || matchesPipeline(pipeline)) &&
-        (!headOnly.value || !release.canRollback)
+        (!headOnly.value || !release.canRollback) &&
+        (!pendingOnly.value || !release.deploymentFinished)
       )
     })
     .map((release) => ({
@@ -295,6 +320,14 @@ async function onRedeployed() {
       v-model="headOnly"
       label="Head releases only"
       :color="headOnly ? 'primary' : undefined"
+      density="compact"
+      hide-details
+      class="flex-grow-0"
+    />
+    <v-checkbox
+      v-model="pendingOnly"
+      label="Pending only"
+      :color="pendingOnly ? 'primary' : undefined"
       density="compact"
       hide-details
       class="flex-grow-0"

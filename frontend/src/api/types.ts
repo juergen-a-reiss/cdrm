@@ -395,6 +395,35 @@ export interface ProductStageOverview {
   workloads: ProductStageWorkloadOverview[]
 }
 
+// One row of the workload detail view's table — a stage this workload is linked to. See
+// ProductStageWorkloadOverview for the per-product analogue.
+export interface WorkloadStageDeploymentOverview {
+  stageId: string
+  stageName: string
+  order: number
+  // stage.namespacePrefix + the workload's own kubernetesNameSpace — null if the
+  // workload has no Kubernetes namespace configured.
+  namespace: string | null
+  // The latest deploy/rollback/redeploy recorded at THIS stage — null if this workload
+  // has never been deployed here.
+  latestRelease: ReleaseHistoryOverviewEntry | null
+}
+
+// Backs the workload detail view — see workloadsApi.deploymentOverview. Only ever loaded
+// from Postgres, never touches Kubernetes (see LiveStatusResponse below for that,
+// fetched separately and lazily per row).
+export interface WorkloadDeploymentOverviewResponse {
+  workloadId: string
+  workloadName: string
+  pipeline: string
+  productId: string
+  productName: string
+  // Whether a live-status read is even meaningful for this workload — a plain
+  // (non-Kubernetes) workload has no cluster resource to read one from.
+  kubernetes: boolean
+  stages: WorkloadStageDeploymentOverview[]
+}
+
 export interface ProductDeploymentOverviewResponse {
   productId: string
   productName: string

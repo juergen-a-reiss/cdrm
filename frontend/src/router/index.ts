@@ -24,6 +24,12 @@ export const router = createRouter({
       props: true,
     },
     { path: '/workloads', name: 'workloads', component: () => import('../views/WorkloadsView.vue') },
+    {
+      path: '/workloads/:name',
+      name: 'workload-detail',
+      component: () => import('../views/WorkloadDetailView.vue'),
+      props: true,
+    },
     { path: '/releases', name: 'releases', component: () => import('../views/ReleasesView.vue') },
     {
       path: '/release-history',

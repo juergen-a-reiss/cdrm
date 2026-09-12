@@ -2,7 +2,7 @@
 // Licensed under the terms in the LICENSE file at the repository root.
 
 import { http, toQueryString } from './http'
-import type { LiveStatusResponse, WorkloadRequest, WorkloadResponse } from './types'
+import type { LiveStatusResponse, WorkloadDeploymentOverviewResponse, WorkloadRequest, WorkloadResponse } from './types'
 
 export const workloadsApi = {
   list: (sort?: string) => http.get<WorkloadResponse[]>(`/workloads${sort ? `?sort=${encodeURIComponent(sort)}` : ''}`),
@@ -10,6 +10,8 @@ export const workloadsApi = {
   create: (request: WorkloadRequest) => http.post<WorkloadResponse>('/workloads', request),
   update: (id: string, request: WorkloadRequest) => http.put<WorkloadResponse>(`/workloads/${id}`, request),
   remove: (id: string) => http.delete(`/workloads/${id}`),
+  // Backs the workload detail view — never touches Kubernetes, see liveStatus for that.
+  deploymentOverview: (id: string) => http.get<WorkloadDeploymentOverviewResponse>(`/workloads/${id}/deployment-overview`),
   // On-demand live read from the cluster — slower than everything else in this module,
   // see the product detail view's LiveStatusCell for how it's fetched lazily.
   liveStatus: (id: string, stageId: string) =>

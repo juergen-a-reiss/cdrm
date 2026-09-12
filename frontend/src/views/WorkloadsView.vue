@@ -5,6 +5,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
 import ResourceTable from '../components/ResourceTable.vue'
 import type { SortByItem } from '../components/ResourceTable.vue'
@@ -39,6 +40,7 @@ interface WorkloadRow {
   raw: WorkloadResponse
 }
 
+const router = useRouter()
 const sortBy = usePersistedRef<SortByItem[]>('cdrm.sort.workloads', [{ key: 'name', order: 'asc' }])
 const { items, loading, error, reload } = useResourceList(() => workloadsApi.list(sortParam(sortBy.value)))
 watch(sortBy, reload, { deep: true })
@@ -98,6 +100,10 @@ function openEdit(workload: WorkloadResponse) {
   dialogOpen.value = true
 }
 
+function openDetail(workload: WorkloadRow) {
+  router.push({ name: 'workload-detail', params: { name: workload.name } })
+}
+
 async function removeWorkload(workload: WorkloadResponse) {
   if (!confirm(`Delete workload "${workload.name}"?`)) {
     return
@@ -118,7 +124,14 @@ async function removeWorkload(workload: WorkloadResponse) {
     <PipelineFilterBar />
     <ProductFilterBar />
   </div>
-  <ResourceTable :headers="headers" :items="rows" :loading="loading" :error="error" v-model:sort-by="sortBy">
+  <ResourceTable
+    :headers="headers"
+    :items="rows"
+    :loading="loading"
+    :error="error"
+    v-model:sort-by="sortBy"
+    @click:row="openDetail"
+  >
     <template v-if="canManageWorkloads" #top>
       <v-toolbar flat>
         <v-toolbar-title>Workloads</v-toolbar-title>
@@ -127,8 +140,8 @@ async function removeWorkload(workload: WorkloadResponse) {
       </v-toolbar>
     </template>
     <template v-if="canManageWorkloads" #item.actions="{ item }">
-      <v-icon icon="mdi-pencil" size="small" class="mr-2" @click="openEdit(item.raw)" />
-      <v-icon icon="mdi-delete" size="small" @click="removeWorkload(item.raw)" />
+      <v-icon icon="mdi-pencil" size="small" class="mr-2" @click.stop="openEdit(item.raw)" />
+      <v-icon icon="mdi-delete" size="small" @click.stop="removeWorkload(item.raw)" />
     </template>
   </ResourceTable>
 

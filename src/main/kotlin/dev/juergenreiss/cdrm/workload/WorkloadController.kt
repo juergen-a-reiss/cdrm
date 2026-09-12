@@ -10,12 +10,18 @@ import java.util.*
 
 @RestController
 @RequestMapping("/workloads")
-class WorkloadController(private val service: WorkloadService) {
+class WorkloadController(
+    private val service: WorkloadService,
+    private val overviewService: WorkloadDeploymentOverviewService,
+) {
     @GetMapping
     fun findAll(@RequestParam(required = false) sort: String?): List<WorkloadResponse> = service.findAll(sort)
 
     @GetMapping("/{id}")
     fun findById(@PathVariable id: UUID): WorkloadResponse = service.findById(id)
+
+    @GetMapping("/{id}/deployment-overview")
+    fun deploymentOverview(@PathVariable id: UUID): WorkloadDeploymentOverviewResponse = overviewService.get(id)
 
     @GetMapping("/{id}/live-status")
     fun liveStatus(@PathVariable id: UUID, @RequestParam stageId: UUID): LiveStatusResponse = service.liveStatus(id, stageId)
