@@ -10,6 +10,7 @@ import dev.juergenreiss.cdrm.gitops.GitOpsResolver
 import dev.juergenreiss.cdrm.kubernetes.KubernetesDeploymentClient
 import dev.juergenreiss.cdrm.product.Product
 import dev.juergenreiss.cdrm.stage.Stage
+import dev.juergenreiss.cdrm.stage.effectiveNamespaceFor
 import dev.juergenreiss.cdrm.workload.Workload
 import io.micrometer.core.instrument.MeterRegistry
 import org.slf4j.LoggerFactory
@@ -76,7 +77,7 @@ class DeploymentExecutor(
             incrementDeployFailedMetric(workload, stage)
             return DeployAttemptResult.Failed("Kubernetes configuration missing for this stage")
         }
-        val effectiveNamespace = (stage.namespacePrefix ?: "") + namespace
+        val effectiveNamespace = stage.effectiveNamespaceFor(workload)!!
 
         return try {
             kubernetesDeploymentClient.patchImage(context, effectiveNamespace, kind, workload.name, image)

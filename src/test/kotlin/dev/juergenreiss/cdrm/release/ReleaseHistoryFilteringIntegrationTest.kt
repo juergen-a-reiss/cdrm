@@ -221,4 +221,45 @@ class ReleaseHistoryFilteringIntegrationTest {
         assertEquals(2L, summary.single { it.key == "Platform" }.count)
         assertEquals(1L, summary.single { it.key == "Payments" }.count)
     }
+
+    // Batching building block for the product deployment overview screen — DISTINCT ON
+    // is Postgres-specific (see findLatestAtCurrentStageByReleaseIdIn's own comment),
+    // the one place worth verifying against a real database rather than a mock.
+    @Test
+    fun `findLatestByWorkloadIdInAndStageIdIn picks the latest row per (workloadId, stageId) pair`() {
+        val workloadId = UUID.randomUUID()
+        val older = Instant.now().minus(2, ChronoUnit.DAYS)
+        val newer = Instant.now()
+        releaseHistoryRepository.save(history("Platform", "api", devStage, ReleaseHistoryAction.PROMOTED, older, workloadId = workloadId))
+        releaseHistoryRepository.save(history("Platform", "api", devStage, ReleaseHistoryAction.ROLLED_BACK, newer, workloadId = workloadId))
+
+        val result = releaseHistoryRepository.findLatestByWorkloadIdInAndStageIdIn(listOf(workloadId), listOf(devStage.id!!))
+
+        val entry = result.single { it.workloadId == workloadId && it.stageId == devStage.id }
+        assertEquals(ReleaseHistoryAction.ROLLED_BACK, entry.action)
+    }
+
+    @Test
+    fun `findLatestByWorkloadIdInAndStageIdIn excludes rows outside the requested id sets`() {
+        val insideWorkload = UUID.randomUUID()
+        val outsideWorkload = UUID.randomUUID()
+        releaseHistoryRepository.save(history("Platform", "api", devStage, ReleaseHistoryAction.PROMOTED, Instant.now(), workloadId = insideWorkload))
+        releaseHistoryRepository.save(history("Platform", "other", prodStage, ReleaseHistoryAction.PROMOTED, Instant.now(), workloadId = outsideWorkload))
+
+        val result = releaseHistoryRepository.findLatestByWorkloadIdInAndStageIdIn(listOf(insideWorkload), listOf(devStage.id!!))
+
+        assertEquals(1, result.size)
+        assertEquals(insideWorkload, result.single().workloadId)
+    }
+
+    @Test
+    fun `findLatestByWorkloadIdInAndStageIdIn returns a pair with exactly one row as-is`() {
+        val workloadId = UUID.randomUUID()
+        releaseHistoryRepository.save(history("Platform", "api", devStage, ReleaseHistoryAction.CREATED, Instant.now(), workloadId = workloadId))
+
+        val result = releaseHistoryRepository.findLatestByWorkloadIdInAndStageIdIn(listOf(workloadId), listOf(devStage.id!!))
+
+        assertEquals(1, result.size)
+        assertEquals(ReleaseHistoryAction.CREATED, result.single().action)
+    }
 }

@@ -2,6 +2,9 @@ package dev.juergenreiss.cdrm.workload
 
 import dev.juergenreiss.cdrm.audit.AuditEntityType
 import dev.juergenreiss.cdrm.audit.AuditRecorder
+import dev.juergenreiss.cdrm.kubernetes.KubernetesDeploymentClient
+import dev.juergenreiss.cdrm.kubernetes.LivePodStatus
+import dev.juergenreiss.cdrm.kubernetes.LiveWorkloadStatus
 import dev.juergenreiss.cdrm.testsupport.singleInvocationArgs
 import dev.juergenreiss.cdrm.product.Product
 import dev.juergenreiss.cdrm.product.ProductRepository
@@ -22,6 +25,7 @@ import org.mockito.Mock
 import org.mockito.Mockito.lenient
 import org.mockito.Mockito.never
 import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import org.mockito.junit.jupiter.MockitoExtension
 import org.springframework.dao.DataIntegrityViolationException
 import dev.juergenreiss.cdrm.security.CurrentActorResolver
@@ -55,24 +59,38 @@ class WorkloadServiceTest {
     @Mock
     private lateinit var auditRecorder: AuditRecorder
 
+    @Mock
+    private lateinit var kubernetesDeploymentClient: KubernetesDeploymentClient
+
     private lateinit var service: WorkloadService
 
     @BeforeEach
     fun setUp() {
-        service = WorkloadService(repository, stageRepository, workloadStageRepository, productRepository, currentActorResolver, rebac, auditRecorder)
+        service = WorkloadService(
+            repository, stageRepository, workloadStageRepository, productRepository,
+            currentActorResolver, rebac, auditRecorder, kubernetesDeploymentClient,
+        )
         // Default: any productId passed to create/update resolves to a plain, non-group
         // product — lenient so tests that never reach validateProduct() (e.g. the
         // validateTarget checks, which run first) aren't flagged for an unused stub.
         lenient().`when`(productRepository.findById(any())).thenReturn(Optional.of(persistedProduct()))
     }
 
-    private fun persistedStage(order: Int, name: String = "Stage-$order", pipeline: String = "pipeline") = Stage(
+    private fun persistedStage(
+        order: Int,
+        name: String = "Stage-$order",
+        pipeline: String = "pipeline",
+        kubernetesContext: String? = null,
+        namespacePrefix: String? = null,
+    ) = Stage(
         id = UUID.randomUUID(),
         pipeline = pipeline,
         name = name,
         description = null,
         order = order,
         deploymentPolicy = DeploymentPolicy.IMMEDIATE,
+        kubernetesContext = kubernetesContext,
+        namespacePrefix = namespacePrefix,
         createdAt = Instant.now(),
         modifiedAt = Instant.now(),
         createdBy = UUID.randomUUID(),
@@ -83,12 +101,17 @@ class WorkloadServiceTest {
         id: UUID = UUID.randomUUID(),
         name: String = "Release",
         productId: UUID = UUID.randomUUID(),
+        kubernetes: Boolean = false,
+        kubernetesKind: KubernetesKind? = null,
+        kubernetesNameSpace: String? = null,
     ) = Workload(
         id = id,
         name = name,
         productId = productId,
         description = null,
-        kubernetes = false,
+        kubernetes = kubernetes,
+        kubernetesKind = kubernetesKind,
+        kubernetesNameSpace = kubernetesNameSpace,
         pipeline = "pipeline",
         createdAt = Instant.now(),
         modifiedAt = Instant.now(),
@@ -623,5 +646,109 @@ class WorkloadServiceTest {
 
         assertEquals(400, exception.statusCode.value())
         verify(repository, never()).save(any())
+    }
+
+    @Test
+    fun `liveStatus is NOT_APPLICABLE for a non-Kubernetes workload`() {
+        val workload = persistedWorkload(kubernetes = false)
+        given(repository.findById(workload.id!!)).willReturn(Optional.of(workload))
+        given(rebac.canSeeWorkload(anyString(), anyString())).willReturn(true)
+        val stage = persistedStage(order = 1, kubernetesContext = "ctx", namespacePrefix = null)
+        given(stageRepository.findById(stage.id!!)).willReturn(Optional.of(stage))
+
+        val result = service.liveStatus(workload.id!!, stage.id!!)
+
+        assertEquals(LiveStatusState.NOT_APPLICABLE, result.state)
+        verifyNoInteractions(kubernetesDeploymentClient)
+    }
+
+    @Test
+    fun `liveStatus is NOT_APPLICABLE when the stage has no kubernetesContext configured`() {
+        val workload = persistedWorkload(kubernetes = true, kubernetesKind = KubernetesKind.DEPLOYMENT, kubernetesNameSpace = "platform")
+        given(repository.findById(workload.id!!)).willReturn(Optional.of(workload))
+        given(rebac.canSeeWorkload(anyString(), anyString())).willReturn(true)
+        val stage = persistedStage(order = 1, kubernetesContext = null)
+        given(stageRepository.findById(stage.id!!)).willReturn(Optional.of(stage))
+
+        val result = service.liveStatus(workload.id!!, stage.id!!)
+
+        assertEquals(LiveStatusState.NOT_APPLICABLE, result.state)
+        verifyNoInteractions(kubernetesDeploymentClient)
+    }
+
+    @Test
+    fun `liveStatus is NOT_FOUND when the client reports no such resource`() {
+        val workload = persistedWorkload(kubernetes = true, kubernetesKind = KubernetesKind.DEPLOYMENT, kubernetesNameSpace = "platform")
+        given(repository.findById(workload.id!!)).willReturn(Optional.of(workload))
+        given(rebac.canSeeWorkload(anyString(), anyString())).willReturn(true)
+        val stage = persistedStage(order = 1, kubernetesContext = "ctx", namespacePrefix = "p-")
+        given(stageRepository.findById(stage.id!!)).willReturn(Optional.of(stage))
+        given(kubernetesDeploymentClient.getLiveStatus("ctx", "p-platform", KubernetesKind.DEPLOYMENT, workload.name)).willReturn(null)
+
+        val result = service.liveStatus(workload.id!!, stage.id!!)
+
+        assertEquals(LiveStatusState.NOT_FOUND, result.state)
+    }
+
+    @Test
+    fun `liveStatus is UNREACHABLE when the client throws`() {
+        val workload = persistedWorkload(kubernetes = true, kubernetesKind = KubernetesKind.DEPLOYMENT, kubernetesNameSpace = "platform")
+        given(repository.findById(workload.id!!)).willReturn(Optional.of(workload))
+        given(rebac.canSeeWorkload(anyString(), anyString())).willReturn(true)
+        val stage = persistedStage(order = 1, kubernetesContext = "ctx", namespacePrefix = "p-")
+        given(stageRepository.findById(stage.id!!)).willReturn(Optional.of(stage))
+        given(kubernetesDeploymentClient.getLiveStatus("ctx", "p-platform", KubernetesKind.DEPLOYMENT, workload.name))
+            .willThrow(RuntimeException("cluster unreachable"))
+
+        val result = service.liveStatus(workload.id!!, stage.id!!)
+
+        assertEquals(LiveStatusState.UNREACHABLE, result.state)
+        assertEquals("cluster unreachable", result.error)
+    }
+
+    @Test
+    fun `liveStatus is OK and computes readyReplicas, totalRestartCount and uptimeSince from the oldest running pod`() {
+        val workload = persistedWorkload(kubernetes = true, kubernetesKind = KubernetesKind.DEPLOYMENT, kubernetesNameSpace = "platform")
+        given(repository.findById(workload.id!!)).willReturn(Optional.of(workload))
+        given(rebac.canSeeWorkload(anyString(), anyString())).willReturn(true)
+        val stage = persistedStage(order = 1, kubernetesContext = "ctx", namespacePrefix = "p-")
+        given(stageRepository.findById(stage.id!!)).willReturn(Optional.of(stage))
+        val older = Instant.parse("2024-01-01T00:00:00Z")
+        val newer = Instant.parse("2024-01-05T00:00:00Z")
+        given(kubernetesDeploymentClient.getLiveStatus("ctx", "p-platform", KubernetesKind.DEPLOYMENT, workload.name)).willReturn(
+            LiveWorkloadStatus(
+                desiredReplicas = 2,
+                declaredImage = "new:2.0",
+                resourceCreatedAt = Instant.parse("2023-01-01T00:00:00Z"),
+                pods = listOf(
+                    LivePodStatus("pod-1", "new:2.0", ready = true, restartCount = 0, runningSince = newer),
+                    LivePodStatus("pod-2", "new:2.0", ready = false, restartCount = 2, runningSince = older),
+                ),
+            )
+        )
+
+        val result = service.liveStatus(workload.id!!, stage.id!!)
+
+        assertEquals(LiveStatusState.OK, result.state)
+        assertEquals(2, result.desiredReplicas)
+        assertEquals(1, result.readyReplicas)
+        assertEquals(2, result.totalRestartCount)
+        assertEquals("new:2.0", result.image)
+        assertEquals(older, result.uptimeSince)
+        assertEquals(2, result.pods.size)
+    }
+
+    @Test
+    fun `liveStatus hides a workload the caller can't see, without touching Kubernetes`() {
+        val workload = persistedWorkload(kubernetes = true, kubernetesKind = KubernetesKind.DEPLOYMENT, kubernetesNameSpace = "platform")
+        given(repository.findById(workload.id!!)).willReturn(Optional.of(workload))
+        given(rebac.canSeeWorkload(anyString(), anyString())).willReturn(false)
+
+        val exception = assertThrows(ResponseStatusException::class.java) {
+            service.liveStatus(workload.id!!, UUID.randomUUID())
+        }
+
+        assertEquals(404, exception.statusCode.value())
+        verifyNoInteractions(kubernetesDeploymentClient)
     }
 }

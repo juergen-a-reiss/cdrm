@@ -362,6 +362,78 @@ export interface ReleaseHistoryOverviewEntry {
   createdBy: string
 }
 
+// The product detail view's per-stage tabs — see productsApi.deploymentOverview. Only
+// ever loaded from Postgres, never touches Kubernetes (see LiveStatusResponse below for
+// that, fetched separately and lazily per row).
+export interface ProductStageWorkloadOverview {
+  workloadId: string
+  workloadName: string
+  kubernetes: boolean
+  kubernetesKind: KubernetesKind | null
+  // stage.namespacePrefix + the workload's own kubernetesNameSpace — null if the
+  // workload has no Kubernetes namespace configured.
+  namespace: string | null
+  // The latest deploy/rollback/redeploy recorded at THIS stage — null if this workload
+  // has never been deployed here.
+  latestRelease: ReleaseHistoryOverviewEntry | null
+}
+
+export interface ProductStageOverview {
+  stageId: string
+  stageName: string
+  pipeline: string
+  order: number
+  // The kubeconfig context name — "the cluster" for this stage (not derived from the
+  // stage_cluster admin-UI link, which the backend never consults for a live/deploy
+  // read either).
+  kubernetesContext: string | null
+  deploymentPolicy: DeploymentPolicy
+  workloads: ProductStageWorkloadOverview[]
+}
+
+export interface ProductDeploymentOverviewResponse {
+  productId: string
+  productName: string
+  // One tab per stage any of the product's workloads is linked to — a product's
+  // workloads can span multiple pipelines, so this is a union across all of them, not
+  // one fixed pipeline's stage list.
+  stages: ProductStageOverview[]
+}
+
+// NOT_APPLICABLE: non-Kubernetes workload, or the stage/workload is missing the
+// Kubernetes config a live read needs. NOT_FOUND: never deployed here (or deleted
+// outside cdrm). UNREACHABLE: the live read itself failed — error explains why. OK: a
+// real read succeeded, every field below is populated.
+export type LiveStatusState = 'NOT_APPLICABLE' | 'NOT_FOUND' | 'UNREACHABLE' | 'OK'
+
+export interface LivePodInfo {
+  name: string
+  image: string | null
+  ready: boolean
+  restartCount: number
+  runningSince: string | null
+}
+
+// Live current state of a workload's Deployment/StatefulSet at a given stage, read
+// on-demand from the cluster (see workloadsApi.liveStatus) — fetched lazily, per row,
+// only after the base grid (ProductDeploymentOverviewResponse) has already rendered.
+export interface LiveStatusResponse {
+  state: LiveStatusState
+  error: string | null
+  desiredReplicas: number | null
+  readyReplicas: number | null
+  totalRestartCount: number | null
+  // The manifest's own declared image — can differ from what's actually running on a
+  // pod mid-rollout (see pods for that).
+  image: string | null
+  resourceCreatedAt: string | null
+  // The oldest still-running pod's own start time — a single crashed-and-restarted
+  // replica among otherwise-stable ones shouldn't reset this to "just now" (that pod's
+  // own restart is still visible via its row in pods).
+  uptimeSince: string | null
+  pods: LivePodInfo[]
+}
+
 // One page of the release-history dashboard's details table — sorted, filtered, and
 // paginated by the backend (see releasesApi.historyOverview), not fetched in full.
 export interface ReleaseHistoryPageResponse {

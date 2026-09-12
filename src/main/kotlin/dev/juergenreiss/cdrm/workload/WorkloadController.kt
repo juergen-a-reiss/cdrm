@@ -17,6 +17,9 @@ class WorkloadController(private val service: WorkloadService) {
     @GetMapping("/{id}")
     fun findById(@PathVariable id: UUID): WorkloadResponse = service.findById(id)
 
+    @GetMapping("/{id}/live-status")
+    fun liveStatus(@PathVariable id: UUID, @RequestParam stageId: UUID): LiveStatusResponse = service.liveStatus(id, stageId)
+
     @Operation(description = "Creates a workload. stageIds in the request body is ignored — the new workload is always linked to every existing stage.")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)

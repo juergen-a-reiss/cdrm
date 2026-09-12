@@ -6,4 +6,6 @@ package dev.juergenreiss.cdrm.workload
 import org.springframework.data.jpa.repository.JpaRepository
 import java.util.*
 
-interface WorkloadRepository : JpaRepository<Workload, UUID>
+interface WorkloadRepository : JpaRepository<Workload, UUID> {
+    fun findByProductId(productId: UUID): List<Workload>
+}

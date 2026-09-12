@@ -7,10 +7,12 @@ import dev.juergenreiss.cdrm.audit.AuditEntityType
 import dev.juergenreiss.cdrm.audit.AuditRecorder
 import dev.juergenreiss.cdrm.common.SortSpec
 import dev.juergenreiss.cdrm.common.sortedBySpec
+import dev.juergenreiss.cdrm.kubernetes.KubernetesDeploymentClient
 import dev.juergenreiss.cdrm.product.ProductRepository
 import dev.juergenreiss.cdrm.security.CurrentActorResolver
 import dev.juergenreiss.cdrm.security.RebacContext
 import dev.juergenreiss.cdrm.stage.StageRepository
+import dev.juergenreiss.cdrm.stage.effectiveNamespaceFor
 import org.slf4j.LoggerFactory
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.domain.Sort
@@ -30,6 +32,7 @@ class WorkloadService(
     private val currentActorResolver: CurrentActorResolver,
     private val rebac: RebacContext,
     private val auditRecorder: AuditRecorder,
+    private val kubernetesDeploymentClient: KubernetesDeploymentClient,
 ) {
 
     private val log = LoggerFactory.getLogger(WorkloadService::class.java)
@@ -61,6 +64,55 @@ class WorkloadService(
         val productName = productRepository.findById(workload.productId).orElseThrow().name
         if (!rebac.canSeeWorkload(productName, workload.name)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
         return workload.toResponse()
+    }
+
+    // On-demand live read from the cluster — deliberately separate from
+    // ProductDeploymentOverviewService (which never touches Kubernetes), so the
+    // frontend can render the base grid immediately and fetch this slower, per-row call
+    // afterward without blocking on it.
+    fun liveStatus(workloadId: UUID, stageId: UUID): LiveStatusResponse {
+        val workload = repository.findById(workloadId).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
+        val productName = productRepository.findById(workload.productId).orElseThrow().name
+        if (!rebac.canSeeWorkload(productName, workload.name)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
+        val stage = stageRepository.findById(stageId)
+            .orElseThrow { ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown stage") }
+
+        val context = stage.kubernetesContext
+        val namespace = stage.effectiveNamespaceFor(workload)
+        val kind = workload.kubernetesKind
+        if (!workload.kubernetes || context.isNullOrBlank() || namespace.isNullOrBlank() || kind == null) {
+            return LiveStatusResponse(
+                state = LiveStatusState.NOT_APPLICABLE, error = null, desiredReplicas = null, readyReplicas = null,
+                totalRestartCount = null, image = null, resourceCreatedAt = null, uptimeSince = null, pods = emptyList(),
+            )
+        }
+
+        val live = try {
+            kubernetesDeploymentClient.getLiveStatus(context, namespace, kind, workload.name)
+        } catch (e: Exception) {
+            log.info("Live status unreachable for workload {} at stage {}: {}", workloadId, stageId, e.message)
+            return LiveStatusResponse(
+                state = LiveStatusState.UNREACHABLE, error = e.message ?: "cluster unreachable", desiredReplicas = null,
+                readyReplicas = null, totalRestartCount = null, image = null, resourceCreatedAt = null, uptimeSince = null,
+                pods = emptyList(),
+            )
+        } ?: return LiveStatusResponse(
+            state = LiveStatusState.NOT_FOUND, error = null, desiredReplicas = null, readyReplicas = null,
+            totalRestartCount = null, image = null, resourceCreatedAt = null, uptimeSince = null, pods = emptyList(),
+        )
+
+        val pods = live.pods.map { LivePodInfo(it.name, it.image, it.ready, it.restartCount, it.runningSince) }
+        return LiveStatusResponse(
+            state = LiveStatusState.OK,
+            error = null,
+            desiredReplicas = live.desiredReplicas,
+            readyReplicas = pods.count { it.ready },
+            totalRestartCount = pods.sumOf { it.restartCount },
+            image = live.declaredImage,
+            resourceCreatedAt = live.resourceCreatedAt,
+            uptimeSince = pods.mapNotNull { it.runningSince }.minOrNull(),
+            pods = pods,
+        )
     }
 
     @Transactional

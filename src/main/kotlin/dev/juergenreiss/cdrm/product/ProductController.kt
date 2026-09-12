@@ -9,12 +9,18 @@ import java.util.*
 
 @RestController
 @RequestMapping("/products")
-class ProductController(private val service: ProductService) {
+class ProductController(
+    private val service: ProductService,
+    private val overviewService: ProductDeploymentOverviewService,
+) {
     @GetMapping
     fun findAll(@RequestParam(required = false) sort: String?): List<ProductResponse> = service.findAll(sort)
 
     @GetMapping("/{id}")
     fun findById(@PathVariable id: UUID): ProductResponse = service.findById(id)
+
+    @GetMapping("/{id}/deployment-overview")
+    fun deploymentOverview(@PathVariable id: UUID): ProductDeploymentOverviewResponse = overviewService.get(id)
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)

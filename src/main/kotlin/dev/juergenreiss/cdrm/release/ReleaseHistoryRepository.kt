@@ -74,6 +74,19 @@ interface ReleaseHistoryRepository : JpaRepository<ReleaseHistory, UUID>, JpaSpe
     )
     fun findLatestAtCurrentStageByReleaseIdIn(releaseIds: Collection<UUID>): List<ReleaseHistory>
 
+    // Batched latest-history-per-(workload,stage) lookup for the product deployment
+    // overview screen. Unlike findLatestAtCurrentStageByReleaseIdIn, this isn't scoped
+    // to a release's own current stage — a workload's stage-tab there shows the latest
+    // deploy/rollback/redeploy at THAT stage regardless of whether the release that
+    // produced it has since moved on to a different one.
+    @Query(
+        value = "select distinct on (rh.workload_id, rh.stage_id) rh.* from release_history rh " +
+            "where rh.workload_id in (:workloadIds) and rh.stage_id in (:stageIds) " +
+            "order by rh.workload_id, rh.stage_id, rh.created_at desc",
+        nativeQuery = true,
+    )
+    fun findLatestByWorkloadIdInAndStageIdIn(workloadIds: Collection<UUID>, stageIds: Collection<UUID>): List<ReleaseHistory>
+
     // Locked so a second app instance (or a slow-running overlapping tick) can't verify
     // the same row twice.
     @Lock(LockModeType.PESSIMISTIC_WRITE)

@@ -13,13 +13,16 @@ import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
 import com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo
 import dev.juergenreiss.cdrm.workload.KubernetesKind
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.BDDMockito.given
 import org.mockito.Mockito.mock
+import java.time.Instant
 
 class KubernetesDeploymentClientTest {
 
@@ -194,5 +197,82 @@ class KubernetesDeploymentClientTest {
 
         assertFalse(result.ready)
         assertTrue(result.detail.contains("1 pod(s) restarting (restart count > 0)"))
+    }
+
+    private fun stubDeploymentWithMeta(replicas: Int = 1, image: String = "old:1.0", createdAt: String? = "2024-01-01T00:00:00Z") {
+        val metaJson = if (createdAt != null) """"metadata":{"creationTimestamp":"$createdAt"},""" else ""
+        server.stubFor(
+            get(urlPathEqualTo("/apis/apps/v1/namespaces/platform/deployments/platform-api"))
+                .willReturn(
+                    okJson(
+                        """{$metaJson"spec":{"replicas":$replicas,"selector":{"matchLabels":{"app":"platform-api"}},
+                            |"template":{"spec":{"containers":[{"name":"app","image":"$image"}]}}}}""".trimMargin()
+                    )
+                )
+        )
+    }
+
+    private fun podWithState(
+        name: String = "platform-api-abc",
+        image: String = "old:1.0",
+        ready: Boolean = true,
+        restartCount: Int = 0,
+        startedAt: String? = "2024-01-02T00:00:00Z",
+    ): String {
+        val stateJson = if (startedAt != null) ""","state":{"running":{"startedAt":"$startedAt"}}""" else ""
+        return """{"metadata":{"name":"$name"},"spec":{"containers":[{"name":"app","image":"$image"}]},
+            |"status":{"containerStatuses":[{"name":"app","ready":$ready,"restartCount":$restartCount$stateJson}]}}""".trimMargin()
+    }
+
+    @Test
+    fun `getLiveStatus returns null when the resource doesn't exist`() {
+        server.stubFor(
+            get(urlPathEqualTo("/apis/apps/v1/namespaces/platform/deployments/platform-api"))
+                .willReturn(aResponse().withStatus(404))
+        )
+
+        val result = client.getLiveStatus("my-context", "platform", KubernetesKind.DEPLOYMENT, "platform-api")
+
+        assertEquals(null, result)
+    }
+
+    @Test
+    fun `getLiveStatus parses desiredReplicas, declaredImage, resourceCreatedAt and per-pod details`() {
+        stubDeploymentWithMeta(replicas = 2, image = "new:2.0", createdAt = "2024-01-01T00:00:00Z")
+        stubPods(podWithState(name = "pod-1", image = "new:2.0", ready = true, restartCount = 1, startedAt = "2024-01-02T00:00:00Z"))
+
+        val result = client.getLiveStatus("my-context", "platform", KubernetesKind.DEPLOYMENT, "platform-api")!!
+
+        assertEquals(2, result.desiredReplicas)
+        assertEquals("new:2.0", result.declaredImage)
+        assertEquals(Instant.parse("2024-01-01T00:00:00Z"), result.resourceCreatedAt)
+        val pod = result.pods.single()
+        assertEquals("pod-1", pod.name)
+        assertEquals("new:2.0", pod.image)
+        assertTrue(pod.ready)
+        assertEquals(1, pod.restartCount)
+        assertEquals(Instant.parse("2024-01-02T00:00:00Z"), pod.runningSince)
+    }
+
+    @Test
+    fun `getLiveStatus reports a null runningSince for a pod never observed running`() {
+        stubDeploymentWithMeta(replicas = 1)
+        stubPods(podWithState(ready = false, startedAt = null))
+
+        val result = client.getLiveStatus("my-context", "platform", KubernetesKind.DEPLOYMENT, "platform-api")!!
+
+        assertNull(result.pods.single().runningSince)
+    }
+
+    @Test
+    fun `getLiveStatus propagates a non-404 error instead of swallowing it`() {
+        server.stubFor(
+            get(urlPathEqualTo("/apis/apps/v1/namespaces/platform/deployments/platform-api"))
+                .willReturn(aResponse().withStatus(500))
+        )
+
+        assertThrows(Exception::class.java) {
+            client.getLiveStatus("my-context", "platform", KubernetesKind.DEPLOYMENT, "platform-api")
+        }
     }
 }

@@ -6,7 +6,9 @@ package dev.juergenreiss.cdrm.release
 import dev.juergenreiss.cdrm.kubernetes.KubernetesDeploymentClient
 import dev.juergenreiss.cdrm.notification.ReleaseHistoryNotificationKind
 import dev.juergenreiss.cdrm.notification.ReleaseHistoryRecordedEvent
+import dev.juergenreiss.cdrm.stage.Stage
 import dev.juergenreiss.cdrm.stage.StageRepository
+import dev.juergenreiss.cdrm.stage.effectiveNamespaceFor
 import dev.juergenreiss.cdrm.workload.Workload
 import dev.juergenreiss.cdrm.workload.WorkloadRepository
 import io.micrometer.core.instrument.MeterRegistry
@@ -68,14 +70,15 @@ class DeploymentVerificationJob(
             }
 
             val stage = stageRepository.findById(entry.stageId).orElse(null) ?: continue
-            verifyEntry(entry, workload, stage.kubernetesContext, stage.namespacePrefix, now)
+            verifyEntry(entry, workload, stage, now)
         }
     }
 
-    private fun verifyEntry(entry: ReleaseHistory, workload: Workload, context: String?, namespacePrefix: String?, now: Instant) {
-        val namespace = workload.kubernetesNameSpace
+    private fun verifyEntry(entry: ReleaseHistory, workload: Workload, stage: Stage, now: Instant) {
+        val context = stage.kubernetesContext
+        val effectiveNamespace = stage.effectiveNamespaceFor(workload)
         val kind = workload.kubernetesKind
-        if (context.isNullOrBlank() || namespace.isNullOrBlank() || kind == null) {
+        if (context.isNullOrBlank() || effectiveNamespace.isNullOrBlank() || kind == null) {
             // Missing stage/workload Kubernetes config, not a cluster/sync-timing issue —
             // nothing external is ever going to fix this on its own, so (unlike the cases
             // below) this still times out on the original deployedAt-anchored clock.
@@ -83,7 +86,6 @@ class DeploymentVerificationJob(
             failWith(entry, now, "Kubernetes configuration missing for this stage")
             return
         }
-        val effectiveNamespace = (namespacePrefix ?: "") + namespace
 
         val status = try {
             kubernetesDeploymentClient.checkRollout(context, effectiveNamespace, kind, workload.name, entry.image)

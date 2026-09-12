@@ -9,6 +9,7 @@ import dev.juergenreiss.cdrm.cluster.GitOpsNamespaceMode
 import dev.juergenreiss.cdrm.cluster.K8sNamespaceGitopsConfig
 import dev.juergenreiss.cdrm.product.Product
 import dev.juergenreiss.cdrm.stage.Stage
+import dev.juergenreiss.cdrm.stage.effectiveNamespaceFor
 import dev.juergenreiss.cdrm.workload.Workload
 import org.springframework.stereotype.Component
 
@@ -62,8 +63,7 @@ class GitOpsResolver(
     // consulted at deploy time by KubernetesDeploymentClient either) — a namespace name
     // naturally belongs to exactly one cluster in practice.
     private fun findNamespace(workload: Workload, stage: Stage): NamespaceMatch? {
-        val namespace = workload.kubernetesNameSpace ?: return null
-        val effectiveNamespace = (stage.namespacePrefix ?: "") + namespace
+        val effectiveNamespace = stage.effectiveNamespaceFor(workload) ?: return null
         for (cluster in clusterRepository.findAll()) {
             val config = cluster.k8sGitOpsConfig ?: continue
             if (!config.useGitOps) continue

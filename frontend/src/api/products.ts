@@ -2,7 +2,7 @@
 // Licensed under the terms in the LICENSE file at the repository root.
 
 import { http } from './http'
-import type { ProductRequest, ProductResponse } from './types'
+import type { ProductDeploymentOverviewResponse, ProductRequest, ProductResponse } from './types'
 
 export const productsApi = {
   list: (sort?: string) => http.get<ProductResponse[]>(`/products${sort ? `?sort=${encodeURIComponent(sort)}` : ''}`),
@@ -10,4 +10,6 @@ export const productsApi = {
   create: (request: ProductRequest) => http.post<ProductResponse>('/products', request),
   update: (id: string, request: ProductRequest) => http.put<ProductResponse>(`/products/${id}`, request),
   remove: (id: string) => http.delete(`/products/${id}`),
+  // Backs the product detail view — never touches Kubernetes, see workloadsApi.liveStatus for that.
+  deploymentOverview: (id: string) => http.get<ProductDeploymentOverviewResponse>(`/products/${id}/deployment-overview`),
 }

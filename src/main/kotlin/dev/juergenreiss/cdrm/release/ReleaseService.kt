@@ -216,26 +216,9 @@ class ReleaseService(
 
         val content = entries.map { entry ->
             val stage = stagesById[entry.stageId]
-            ReleaseHistoryOverviewEntry(
-                id = entry.id!!,
-                releaseId = entry.releaseId,
-                image = entry.image,
-                action = entry.action,
-                productId = entry.productId,
-                productName = entry.productName,
-                workloadId = entry.workloadId,
-                workloadName = entry.workloadName,
-                stage = ReleaseStageInfo(id = entry.stageId, name = entry.stageName, order = stage?.order ?: 0),
-                timestamp = entry.createdAt!!,
-                deployedAt = entry.deployedAt,
+            entry.toOverviewEntry(
+                stageOrder = stage?.order ?: 0,
                 scheduledAt = scheduledDeploymentFor(entry, stage, cronByProductAndStage[entry.productId to entry.stageId]),
-                deployError = entry.deployError,
-                deploymentFinished = entry.deploymentFinished,
-                deploymentFailed = entry.deploymentFailed,
-                gitOpsStatus = entry.gitOpsStatus(),
-                gitopsError = entry.gitopsError,
-                kubernetesStatus = entry.kubernetesStatus(),
-                createdBy = entry.createdBy,
             )
         }
         return ReleaseHistoryPageResponse(content = content, totalElements = result.totalElements, page = page, size = size)

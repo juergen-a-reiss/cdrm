@@ -5,6 +5,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
 import ResourceTable from '../components/ResourceTable.vue'
 import type { SortByItem } from '../components/ResourceTable.vue'
@@ -32,12 +33,17 @@ interface ProductRow extends ProductResponse {
   deploymentTimes: DeploymentTimeRow[]
 }
 
+const router = useRouter()
 const sortBy = usePersistedRef<SortByItem[]>('cdrm.sort.products', [{ key: 'name', order: 'asc' }])
 const { items, loading, error, reload } = useResourceList(() => productsApi.list(sortParam(sortBy.value)))
 watch(sortBy, reload, { deep: true })
 useChangeReload('dev.juergenreiss.cdrm.product.', reload)
 const { matches } = useProductFilter()
 const activeTab = usePersistedRef('cdrm.productsView.tab', 'table')
+
+function openDetail(product: ProductResponse) {
+  router.push({ name: 'product-detail', params: { id: product.id } })
+}
 
 function groupName(product: ProductResponse): string | null {
   if (!product.productGroupId) return null
@@ -112,7 +118,14 @@ async function removeProduct(product: ProductResponse) {
 
   <v-window v-model="activeTab">
     <v-window-item value="table">
-      <ResourceTable :headers="headers" :items="rows" :loading="loading" :error="error" v-model:sort-by="sortBy">
+      <ResourceTable
+        :headers="headers"
+        :items="rows"
+        :loading="loading"
+        :error="error"
+        v-model:sort-by="sortBy"
+        @click:row="openDetail"
+      >
         <template v-if="canManageProducts" #top>
           <v-toolbar flat>
             <v-toolbar-title>Products</v-toolbar-title>
@@ -135,8 +148,8 @@ async function removeProduct(product: ProductResponse) {
           </div>
         </template>
         <template v-if="canManageProducts" #item.actions="{ item }">
-          <v-icon icon="mdi-pencil" size="small" class="mr-2" @click="openEdit(item)" />
-          <v-icon icon="mdi-delete" size="small" @click="removeProduct(item)" />
+          <v-icon icon="mdi-pencil" size="small" class="mr-2" @click.stop="openEdit(item)" />
+          <v-icon icon="mdi-delete" size="small" @click.stop="removeProduct(item)" />
         </template>
       </ResourceTable>
     </v-window-item>

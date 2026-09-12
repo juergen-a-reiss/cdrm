@@ -4,7 +4,7 @@
 -->
 
 <script setup lang="ts" generic="T extends { id: string }">
-import { computed, useSlots } from 'vue'
+import { computed, useAttrs, useSlots } from 'vue'
 import type { DataTableHeader } from 'vuetify/lib/components/VDataTable/types.js'
 
 export interface SortByItem {
@@ -52,12 +52,21 @@ const emit = defineEmits<{
   'update:sortBy': [value: SortByItem[]]
   'update:page': [value: number]
   'update:itemsPerPage': [value: number]
+  // Opt-in, like expandableRows: a consumer only gets row clicks (e.g. to navigate to a
+  // detail view) if it actually listens for this event.
+  'click:row': [item: T]
 }>()
 
 const slots = useSlots()
 // Forward any per-column `item.<key>` slot the consumer provides, so custom
 // cell rendering isn't limited to a hardcoded list of column names.
 const itemSlotNames = computed(() => Object.keys(slots).filter((name) => name.startsWith('item.')))
+
+const attrs = useAttrs()
+// Whether a consumer is actually listening for click:row — Vue exposes a bound
+// `@click:row` as the `onClick:row` attr — so rows only look clickable (cursor) when
+// something will actually happen on click, the same opt-in spirit as expandableRows.
+const hasRowClickListener = computed(() => attrs['onClick:row'] !== undefined)
 </script>
 
 <template>
@@ -71,7 +80,7 @@ const itemSlotNames = computed(() => Object.keys(slots).filter((name) => name.st
     :page="page ?? 1"
     :items-per-page="itemsPerPage ?? -1"
     :hide-default-footer="page === undefined"
-    :class="{ 'cdrm-expandable-rows': expandableRows }"
+    :class="{ 'cdrm-expandable-rows': expandableRows, 'cdrm-clickable-rows': hasRowClickListener }"
     :expand-on-click="expandableRows"
     expand-strategy="single"
     :expanded="expanded"
@@ -80,6 +89,7 @@ const itemSlotNames = computed(() => Object.keys(slots).filter((name) => name.st
     @update:sort-by="emit('update:sortBy', $event as SortByItem[])"
     @update:page="emit('update:page', $event)"
     @update:items-per-page="emit('update:itemsPerPage', $event)"
+    @click:row="(_e: unknown, { item }: { item: T }) => emit('click:row', item)"
   >
     <template v-if="$slots.top" #top>
       <slot name="top" />
@@ -94,7 +104,8 @@ const itemSlotNames = computed(() => Object.keys(slots).filter((name) => name.st
 </template>
 
 <style scoped>
-.cdrm-expandable-rows :deep(tbody tr) {
+.cdrm-expandable-rows :deep(tbody tr),
+.cdrm-clickable-rows :deep(tbody tr) {
   cursor: pointer;
 }
 
