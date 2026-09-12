@@ -62,10 +62,17 @@ class ProductDeploymentOverviewServiceTest {
         )
     }
 
-    private fun persistedProduct(id: UUID = UUID.randomUUID(), name: String = "Product") = Product(
+    private fun persistedProduct(
+        id: UUID = UUID.randomUUID(),
+        name: String = "Product",
+        isGroup: Boolean = false,
+        productGroupId: UUID? = null,
+    ) = Product(
         id = id,
         name = name,
         description = null,
+        isGroup = isGroup,
+        productGroupId = productGroupId,
         createdAt = Instant.now(),
         modifiedAt = Instant.now(),
         createdBy = UUID.randomUUID(),
@@ -166,7 +173,7 @@ class ProductDeploymentOverviewServiceTest {
         val product = persistedProduct()
         given(productRepository.findById(product.id!!)).willReturn(Optional.of(product))
         given(rebac.canSeeProduct(product.name)).willReturn(true)
-        given(workloadRepository.findByProductId(product.id!!)).willReturn(emptyList())
+        given(workloadRepository.findByProductIdIn(setOf(product.id!!))).willReturn(emptyList())
 
         val result = service.get(product.id!!)
 
@@ -182,7 +189,7 @@ class ProductDeploymentOverviewServiceTest {
 
         val workloadA = persistedWorkload(productId = product.id!!, name = "a")
         val workloadB = persistedWorkload(productId = product.id!!, name = "b")
-        given(workloadRepository.findByProductId(product.id!!)).willReturn(listOf(workloadA, workloadB))
+        given(workloadRepository.findByProductIdIn(setOf(product.id!!))).willReturn(listOf(workloadA, workloadB))
 
         val stageFrankfurt = persistedStage(name = "frankfurt-qa", pipeline = "frankfurt", order = 1)
         val stageParis = persistedStage(name = "paris-qa", pipeline = "paris", order = 1)
@@ -210,7 +217,7 @@ class ProductDeploymentOverviewServiceTest {
         given(rebac.canSeeWorkload(anyString(), anyString())).willReturn(true)
 
         val workload = persistedWorkload(productId = product.id!!)
-        given(workloadRepository.findByProductId(product.id!!)).willReturn(listOf(workload))
+        given(workloadRepository.findByProductIdIn(setOf(product.id!!))).willReturn(listOf(workload))
 
         val stage = persistedStage()
         given(workloadStageRepository.findByWorkloadIdIn(listOf(workload.id!!))).willReturn(emptyList())
@@ -230,7 +237,7 @@ class ProductDeploymentOverviewServiceTest {
         given(rebac.canSeeWorkload(anyString(), anyString())).willReturn(true)
 
         val workload = persistedWorkload(productId = product.id!!)
-        given(workloadRepository.findByProductId(product.id!!)).willReturn(listOf(workload))
+        given(workloadRepository.findByProductIdIn(setOf(product.id!!))).willReturn(listOf(workload))
         val stage = persistedStage()
         given(workloadStageRepository.findByWorkloadIdIn(listOf(workload.id!!))).willReturn(listOf(link(workload.id!!, stage.id!!)))
         given(stageRepository.findAllById(setOf(stage.id!!))).willReturn(listOf(stage))
@@ -249,7 +256,7 @@ class ProductDeploymentOverviewServiceTest {
         given(rebac.canSeeWorkload(anyString(), anyString())).willReturn(true)
 
         val workload = persistedWorkload(productId = product.id!!)
-        given(workloadRepository.findByProductId(product.id!!)).willReturn(listOf(workload))
+        given(workloadRepository.findByProductIdIn(setOf(product.id!!))).willReturn(listOf(workload))
         val stage = persistedStage()
         given(workloadStageRepository.findByWorkloadIdIn(listOf(workload.id!!))).willReturn(listOf(link(workload.id!!, stage.id!!)))
         given(stageRepository.findAllById(setOf(stage.id!!))).willReturn(listOf(stage))
@@ -275,7 +282,7 @@ class ProductDeploymentOverviewServiceTest {
         val withoutNamespace = persistedWorkload(
             productId = product.id!!, name = "without-ns", kubernetes = false, kubernetesKind = null, kubernetesNameSpace = null,
         )
-        given(workloadRepository.findByProductId(product.id!!)).willReturn(listOf(withNamespace, withoutNamespace))
+        given(workloadRepository.findByProductIdIn(setOf(product.id!!))).willReturn(listOf(withNamespace, withoutNamespace))
         val stage = persistedStage(namespacePrefix = "prod-")
         given(workloadStageRepository.findByWorkloadIdIn(listOf(withNamespace.id!!, withoutNamespace.id!!))).willReturn(
             listOf(link(withNamespace.id!!, stage.id!!), link(withoutNamespace.id!!, stage.id!!))
@@ -302,7 +309,7 @@ class ProductDeploymentOverviewServiceTest {
         val hidden = persistedWorkload(productId = product.id!!, name = "hidden")
         given(rebac.canSeeWorkload(product.name, "visible")).willReturn(true)
         given(rebac.canSeeWorkload(product.name, "hidden")).willReturn(false)
-        given(workloadRepository.findByProductId(product.id!!)).willReturn(listOf(visible, hidden))
+        given(workloadRepository.findByProductIdIn(setOf(product.id!!))).willReturn(listOf(visible, hidden))
 
         val stage = persistedStage()
         given(workloadStageRepository.findByWorkloadIdIn(listOf(visible.id!!))).willReturn(listOf(link(visible.id!!, stage.id!!)))
@@ -312,5 +319,66 @@ class ProductDeploymentOverviewServiceTest {
         val result = service.get(product.id!!)
 
         assertEquals(listOf("visible"), result.stages.single().workloads.map { it.workloadName })
+    }
+
+    @Test
+    fun `a group's overview pools workloads from every descendant product and subgroup`() {
+        val group = persistedProduct(name = "platform-group", isGroup = true)
+        val childProduct = persistedProduct(name = "child", productGroupId = group.id)
+        val childSubgroup = persistedProduct(name = "child-subgroup", isGroup = true, productGroupId = group.id)
+        val grandchildProduct = persistedProduct(name = "grandchild", productGroupId = childSubgroup.id)
+
+        given(productRepository.findById(group.id!!)).willReturn(Optional.of(group))
+        given(rebac.canSeeProduct(anyString())).willReturn(true)
+        given(rebac.canSeeWorkload(anyString(), anyString())).willReturn(true)
+        given(productRepository.findByProductGroupIdIn(setOf(group.id!!))).willReturn(listOf(childProduct, childSubgroup))
+        given(productRepository.findByProductGroupIdIn(setOf(childSubgroup.id!!))).willReturn(listOf(grandchildProduct))
+
+        val workloadA = persistedWorkload(productId = childProduct.id!!, name = "a")
+        val workloadB = persistedWorkload(productId = grandchildProduct.id!!, name = "b")
+        given(
+            workloadRepository.findByProductIdIn(setOf(childProduct.id!!, childSubgroup.id!!, grandchildProduct.id!!))
+        ).willReturn(listOf(workloadA, workloadB))
+
+        val stage = persistedStage()
+        given(workloadStageRepository.findByWorkloadIdIn(listOf(workloadA.id!!, workloadB.id!!)))
+            .willReturn(listOf(link(workloadA.id!!, stage.id!!), link(workloadB.id!!, stage.id!!)))
+        given(stageRepository.findAllById(setOf(stage.id!!))).willReturn(listOf(stage))
+        given(
+            releaseHistoryRepository.findLatestByWorkloadIdInAndStageIdIn(listOf(workloadA.id!!, workloadB.id!!), setOf(stage.id!!))
+        ).willReturn(emptyList())
+
+        val result = service.get(group.id!!)
+
+        assertTrue(result.isGroup)
+        val workloads = result.stages.single().workloads.associateBy { it.workloadName }
+        assertEquals("child", workloads.getValue("a").productName)
+        assertEquals("grandchild", workloads.getValue("b").productName)
+    }
+
+    @Test
+    fun `a descendant product the caller can't see is excluded from the group overview`() {
+        val group = persistedProduct(name = "platform-group", isGroup = true)
+        val visibleChild = persistedProduct(name = "visible-child", productGroupId = group.id)
+        val hiddenChild = persistedProduct(name = "hidden-child", productGroupId = group.id)
+
+        given(productRepository.findById(group.id!!)).willReturn(Optional.of(group))
+        given(rebac.canSeeProduct(group.name)).willReturn(true)
+        given(rebac.canSeeProduct(visibleChild.name)).willReturn(true)
+        given(rebac.canSeeProduct(hiddenChild.name)).willReturn(false)
+        given(rebac.canSeeWorkload(anyString(), anyString())).willReturn(true)
+        given(productRepository.findByProductGroupIdIn(setOf(group.id!!))).willReturn(listOf(visibleChild, hiddenChild))
+
+        val workload = persistedWorkload(productId = visibleChild.id!!, name = "workload")
+        given(workloadRepository.findByProductIdIn(setOf(visibleChild.id!!))).willReturn(listOf(workload))
+
+        val stage = persistedStage()
+        given(workloadStageRepository.findByWorkloadIdIn(listOf(workload.id!!))).willReturn(listOf(link(workload.id!!, stage.id!!)))
+        given(stageRepository.findAllById(setOf(stage.id!!))).willReturn(listOf(stage))
+        given(releaseHistoryRepository.findLatestByWorkloadIdInAndStageIdIn(listOf(workload.id!!), setOf(stage.id!!))).willReturn(emptyList())
+
+        val result = service.get(group.id!!)
+
+        assertEquals(listOf("workload"), result.stages.single().workloads.map { it.workloadName })
     }
 }

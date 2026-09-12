@@ -4,7 +4,7 @@
 -->
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ApiError } from '../api/http'
 import { productsApi } from '../api/products'
 import type { ProductDeploymentOverviewResponse } from '../api/types'
@@ -47,13 +47,16 @@ async function load() {
 
 watch(() => props.name, load, { immediate: true })
 
-const headers = [
+// Only shown for a group's overview, where a row's workload can belong to any
+// descendant product/subgroup — see ProductStageWorkloadOverview.productName.
+const headers = computed(() => [
+  ...(overview.value?.isGroup ? [{ title: 'Product', key: 'productName' }] : []),
   { title: 'Workload', key: 'workloadName' },
   { title: 'Namespace', key: 'namespace' },
   { title: 'Last release', key: 'lastRelease', sortable: false },
   { title: 'Status', key: 'status', sortable: false },
   { title: 'Live status', key: 'liveStatus', sortable: false },
-]
+])
 </script>
 
 <template>
@@ -64,7 +67,11 @@ const headers = [
     <h1 class="text-h5 mb-4">{{ overview.productName }}</h1>
 
     <div v-if="overview.stages.length === 0" class="text-body-2 text-medium-emphasis">
-      This product has no workloads linked to any stage yet.
+      {{
+        overview.isGroup
+          ? 'This product group has no member workloads linked to any stage yet.'
+          : 'This product has no workloads linked to any stage yet.'
+      }}
     </div>
 
     <template v-else>

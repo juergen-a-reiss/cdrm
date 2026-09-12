@@ -8,4 +8,5 @@ import java.util.*
 
 interface ProductRepository : JpaRepository<Product, UUID> {
     fun existsByProductGroupId(productGroupId: UUID): Boolean
+    fun findByProductGroupIdIn(productGroupIds: Collection<UUID>): List<Product>
 }

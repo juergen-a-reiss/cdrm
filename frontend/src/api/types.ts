@@ -368,6 +368,10 @@ export interface ReleaseHistoryOverviewEntry {
 export interface ProductStageWorkloadOverview {
   workloadId: string
   workloadName: string
+  // The workload's own owning product — differs per row when this overview is for a
+  // group (pooled across it and every descendant product/subgroup).
+  productId: string
+  productName: string
   kubernetes: boolean
   kubernetesKind: KubernetesKind | null
   // stage.namespacePrefix + the workload's own kubernetesNameSpace — null if the
@@ -394,6 +398,10 @@ export interface ProductStageOverview {
 export interface ProductDeploymentOverviewResponse {
   productId: string
   productName: string
+  // Whether productId names a product group — workloads are then pooled from every
+  // descendant product/subgroup, and each row's productName may differ from productName
+  // above (see ProductStageWorkloadOverview.productName).
+  isGroup: boolean
   // One tab per stage any of the product's workloads is linked to — a product's
   // workloads can span multiple pipelines, so this is a union across all of them, not
   // one fixed pipeline's stage list.

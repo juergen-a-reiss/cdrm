@@ -37,8 +37,16 @@ class ProductDeploymentOverviewService(
         val product = productRepository.findById(productId).orElseThrow { ResponseStatusException(HttpStatus.NOT_FOUND) }
         if (!rebac.canSeeProduct(product.name)) throw ResponseStatusException(HttpStatus.NOT_FOUND)
 
-        val workloads = workloadRepository.findByProductId(productId).filter { rebac.canSeeWorkload(product.name, it.name) }
-        if (workloads.isEmpty()) return ProductDeploymentOverviewResponse(product.id!!, product.name, emptyList())
+        // A group has no workloads of its own (see ProductService's group invariants) —
+        // its overview pools every descendant product's (and subgroup's) workloads instead.
+        val targetProducts = (if (product.isGroup) descendantProducts(product.id!!) else listOf(product))
+            .filter { rebac.canSeeProduct(it.name) }
+        val productsById = targetProducts.associateBy { it.id!! }
+        if (productsById.isEmpty()) return ProductDeploymentOverviewResponse(product.id!!, product.name, product.isGroup, emptyList())
+
+        val workloads = workloadRepository.findByProductIdIn(productsById.keys)
+            .filter { workload -> productsById[workload.productId]?.let { rebac.canSeeWorkload(it.name, workload.name) } ?: false }
+        if (workloads.isEmpty()) return ProductDeploymentOverviewResponse(product.id!!, product.name, product.isGroup, emptyList())
 
         val workloadIds = workloads.mapNotNull { it.id }
         val links = workloadStageRepository.findByWorkloadIdIn(workloadIds)
@@ -59,6 +67,8 @@ class ProductDeploymentOverviewService(
                     ProductStageWorkloadOverview(
                         workloadId = workload.id!!,
                         workloadName = workload.name,
+                        productId = workload.productId,
+                        productName = productsById.getValue(workload.productId).name,
                         kubernetes = workload.kubernetes,
                         kubernetesKind = workload.kubernetesKind,
                         namespace = stage.effectiveNamespaceFor(workload),
@@ -75,6 +85,21 @@ class ProductDeploymentOverviewService(
                 workloads = stageWorkloads,
             )
         }
-        return ProductDeploymentOverviewResponse(product.id!!, product.name, stages)
+        return ProductDeploymentOverviewResponse(product.id!!, product.name, product.isGroup, stages)
+    }
+
+    // Breadth-first walk of the group tree rooted at groupId, one query per depth level.
+    // Guards against a stray cycle in legacy data even though ProductService rejects new
+    // ones (see its validateGroupInvariants) — same precaution ProductTree.vue takes.
+    private fun descendantProducts(groupId: UUID): List<Product> {
+        val result = mutableListOf<Product>()
+        val visitedGroupIds = mutableSetOf(groupId)
+        var frontier = setOf(groupId)
+        while (frontier.isNotEmpty()) {
+            val children = productRepository.findByProductGroupIdIn(frontier)
+            result += children
+            frontier = children.filter { it.isGroup && visitedGroupIds.add(it.id!!) }.map { it.id!! }.toSet()
+        }
+        return result
     }
 }

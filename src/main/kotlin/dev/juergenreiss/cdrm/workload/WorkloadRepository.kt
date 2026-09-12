@@ -8,4 +8,5 @@ import java.util.*
 
 interface WorkloadRepository : JpaRepository<Workload, UUID> {
     fun findByProductId(productId: UUID): List<Workload>
+    fun findByProductIdIn(productIds: Collection<UUID>): List<Workload>
 }
