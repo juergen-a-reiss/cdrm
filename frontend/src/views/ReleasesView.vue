@@ -38,10 +38,16 @@ import { sortParam } from '../utils/sortParam'
 interface ReleaseRow {
   id: string
   image: string
+  // Not its own column (see headers below) — shown as a native tooltip on row hover
+  // instead, via ResourceTable's rowProps (there's rarely much of one from a CI build).
   description: string | null
   workloadName: string
   currentStageName: string
   isHead: boolean
+  inPipeline: boolean
+  // Raw ISO timestamp so the "Created" column sorts chronologically — the header renders
+  // it via a `value` function (see headers below), not this field directly.
+  createdAt: string
   // Raw ISO timestamp (or null) so the "Last Deployed" column sorts chronologically —
   // the header renders it via a `value` function (see headers below), not this field
   // directly.
@@ -71,6 +77,7 @@ const { matches: matchesPipeline } = usePipelineFilter()
 const { showToast } = useToast()
 const headOnly = ref(false)
 const pendingOnly = ref(false)
+const inPipelineOnly = ref(false)
 
 // Lets another view (e.g. the workload detail view's "View releases"/"View pending
 // releases" links) jump straight to a pre-filtered list instead of the user re-applying
@@ -109,7 +116,8 @@ const rows = computed<ReleaseRow[]>(() =>
         matchesWorkload(release.workloadId) &&
         (pipeline === undefined || matchesPipeline(pipeline)) &&
         (!headOnly.value || !release.canRollback) &&
-        (!pendingOnly.value || !release.deploymentFinished)
+        (!pendingOnly.value || !release.deploymentFinished) &&
+        (!inPipelineOnly.value || release.inPipeline)
       )
     })
     .map((release) => ({
@@ -119,6 +127,8 @@ const rows = computed<ReleaseRow[]>(() =>
       workloadName: workloadNameById.value.get(release.workloadId) ?? release.workloadId,
       currentStageName: release.currentStage.name,
       isHead: !release.canRollback,
+      inPipeline: release.inPipeline,
+      createdAt: release.createdAt,
       lastDeployedAt: release.lastDeployedAt,
       canPromote: release.canPromote,
       canRollback: release.canRollback,
@@ -145,11 +155,11 @@ const showActions = computed(
 
 const headers = computed<DataTableHeader<ReleaseRow>[]>(() => {
   const base: DataTableHeader<ReleaseRow>[] = [
+    { title: 'Created', key: 'createdAt', value: (item) => formatDateTime(item.createdAt) },
     { title: 'Image', key: 'image' },
     { title: 'Workload', key: 'workloadName' },
     { title: 'Current Stage', key: 'currentStageName' },
     { title: 'Last Deployed', key: 'lastDeployedAt', value: (item) => (item.lastDeployedAt ? formatDateTime(item.lastDeployedAt) : 'Pending') },
-    { title: 'Description', key: 'description' },
   ]
   if (showActions.value) {
     base.push({ title: 'Actions', key: 'actions', sortable: false, width: 240 })
@@ -332,12 +342,21 @@ async function onRedeployed() {
       hide-details
       class="flex-grow-0"
     />
+    <v-checkbox
+      v-model="inPipelineOnly"
+      label="In pipeline only"
+      :color="inPipelineOnly ? 'primary' : undefined"
+      density="compact"
+      hide-details
+      class="flex-grow-0"
+    />
   </div>
   <ResourceTable
     :headers="headers"
     :items="rows"
     :loading="loading"
     :error="error"
+    :row-props="(item) => (item.description ? { title: item.description } : {})"
     expandable-rows
     v-model:expanded="expanded"
     v-model:sort-by="sortBy"
@@ -361,6 +380,13 @@ async function onRedeployed() {
           size="small"
           color="error"
           :title="`Deployment to this stage failed${item.raw.deploymentError ? `: ${item.raw.deploymentError}` : ''}`"
+        />
+        <v-icon
+          v-if="!item.inPipeline"
+          icon="mdi-signal-off"
+          size="small"
+          color="grey"
+          title="Out of pipeline — a more recently created release of this workload has already advanced past this stage"
         />
       </span>
     </template>

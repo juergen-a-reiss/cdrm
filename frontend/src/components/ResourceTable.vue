@@ -36,6 +36,10 @@ const props = defineProps<{
   page?: number
   itemsPerPage?: number
   itemsLength?: number
+  // Opt-in: extra attrs (e.g. `title` for a native hover tooltip) merged onto each row's
+  // own `<tr>` — narrowed to just the item (unlike Vuetify's own row-props, which also
+  // hands back index/internalItem) since no consumer has needed those yet.
+  rowProps?: (item: T) => Record<string, unknown>
 }>()
 
 defineSlots<
@@ -90,6 +94,7 @@ const hasRowClickListener = computed(() => attrs['onClick:row'] !== undefined)
     @update:page="emit('update:page', $event)"
     @update:items-per-page="emit('update:itemsPerPage', $event)"
     @click:row="(_e: unknown, { item }: { item: T }) => emit('click:row', item)"
+    :row-props="rowProps ? ({ item }: { item: T }) => rowProps!(item) : undefined"
   >
     <template v-if="$slots.top" #top>
       <slot name="top" />

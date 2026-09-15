@@ -208,6 +208,45 @@ any issue that happens in production. Redeploy does the following:
 
 This redeploy does not change the *head* status.
 
+#### Release Pipeline Status
+
+Not every release makes it all the way to production - especially during volatile feature development, many releases
+pile up in the early stages and only a few ever get promoted further. cdrm surfaces this directly: a release is *in
+pipeline* unless some other, more recently created release of the same workload has already been promoted to a stage
+further along than this one. Once that happens, this release has effectively been abandoned in favor of the newer
+one - nobody is going to come back and promote it, since whatever it was testing has already been superseded. Such a
+release is marked *out of pipeline* in the Releases view (next to the head/deployment-failure icons in the Current
+Stage column), and the "In pipeline only" filter hides them entirely.
+
+This is deliberately a live computation, never a stored flag - recomputed fresh from today's data on every read,
+exactly like the *head* status above. That is also what makes it fuzzy by design: if someone does decide to promote an
+"out of pipeline" release after all, it simply becomes *in pipeline* again the moment that happens, the same as any
+other release. There is nothing to undo or reconcile - the status was only ever a reflection of the current data, not
+a decision cdrm made and remembered.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> InPipeline
+
+    state "In Pipeline<br/>no newer release of this workload<br/>has reached a later stage" as InPipeline
+    state "Out of Pipeline<br/>a newer release has already<br/>advanced past this one" as OutOfPipeline
+
+    InPipeline --> OutOfPipeline: a release created after this one is promoted to a later stage
+    OutOfPipeline --> InPipeline: this release is promoted past whatever had overtaken it
+    InPipeline --> [*]
+    OutOfPipeline --> [*]
+
+    classDef active fill:#e8f6ec,stroke:#1a3a63,color:#000
+    classDef stale fill:#fdecea,stroke:#6b4c14,color:#000
+    class InPipeline active
+    class OutOfPipeline stale
+```
+
+This status is completely independent of *head*: a non-head release at the leading stage (no other release of the
+workload has gone further yet) is still in pipeline, and a head release can itself be out of pipeline if a newer
+release has already jumped ahead of its own stage entirely.
+
 #### Deployment Scheduling
 
 Each stage has a deployment policy: **immediate** or **scheduled**. An immediate-policy stage attempts to deploy the

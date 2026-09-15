@@ -7,6 +7,8 @@
 import { computed } from 'vue'
 import { userProfile } from '../auth/userProfile'
 import { currentRoles } from '../auth/roles'
+import { supportedTimezones, useDateTimePreferences } from '../composables/useDateTimePreferences'
+import { formatDateTime } from '../utils/formatDateTime'
 
 // Matches the README's "RBAC Role Based Access Control" section — kept here rather than
 // fetched from anywhere so this still works the instant the token is decoded, no request
@@ -19,6 +21,13 @@ const ROLE_DESCRIPTIONS: Record<string, string> = {
 }
 
 const isDevops = computed(() => currentRoles.value.includes('cdrm-devops'))
+
+const dateTimePrefs = useDateTimePreferences()
+const timezoneOptions = supportedTimezones()
+// Recomputes (and so re-renders) whenever dateTimePrefs changes, since formatDateTime()
+// reads it internally — a live "here's what that looks like" as the viewer edits their
+// own timezone/format choice below, not a ticking clock.
+const dateTimePreview = computed(() => formatDateTime(new Date().toISOString()))
 </script>
 
 <template>
@@ -52,6 +61,51 @@ const isDevops = computed(() => currentRoles.value.includes('cdrm-devops'))
             </tr>
           </tbody>
         </v-table>
+
+        <div class="text-subtitle-2 mb-2">Date &amp; Time Display</div>
+        <!-- v-menu closes on any click inside it by default (close-on-content-click) —
+             never mattered while the rest of this card was read-only display, but would
+             close the whole menu on every single radio/field click here. Stopping
+             propagation keeps that default for the rest of the card while this section
+             stays open through as many changes as the user wants to make. -->
+        <div class="mb-4" @click.stop>
+          <div class="text-body-2 font-weight-medium mb-1">Timezone</div>
+          <v-radio-group v-model="dateTimePrefs.timezoneMode" density="compact" hide-details inline class="mb-1">
+            <v-radio label="Browser default" value="browser" />
+            <v-radio label="Select a timezone" value="custom" />
+          </v-radio-group>
+          <v-autocomplete
+            v-if="dateTimePrefs.timezoneMode === 'custom'"
+            v-model="dateTimePrefs.timezone"
+            :items="timezoneOptions"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="mb-2"
+          />
+
+          <div class="text-body-2 font-weight-medium mb-1 mt-2">Format</div>
+          <v-radio-group v-model="dateTimePrefs.formatMode" density="compact" hide-details inline class="mb-1">
+            <v-radio label="Browser default" value="browser" />
+            <v-radio label="Enter a format" value="custom" />
+          </v-radio-group>
+          <v-text-field
+            v-if="dateTimePrefs.formatMode === 'custom'"
+            v-model="dateTimePrefs.format"
+            density="compact"
+            variant="outlined"
+            hide-details
+            class="mb-1"
+          />
+          <p v-if="dateTimePrefs.formatMode === 'custom'" class="text-caption text-medium-emphasis mb-0">
+            Tokens: YYYY, YY, MM, DD, HH (24h), hh (12h), mm, ss, SSS (ms), TZ (timezone). Anything else is copied
+            through as-is.
+          </p>
+
+          <v-alert type="info" variant="tonal" density="compact" class="mt-2">
+            Preview: {{ dateTimePreview }}
+          </v-alert>
+        </div>
 
         <div class="text-subtitle-2 mb-2">Roles</div>
         <div v-if="userProfile.roles.length" class="d-flex flex-wrap ga-1 mb-2">

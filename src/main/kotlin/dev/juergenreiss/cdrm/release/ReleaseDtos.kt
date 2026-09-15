@@ -33,6 +33,14 @@ data class ReleaseResponse(
     val canRollback: Boolean,
     val canEdit: Boolean,
     val canDelete: Boolean,
+    // False when some other, more recently created release of the same workload has
+    // already reached a stage further along the pipeline than this one — i.e. this
+    // release has effectively been abandoned in favor of a newer one, rather than ever
+    // getting promoted onward itself. Purely a live comparison against today's other
+    // releases (see ReleaseService.isInPipeline), never stored: promoting this release
+    // past whatever had overtaken it flips it back to true immediately, no different
+    // from any other release.
+    val inPipeline: Boolean,
     // The current stage (only if this release is head there) plus every stage before it,
     // minus any the caller's cdrm-release-actions claim disallows redeploy to — the valid
     // targets for redeploy().

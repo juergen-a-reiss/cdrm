@@ -7,5 +7,5 @@ import org.springframework.data.jpa.repository.JpaRepository
 import java.util.*
 
 interface ReleaseRepository : JpaRepository<Release, UUID> {
-    fun findByWorkloadIdAndCurrentStageId(workloadId: UUID, currentStageId: UUID): List<Release>
+    fun findByWorkloadId(workloadId: UUID): List<Release>
 }

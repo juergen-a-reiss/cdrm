@@ -898,14 +898,7 @@ class ReleaseServiceTest {
         val target = persistedRelease(id = targetReleaseId, workloadId = workloadId, currentStageId = prod.id!!)
         given(repository.findById(targetReleaseId)).willReturn(Optional.of(target))
         given(repository.save(target)).willReturn(target)
-        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, prod.id!!)).willReturn(
-            listOf(persistedRelease(id = headReleaseId, workloadId = workloadId, currentStageId = prod.id!!), target)
-        )
-        given(
-            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(
-                prod.id!!, listOf(headReleaseId, targetReleaseId)
-            )
-        ).willReturn(
+        given(releaseHistoryRepository.findFirstByWorkloadIdAndStageIdOrderByCreatedAtDesc(workloadId, prod.id!!)).willReturn(
             persistedHistoryEntry(releaseId = headReleaseId, image = "registry.example.com/head", stageId = prod.id!!)
         )
 
@@ -947,10 +940,7 @@ class ReleaseServiceTest {
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
         stubWorkloadVisible(workloadId)
         given(stageRepository.findById(prod.id!!)).willReturn(Optional.of(prod))
-        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, prod.id!!)).willReturn(listOf(release))
-        given(
-            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
-        ).willReturn(
+        given(releaseHistoryRepository.findFirstByWorkloadIdAndStageIdOrderByCreatedAtDesc(workloadId, prod.id!!)).willReturn(
             persistedHistoryEntry(releaseId = releaseId, image = release.image, stageId = prod.id!!)
         )
 
@@ -1024,10 +1014,7 @@ class ReleaseServiceTest {
         val releaseId = UUID.randomUUID()
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
-        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, prod.id!!)).willReturn(listOf(release))
-        given(
-            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
-        ).willReturn(
+        given(releaseHistoryRepository.findFirstByWorkloadIdAndStageIdOrderByCreatedAtDesc(workloadId, prod.id!!)).willReturn(
             persistedHistoryEntry(releaseId = releaseId, image = release.image, stageId = prod.id!!)
         )
         given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
@@ -1059,13 +1046,10 @@ class ReleaseServiceTest {
         val releaseId = UUID.randomUUID()
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
-        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, prod.id!!)).willReturn(listOf(release))
         val failedEntry = persistedHistoryEntry(releaseId = releaseId, image = release.image, stageId = prod.id!!, deployedAt = Instant.now())
         failedEntry.deploymentFinished = Instant.now()
         failedEntry.deploymentFailed = true
-        given(
-            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
-        ).willReturn(failedEntry)
+        given(releaseHistoryRepository.findFirstByWorkloadIdAndStageIdOrderByCreatedAtDesc(workloadId, prod.id!!)).willReturn(failedEntry)
         given(currentActorResolver.resolve()).willReturn(UUID.randomUUID())
         given(deploymentExecutor.attemptDeploy(workload, prod, product, release.image)).willReturn(DeployAttemptResult.Success)
         stubHistorySaveEchoesArgument()
@@ -1088,14 +1072,7 @@ class ReleaseServiceTest {
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
         stubWorkloadVisible(workloadId)
-        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, prod.id!!)).willReturn(
-            listOf(release, persistedRelease(id = headReleaseId, workloadId = workloadId, currentStageId = prod.id!!))
-        )
-        given(
-            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(
-                prod.id!!, listOf(releaseId, headReleaseId)
-            )
-        ).willReturn(
+        given(releaseHistoryRepository.findFirstByWorkloadIdAndStageIdOrderByCreatedAtDesc(workloadId, prod.id!!)).willReturn(
             persistedHistoryEntry(releaseId = headReleaseId, image = "registry.example.com/head", stageId = prod.id!!)
         )
 
@@ -1161,10 +1138,7 @@ class ReleaseServiceTest {
         val releaseId = UUID.randomUUID()
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = qa.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
-        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, qa.id!!)).willReturn(listOf(release))
-        given(
-            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(qa.id!!, listOf(releaseId))
-        ).willReturn(
+        given(releaseHistoryRepository.findFirstByWorkloadIdAndStageIdOrderByCreatedAtDesc(workloadId, qa.id!!)).willReturn(
             persistedHistoryEntry(releaseId = releaseId, image = release.image, stageId = qa.id!!)
         )
 
@@ -1187,12 +1161,7 @@ class ReleaseServiceTest {
         val headReleaseId = UUID.randomUUID()
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = qa.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
-        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, qa.id!!)).willReturn(
-            listOf(release, persistedRelease(id = headReleaseId, workloadId = workloadId, currentStageId = qa.id!!))
-        )
-        given(
-            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(qa.id!!, listOf(releaseId, headReleaseId))
-        ).willReturn(
+        given(releaseHistoryRepository.findFirstByWorkloadIdAndStageIdOrderByCreatedAtDesc(workloadId, qa.id!!)).willReturn(
             persistedHistoryEntry(releaseId = headReleaseId, image = "registry.example.com/head", stageId = qa.id!!)
         )
 
@@ -1210,16 +1179,43 @@ class ReleaseServiceTest {
         val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = prod.id!!)
         given(repository.findById(releaseId)).willReturn(Optional.of(release))
         given(stageRepository.findById(prod.id!!)).willReturn(Optional.of(prod))
-        given(repository.findByWorkloadIdAndCurrentStageId(workloadId, prod.id!!)).willReturn(listOf(release))
-        given(
-            releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(prod.id!!, listOf(releaseId))
-        ).willReturn(
+        given(releaseHistoryRepository.findFirstByWorkloadIdAndStageIdOrderByCreatedAtDesc(workloadId, prod.id!!)).willReturn(
             persistedHistoryEntry(releaseId = releaseId, image = release.image, stageId = prod.id!!)
         )
 
         val result = service.findById(releaseId)
 
         assertFalse(result.canRollback)
+    }
+
+    @Test
+    fun `toResponse reports canRollback true for an older release once the one that superseded it has been promoted onward`() {
+        // Reproduces the mobile-backend bug this was found from: release A is created at
+        // Dev, release B (newer) supersedes it there, then B gets promoted to QA. A's own
+        // currentStageId never changed — it's still Dev — but A must not be "head" at Dev
+        // just because B has since moved on: B's image (deployed when B arrived at Dev,
+        // before its later promotion) is still the last thing actually deployed there.
+        val workloadId = UUID.randomUUID()
+        stubWorkloadVisible(workloadId)
+        val dev = persistedStage(order = 1, name = "Dev")
+        val qa = persistedStage(order = 2, name = "QA")
+        stubWorkloadStages(workloadId, listOf(dev, qa))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev, qa))
+        given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
+
+        val releaseAId = UUID.randomUUID()
+        val releaseA = persistedRelease(id = releaseAId, workloadId = workloadId, currentStageId = dev.id!!)
+        given(repository.findById(releaseAId)).willReturn(Optional.of(releaseA))
+        // B's own currentStageId is QA by now (unused here — this test only cares about
+        // headReleaseId's view of Dev), but its latest history row AT DEV — from before
+        // that promotion — is still the most recent one recorded for that stage.
+        given(releaseHistoryRepository.findFirstByWorkloadIdAndStageIdOrderByCreatedAtDesc(workloadId, dev.id!!)).willReturn(
+            persistedHistoryEntry(releaseId = UUID.randomUUID(), image = "registry.example.com/b", stageId = dev.id!!)
+        )
+
+        val result = service.findById(releaseAId)
+
+        assertTrue(result.canRollback)
     }
 
     @Test
@@ -1289,6 +1285,48 @@ class ReleaseServiceTest {
         val result = service.findById(releaseId)
 
         assertEquals(deployedAt, result.lastDeployedAt)
+    }
+
+    @Test
+    fun `toResponse reports inPipeline false when a newer release of the same workload has reached a later stage`() {
+        val workloadId = UUID.randomUUID()
+        stubWorkloadVisible(workloadId)
+        val dev = persistedStage(order = 1, name = "Dev")
+        val qa = persistedStage(order = 2, name = "QA")
+        stubWorkloadStages(workloadId, listOf(dev, qa))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev, qa))
+        given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
+
+        val releaseId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = dev.id!!)
+            .apply { createdAt = Instant.now().minusSeconds(60) }
+        val newerAtQa = persistedRelease(workloadId = workloadId, currentStageId = qa.id!!)
+            .apply { createdAt = Instant.now() }
+        given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        given(repository.findByWorkloadId(workloadId)).willReturn(listOf(release, newerAtQa))
+
+        val result = service.findById(releaseId)
+
+        assertFalse(result.inPipeline)
+    }
+
+    @Test
+    fun `toResponse reports inPipeline true when no other release of the workload has advanced further`() {
+        val workloadId = UUID.randomUUID()
+        stubWorkloadVisible(workloadId)
+        val dev = persistedStage(order = 1, name = "Dev")
+        stubWorkloadStages(workloadId, listOf(dev))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev))
+        given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
+
+        val releaseId = UUID.randomUUID()
+        val release = persistedRelease(id = releaseId, workloadId = workloadId, currentStageId = dev.id!!)
+        given(repository.findById(releaseId)).willReturn(Optional.of(release))
+        given(repository.findByWorkloadId(workloadId)).willReturn(listOf(release))
+
+        val result = service.findById(releaseId)
+
+        assertTrue(result.inPipeline)
     }
 
     @Test
@@ -1493,6 +1531,76 @@ class ReleaseServiceTest {
         val exception = assertThrows(ResponseStatusException::class.java) { service.findAll("bogus,asc") }
 
         assertEquals(400, exception.statusCode.value())
+    }
+
+    @Test
+    fun `findAll marks an older release out of pipeline once a newer release of the same workload reaches a later stage`() {
+        val workloadId = UUID.randomUUID()
+        val dev = persistedStage(order = 1, name = "Dev")
+        val qa = persistedStage(order = 2, name = "QA")
+        stubWorkloadStages(workloadId, listOf(dev, qa))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev, qa))
+        given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
+        given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
+        given(workloadRepository.findAllById(setOf(workloadId))).willReturn(listOf(persistedWorkload(id = workloadId)))
+
+        val older = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!, image = "app:1")
+            .apply { createdAt = Instant.now().minusSeconds(60) }
+        val newer = persistedRelease(workloadId = workloadId, currentStageId = qa.id!!, image = "app:2")
+            .apply { createdAt = Instant.now() }
+        given(repository.findAll()).willReturn(listOf(older, newer))
+
+        val result = service.findAll().associateBy { it.image }
+
+        assertFalse(result.getValue("app:1").inPipeline)
+        assertTrue(result.getValue("app:2").inPipeline)
+    }
+
+    @Test
+    fun `findAll keeps releases in pipeline when nothing newer has advanced past them`() {
+        val workloadId = UUID.randomUUID()
+        val dev = persistedStage(order = 1, name = "Dev")
+        stubWorkloadStages(workloadId, listOf(dev))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev))
+        given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
+        given(workloadRepository.findAllById(setOf(workloadId))).willReturn(listOf(persistedWorkload(id = workloadId)))
+
+        // Same stage as each other — a newer release at the SAME stage (not a later one)
+        // doesn't push the older one out of pipeline, only a later stage does.
+        val older = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!, image = "app:1")
+            .apply { createdAt = Instant.now().minusSeconds(60) }
+        val newer = persistedRelease(workloadId = workloadId, currentStageId = dev.id!!, image = "app:2")
+            .apply { createdAt = Instant.now() }
+        given(repository.findAll()).willReturn(listOf(older, newer))
+
+        val result = service.findAll()
+
+        assertTrue(result.all { it.inPipeline })
+    }
+
+    @Test
+    fun `findAll never lets one workload's advanced release affect another workload's in-pipeline status`() {
+        val workloadA = UUID.randomUUID()
+        val workloadB = UUID.randomUUID()
+        val dev = persistedStage(order = 1, name = "Dev")
+        val qa = persistedStage(order = 2, name = "QA")
+        stubWorkloadStages(workloadA, listOf(dev, qa))
+        stubWorkloadStages(workloadB, listOf(dev, qa))
+        given(stageRepository.findAll(Sort.by("order"))).willReturn(listOf(dev, qa))
+        given(stageRepository.findById(dev.id!!)).willReturn(Optional.of(dev))
+        given(stageRepository.findById(qa.id!!)).willReturn(Optional.of(qa))
+        given(workloadRepository.findAllById(setOf(workloadA, workloadB)))
+            .willReturn(listOf(persistedWorkload(id = workloadA), persistedWorkload(id = workloadB)))
+
+        val aOld = persistedRelease(workloadId = workloadA, currentStageId = dev.id!!, image = "a:1")
+            .apply { createdAt = Instant.now().minusSeconds(60) }
+        val bNew = persistedRelease(workloadId = workloadB, currentStageId = qa.id!!, image = "b:2")
+            .apply { createdAt = Instant.now() }
+        given(repository.findAll()).willReturn(listOf(aOld, bNew))
+
+        val result = service.findAll().associateBy { it.image }
+
+        assertTrue(result.getValue("a:1").inPipeline)
     }
 
     @Test

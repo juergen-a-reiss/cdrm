@@ -46,7 +46,14 @@ interface ReleaseHistoryRepository : JpaRepository<ReleaseHistory, UUID>, JpaSpe
 
     fun findTopByReleaseIdAndDeployedAtIsNotNullOrderByDeployedAtDesc(releaseId: UUID): ReleaseHistory?
 
-    fun findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(stageId: UUID, releaseIds: Collection<UUID>): ReleaseHistory?
+    // The most recent history row at a (workload, stage) pair, full stop — unlike the
+    // above, not narrowed to a specific set of release ids. Used to find the actual head
+    // of a stage (see ReleaseService.headReleaseId()): whichever release's image is still
+    // the last one actually deployed there, regardless of whether that release has since
+    // been promoted on to a later stage itself (promoting doesn't undeploy the stage it
+    // left — the image sitting there doesn't change until something else deploys over
+    // it).
+    fun findFirstByWorkloadIdAndStageIdOrderByCreatedAtDesc(workloadId: UUID, stageId: UUID): ReleaseHistory?
 
     // The latest history row for a specific (release, stage) pair — not the same as "the
     // release's latest row overall": redeploying to an earlier stage doesn't move the

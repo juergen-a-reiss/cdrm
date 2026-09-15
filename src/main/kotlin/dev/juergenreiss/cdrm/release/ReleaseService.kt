@@ -87,6 +87,12 @@ class ReleaseService(
             .associate { it.releaseId to it.lastDeployedAt }
         val currentStageLatestEntryByReleaseId = releaseHistoryRepository.findLatestAtCurrentStageByReleaseIdIn(releases.mapNotNull { it.id })
             .associateBy { it.releaseId }
+        // Batched per workload (not per release, the way toResponse()'s own default
+        // parameter would) — isInPipeline() only ever compares a release against its own
+        // workload's siblings, so every release of the same workload can share one
+        // ordered-stages lookup and one sibling list instead of each re-querying both.
+        val releasesByWorkload = releases.groupBy { it.workloadId }
+        val orderedStagesByWorkload = releasesByWorkload.keys.associateWith { orderedStagesFor(it) }
         val responses = releases
             .filter { release ->
                 val workload = workloadsById[release.workloadId] ?: return@filter false
@@ -96,6 +102,7 @@ class ReleaseService(
                 it.toResponse(
                     lastDeployedAt = lastDeployedAtByReleaseId[it.id],
                     currentStageLatestEntry = currentStageLatestEntryByReleaseId[it.id],
+                    inPipeline = isInPipeline(it, releasesByWorkload.getValue(it.workloadId), orderedStagesByWorkload.getValue(it.workloadId)),
                 )
             }
         val comparators = sortComparators + mapOf(
@@ -642,17 +649,37 @@ class ReleaseService(
         }
     }
 
-    // The head of a (workload, stage) pair is whichever release currently sitting at that
-    // stage has the most recent history entry there — i.e. the last one actually deployed,
-    // regardless of whether it got there via create(), promote(), or rollback().
-    private fun headReleaseId(workloadId: UUID, stageId: UUID): UUID? {
-        val candidateIds = repository.findByWorkloadIdAndCurrentStageId(workloadId, stageId).mapNotNull { it.id }
-        if (candidateIds.isEmpty()) return null
-        return releaseHistoryRepository.findFirstByStageIdAndReleaseIdInOrderByCreatedAtDesc(stageId, candidateIds)?.releaseId
-    }
+    // The head of a (workload, stage) pair is whichever release has the most recent
+    // history entry there — i.e. the last one actually deployed, via create(), promote(),
+    // or rollback() — regardless of whether that release's OWN currentStageId has since
+    // moved on to a later stage. It must not be narrowed to releases still currently
+    // sitting at this stage: promoting a release on doesn't undeploy the stage it left,
+    // so the image running there doesn't change until something else deploys over it.
+    // Getting this wrong lets an older, never-promoted release re-claim "head" the moment
+    // the one that actually superseded it there is itself promoted onward — see the
+    // mobile-backend example this was found from.
+    private fun headReleaseId(workloadId: UUID, stageId: UUID): UUID? =
+        releaseHistoryRepository.findFirstByWorkloadIdAndStageIdOrderByCreatedAtDesc(workloadId, stageId)?.releaseId
 
     private fun isHead(release: Release): Boolean =
         headReleaseId(release.workloadId, release.currentStageId) == release.id
+
+    // False when some other, more recently created release of the same workload has
+    // already reached a stage further along than this one — see
+    // ReleaseResponse.inPipeline for what that means. Compares stage POSITION (index
+    // within orderedStages) rather than the raw order column, since order can have gaps.
+    // siblings is expected to include `release` itself (harmless — it never matches its
+    // own id) so callers can pass the same list they already have rather than filtering
+    // it first.
+    private fun isInPipeline(release: Release, siblings: List<Release>, orderedStages: List<Stage>): Boolean {
+        val stageIndex = orderedStages.withIndex().associate { (i, stage) -> stage.id to i }
+        val myIndex = stageIndex[release.currentStageId] ?: return true
+        return siblings.none { other ->
+            other.id != release.id &&
+                other.createdAt!!.isAfter(release.createdAt) &&
+                (stageIndex[other.currentStageId] ?: -1) > myIndex
+        }
+    }
 
     private fun redeployableStagesFor(release: Release): List<Stage> {
         val orderedStages = orderedStagesFor(release.workloadId)
@@ -709,6 +736,7 @@ class ReleaseService(
         deployError: String? = null,
         lastDeployedAt: Instant? = releaseHistoryRepository.findTopByReleaseIdAndDeployedAtIsNotNullOrderByDeployedAtDesc(id!!)?.deployedAt,
         currentStageLatestEntry: ReleaseHistory? = releaseHistoryRepository.findFirstByReleaseIdAndStageIdOrderByCreatedAtDesc(id!!, currentStageId),
+        inPipeline: Boolean = isInPipeline(this, repository.findByWorkloadId(workloadId), orderedStagesFor(workloadId)),
     ): ReleaseResponse {
         val currentStage = stageRepository.findById(currentStageId).orElseThrow()
         val orderedStages = orderedStagesFor(workloadId)
@@ -738,6 +766,7 @@ class ReleaseService(
             canRollback = canRollback,
             canEdit = canEdit,
             canDelete = canDelete,
+            inPipeline = inPipeline,
             redeployableStages = redeployableStages,
             lastDeployedAt = lastDeployedAt,
             deployError = deployError,
