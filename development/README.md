@@ -85,6 +85,35 @@ docker volume rm development_db-data
 ./up.sh
 ```
 
+### Encrypted connections (TLS)
+
+`./up.sh` also brings up `postgres-tls-init`, a one-shot container that generates a self-signed certificate into the
+`postgres-tls` volume the first time (skipped on later runs — the same cert is reused across restarts). The
+`postgres` service enables TLS with it (`ssl=on`), but its `pg_hba.conf` still accepts plain connections too — this
+one instance serves both, and which one a given connection gets is entirely up to that client's own `sslmode`, not
+anything server-side.
+
+cdrm itself picks its mode via `DB_SSL_MODE` (see the main README's `docs/INSTALL.md`), which defaults to `disable`
+in `application.yaml` — but `application-dev.yaml` (the `dev` profile `./gradlew bootRun` runs under) overrides it to
+`require`, so local dev connects encrypted out of the box, no env var needed. `require` encrypts the connection
+without checking the server's certificate — the right choice against this self-signed one; `verify-ca`/`verify-full`
+would fail here, since the JVM has no reason to trust a certificate nobody signed. To go back to a plain connection
+locally (e.g. to double-check the `disable` codepath still works), override it back down:
+
+```bash
+export DB_SSL_MODE=disable
+./gradlew bootRun
+```
+
+To force a fresh certificate (e.g. after rotating it), remove the volume — `postgres` must come down with it since
+it holds the file open:
+
+```bash
+docker compose down postgres postgres-tls-init
+docker volume rm development_postgres-tls
+./up.sh
+```
+
 ## Keycloak
 
 Admin console: http://localhost:2305 (credentials: `admin / admin`)

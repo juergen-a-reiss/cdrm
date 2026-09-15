@@ -2,5 +2,5 @@
 
 - Security: Support encrypted postgres connection
 - Security: Support encrypted and authenticated kafka connection
-- Functionality: Per product and stage: show workloads images configured and running. 
+- Feature: workload versions.
 

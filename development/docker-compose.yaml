@@ -8,6 +8,35 @@ networks:
         - subnet: 172.30.200.0/24
 
 services:
+  # One-shot: generates a self-signed cert/key for postgres' TLS listener into the
+  # postgres-tls volume, then exits — skips regenerating if one is already there (so a
+  # plain restart doesn't churn it). Uses the exact same image as the postgres service
+  # below so `chown postgres:postgres` resolves to the identical uid that service's
+  # server process runs as, without having to know or hardcode what that uid is.
+  postgres-tls-init:
+    profiles: [postgres]
+    image: postgres:18.3
+    pull_policy: missing
+    container_name: postgres-tls-init
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ -f /tls/server.key ]; then
+          echo "postgres-tls-init: server.key already present, skipping"
+        else
+          openssl req -new -x509 -days 3650 -nodes -newkey rsa:2048 \
+            -keyout /tls/server.key -out /tls/server.crt -subj "/CN=postgres"
+          chown postgres:postgres /tls/server.key /tls/server.crt
+          chmod 600 /tls/server.key
+          chmod 644 /tls/server.crt
+          echo "postgres-tls-init: generated a new self-signed certificate"
+        fi
+    volumes:
+      - postgres-tls:/tls
+    networks:
+      - shared_net
+
   # docker exec -it postgres psql -U dockers -d dockers
   postgres:
     profiles: [postgres]
@@ -15,15 +44,31 @@ services:
     pull_policy: missing
     container_name: postgres
     restart: always
+    depends_on:
+      postgres-tls-init:
+        condition: service_completed_successfully
     environment:
       POSTGRES_USER: dockers
       POSTGRES_PASSWORD: dockers
       POSTGRES_DB: dockers
     ports:
       - "5432:5432"
+    # ssl=on lets the server negotiate TLS, but pg_hba.conf's default-generated `host`
+    # rules (as opposed to `hostssl`) match either an encrypted or a plain connection —
+    # so this one instance keeps serving both, and which one a given connection uses is
+    # entirely the client's choice (cdrm's own DB_SSL_MODE — see development/README.md).
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/tls/server.crt
+      - -c
+      - ssl_key_file=/tls/server.key
     volumes:
       - db-data:/var/lib/postgresql
       - ./src/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - postgres-tls:/tls:ro
     networks:
       - shared_net
 
@@ -134,6 +179,8 @@ services:
 
 volumes:
   db-data:
+    driver: local
+  postgres-tls:
     driver: local
   gitea-data:
     driver: local

@@ -11,6 +11,15 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      data-source-properties:
+        # pgjdbc's own connection property (passed straight through, not a Spring/Hikari
+        # concept) — disable keeps today's unencrypted behavior for anyone not opting in.
+        # require encrypts the connection without verifying the server's certificate;
+        # verify-ca/verify-full additionally validate it against the JVM's default trust
+        # store (no extra config needed for a real CA-signed certificate — just not for
+        # the self-signed one development/README.md's local Postgres uses).
+        sslmode: ${DB_SSL_MODE:disable}
   jpa:
     hibernate:
       ddl-auto: validate

@@ -10,6 +10,7 @@ lsof -ti:1964 -sTCP:LISTEN | xargs -r kill
 
 echo "Delete the docker volumes: "
 docker volume rm development_db-data
+docker volume rm development_postgres-tls
 docker volume rm development_gitea-data
 
 echo "Stop and delete minikube cluster"

@@ -43,6 +43,7 @@ applies in production, where only `application.yaml`'s defaults (or lack thereof
 | `DB_URL`              | yes      | —                     | Postgres JDBC URL                                                           |
 | `DB_USERNAME`         | yes      | —                     | Postgres user                                                               |
 | `DB_PASSWORD`         | yes      | —                     | Postgres password                                                          |
+| `DB_SSL_MODE`         | no       | `disable`             | Postgres connection encryption: `disable`/`allow`/`prefer`/`require`/`verify-ca`/`verify-full` (pgjdbc's own `sslmode` values) |
 | `OIDC_CLIENT_ID`      | no       | `cdrm`                | OIDC client ID cdrm validates tokens against                                |
 | `KUBECONFIG`          | no       | `~/.kube/config`      | Kubeconfig file for direct Kubernetes deploys (see Kubernetes Clusters)     |
 | `GITOPS_GIT_USERNAME` | no       | *(unset — anonymous)* | Git username to push GitOps commits with (see Kubernetes Clusters)         |
@@ -58,6 +59,14 @@ and rotating them; cdrm itself never stores them anywhere.
 authenticated pushes (a repo that accepts anonymous pushes, or a deployment with no GitOps-managed namespaces at all,
 needs neither). They're sent as an HTTP Basic `Authorization` header per git operation, so this currently only
 supports git remotes over `http://`/`https://` — not SSH.
+
+`DB_SSL_MODE` is a plain pgjdbc connection property (`spring.datasource.hikari.data-source-properties.sslmode`), not
+something cdrm interprets itself — both an unencrypted and an encrypted connection are supported by leaving it at its
+default or setting it, respectively; no code or schema change either way. `require` encrypts the connection but
+doesn't check the server's identity; `verify-ca`/`verify-full` additionally validate the server's certificate against
+the JVM's default trust store, which needs no further configuration for a certificate signed by a real (publicly
+trusted, or already-installed-in-the-JVM) CA — e.g. most managed Postgres offerings. See `development/README.md`'s
+"Encrypted connections (TLS)" section for exercising this locally against a self-signed certificate.
 
 ## Frontend Customization
 

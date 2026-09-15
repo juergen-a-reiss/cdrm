@@ -3,6 +3,14 @@ spring:
     url: jdbc:postgresql://localhost:5432/cdrm
     username: cdrm
     password: cdrm
+    hikari:
+      data-source-properties:
+        # The local postgres container accepts both (see development/README.md's
+        # "Encrypted connections (TLS)"), so default local dev to the encrypted one —
+        # verify-ca/verify-full would fail here anyway, against its self-signed cert.
+        # Still the same DB_SSL_MODE env var as application.yaml, just a different
+        # fallback — export DB_SSL_MODE=disable to go back to a plain connection.
+        sslmode: ${DB_SSL_MODE:require}
   security:
     oauth2:
       resourceserver:
