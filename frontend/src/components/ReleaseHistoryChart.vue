@@ -66,7 +66,7 @@ const chartOptions = computed(() => ({
 
 <template>
   <div class="chart-container">
-    <p v-if="labels.length === 0" class="text-body-2 text-medium-emphasis pa-4">No data for the selected filters.</p>
+    <p v-if="labels.length === 0" class="text-body-medium text-medium-emphasis pa-4">No data for the selected filters.</p>
     <Bar v-else-if="chartType === 'bar'" :data="chartData" :options="chartOptions" />
     <Line v-else :data="chartData" :options="chartOptions" />
   </div>

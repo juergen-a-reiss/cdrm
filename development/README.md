@@ -157,6 +157,14 @@ main README's "Release Notifications" and "Live UI Updates (WebSocket)" sections
 `cdrm`'s `application-dev.yaml` already points at `localhost:9092` and defaults the topic to `cdrm` — no
 further config needed once this component is running.
 
+### Event retention
+
+Messages expire after 30 minutes (`KAFKA_LOG_RETENTION_MINUTES` on the `kafka` service) rather than Kafka's own
+7-day default — there's no reason to let a local dev broker accumulate days of stale release-notification events.
+This is the broker-wide default, applied to the `cdrm` topic since it's auto-created rather than pre-created with
+its own config. Actual deletion only happens on the (default) 5-minute retention-check sweep, so expect up to
+~35 minutes before an expired message is actually gone, not exactly 30.
+
 ### Viewing messages
 
 [Kafdrop](https://github.com/obsidiandynamics/kafdrop) — a simple read-only topic/message browser — comes up

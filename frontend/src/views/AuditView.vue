@@ -157,7 +157,7 @@ onMounted(load)
 </script>
 
 <template>
-  <h1 class="text-h5 mb-4">Audit Log</h1>
+  <h1 class="text-headline-small mb-4">Audit Log</h1>
 
   <div class="d-flex flex-wrap ga-2 align-center mb-4">
     <v-select
@@ -220,7 +220,7 @@ onMounted(load)
       <template #expanded-row="{ item, columns }">
         <tr>
           <td :colspan="columns.length" class="pa-4 bg-surface-light">
-            <div class="text-subtitle-2 mb-2">Changes</div>
+            <div class="text-title-medium mb-2">Changes</div>
             <v-table v-if="item.changes && Object.keys(item.changes).length" density="compact" class="mb-4">
               <thead>
                 <tr>
@@ -239,7 +239,7 @@ onMounted(load)
             </v-table>
             <span v-else class="text-medium-emphasis d-block mb-4">No field changes recorded.</span>
 
-            <div class="text-subtitle-2 mb-2">Full new state</div>
+            <div class="text-title-medium mb-2">Full new state</div>
             <v-table v-if="item.newState" density="compact">
               <tbody>
                 <tr v-for="[field, value] in Object.entries(item.newState)" :key="field">

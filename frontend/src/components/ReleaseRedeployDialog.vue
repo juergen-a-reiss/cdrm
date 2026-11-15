@@ -63,7 +63,7 @@ async function save() {
     <v-card title="Redeploy release">
       <v-card-text>
         <v-alert v-if="error" type="error" :text="error" class="mb-4" />
-        <p v-if="release" class="text-body-2 mb-4">
+        <p v-if="release" class="text-body-medium mb-4">
           Redeploy <strong>{{ release.image }}</strong> to:
         </p>
         <v-select

@@ -153,6 +153,13 @@ services:
       KAFKA_LOG_DIRS: /var/lib/kafka/data
       CLUSTER_ID: dockers-kafka-cluster-01
       KAFKA_JMX_PORT: ""
+      # Local dev only: events expire quickly rather than piling up for days — this is
+      # the broker-wide default retention (log.retention.minutes), applied to the "cdrm"
+      # topic since it's auto-created (auto.create.topics.enable defaults on, no
+      # explicit topic-level override here) rather than pre-created with its own config.
+      # Actual deletion still only happens on the default 5-minute log.retention.check.
+      # interval.ms sweep, so expect up to ~35 minutes before a message is really gone.
+      KAFKA_LOG_RETENTION_MINUTES: "30"
     ports:
       - "9092:29092"
     volumes:

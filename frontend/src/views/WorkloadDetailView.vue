@@ -73,9 +73,9 @@ const headers = [
   <v-progress-linear v-if="loading" indeterminate class="mb-4" />
 
   <template v-if="overview">
-    <h1 class="text-h5 mb-1">{{ overview.workloadName }}</h1>
+    <h1 class="text-headline-small mb-1">{{ overview.workloadName }}</h1>
     <div class="d-flex align-center flex-wrap ga-4 mb-4">
-      <div class="text-body-2 text-medium-emphasis">
+      <div class="text-body-medium text-medium-emphasis">
         Product: {{ overview.productName }} — Pipeline: {{ overview.pipeline }}
       </div>
       <v-btn variant="tonal" color="primary" size="small" prepend-icon="mdi-tag-outline" @click="viewReleases">
@@ -92,7 +92,7 @@ const headers = [
       </v-btn>
     </div>
 
-    <div v-if="overview.stages.length === 0" class="text-body-2 text-medium-emphasis">
+    <div v-if="overview.stages.length === 0" class="text-body-medium text-medium-emphasis">
       This workload is not linked to any stage yet.
     </div>
 
@@ -101,7 +101,7 @@ const headers = [
       <template #item.lastRelease="{ item }">
         <div v-if="item.latestRelease">
           <div>{{ item.latestRelease.image }}</div>
-          <div class="text-caption text-medium-emphasis">
+          <div class="text-body-small text-medium-emphasis">
             {{ item.latestRelease.action }} — {{ formatDeploymentStatus(item.latestRelease) }}
           </div>
         </div>

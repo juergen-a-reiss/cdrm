@@ -1,0 +1,34 @@
+Continuous Delivery and Release Management
+
+I’ve been automating software releases to Kubernetes for years. Now I’ve turned that experience into software.
+
+At Solvians, I designed and implemented the release process for our Continuous Delivery and Release Management setup. Later, when Solvians became part of WSD, the DevOps team and me designed the release process for the WSD platform as well.
+
+For me, a good release process for Kubernetes should be GitOps-based. And the deployment of the releases must be 100% automated. 
+
+But there is something even more important: The Product Owners have to be 100% in the driver's seat: They decide which release candidate of a workload moves to pre-production and, later, to production. Of course, a Product Owner needs a nice UI to decide which release candidate will make it to the next stage of the delivery pipeline. You cannot have the Product Owner work directly in the GitOps Git repository.
+
+The goal was always the same: 
+→ Take the manual work out of releasing software. 
+→ Improve the deployment frequency and quality.
+→ Make rollback easy.
+
+Instead of people having to remember which version needs to go where and when, or which deployment steps need to be performed, the release process should handle all changes reliably and consistently. And it needs to support both GitOps and non-GitOps environments.
+ 
+So, what does a company get from implementing automatic delivery with Product Owner in the driver's seat?
+
+Companies implementing automated deployments that are triggered directly by the Product Owner from a nice UI save hours of manual work every week. For example, in a SaaS environment there might be 100 different workloads. Not all of them are deployed every week. But suppose 50 of them are deployed to production at least once a week. And depending on the setup, also at least once to pre-production. If you save only 12 minutes per workload and deployment because developers do not have to write "deployment tickets" that the DevOps team then implement over the weekend, the company will save 50 × 12 minutes = 600 minutes = 10 hours. Every week! Maybe with the exception of Christmas! 😉 And rest assured: A 12-minute saving is a very conservative estimate! Furthermore, and maybe even more importantly, companies get a shorter time-to-market because they deploy more frequently.
+
+And there is another benefit that is at least as important: releases become predictable, traceable and much less dependent on individual people.
+
+After doing this in real-world SaaS environments for the last 10 years, I started asking myself: What would a release management platform look like if I compiled everything I’ve learned into software?
+
+That question led to CDRM – Continuous Delivery Release Management.
+
+It’s a source-available project where I’m turning my experience with release processes, Kubernetes, GitOps, deployment automation and SaaS operations into software.
+
+This is the start of a small series where I’ll share some of the ideas behind it — and the lessons I’ve learned from implementing them in practice.
+
+Please find CDRM on GitHub: https://github.com/juergen-a-reiss/cdrm
+
+#ContinuousDelivery #DevOps #Kubernetes #SaaS #DeploymentAutomation #SoftwareEngineering #GitOps

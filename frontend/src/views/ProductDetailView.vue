@@ -64,9 +64,9 @@ const headers = computed(() => [
   <v-progress-linear v-if="loading" indeterminate class="mb-4" />
 
   <template v-if="overview">
-    <h1 class="text-h5 mb-4">{{ overview.productName }}</h1>
+    <h1 class="text-headline-small mb-4">{{ overview.productName }}</h1>
 
-    <div v-if="overview.stages.length === 0" class="text-body-2 text-medium-emphasis">
+    <div v-if="overview.stages.length === 0" class="text-body-medium text-medium-emphasis">
       {{
         overview.isGroup
           ? 'This product group has no member workloads linked to any stage yet.'
@@ -78,13 +78,13 @@ const headers = computed(() => [
       <v-tabs v-model="activeStageId">
         <v-tab v-for="stage in overview.stages" :key="stage.stageId" :value="stage.stageId">
           {{ stage.stageName }}
-          <span class="text-caption text-medium-emphasis ml-1">({{ stage.pipeline }})</span>
+          <span class="text-body-small text-medium-emphasis ml-1">({{ stage.pipeline }})</span>
         </v-tab>
       </v-tabs>
 
       <v-window v-model="activeStageId">
         <v-window-item v-for="stage in overview.stages" :key="stage.stageId" :value="stage.stageId">
-          <div class="text-caption text-medium-emphasis my-2">
+          <div class="text-body-small text-medium-emphasis my-2">
             Pipeline: {{ stage.pipeline }} — Cluster: {{ stage.kubernetesContext ?? '(none configured)' }}
           </div>
 
@@ -93,7 +93,7 @@ const headers = computed(() => [
             <template #item.lastRelease="{ item }">
               <div v-if="item.latestRelease">
                 <div>{{ item.latestRelease.image }}</div>
-                <div class="text-caption text-medium-emphasis">
+                <div class="text-body-small text-medium-emphasis">
                   {{ item.latestRelease.action }} — {{ formatDeploymentStatus(item.latestRelease) }}
                 </div>
               </div>

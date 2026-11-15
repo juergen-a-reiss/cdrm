@@ -143,7 +143,7 @@ async function removeProduct(product: ProductResponse) {
         </template>
         <template #item.deploymentTimes="{ item }">
           <div v-if="item.deploymentTimes.length === 0">—</div>
-          <div v-for="entry in item.deploymentTimes" :key="entry.stageName" class="text-caption">
+          <div v-for="entry in item.deploymentTimes" :key="entry.stageName" class="text-body-small">
             <strong>{{ entry.stageName }}</strong>: <code>{{ entry.cron }}</code> — next: {{ entry.nextDeploymentDisplay }}
           </div>
         </template>

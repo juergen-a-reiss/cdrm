@@ -490,7 +490,7 @@ async function runTest() {
 
           <v-divider class="my-4" />
           <div class="d-flex align-center justify-space-between mb-1">
-            <span class="text-body-2 text-medium-emphasis">Kubernetes Namespaces</span>
+            <span class="text-body-medium text-medium-emphasis">Kubernetes Namespaces</span>
             <div class="d-flex ga-2">
               <v-btn size="small" variant="text" prepend-icon="mdi-plus" @click="addNamespace">Add namespace</v-btn>
               <v-btn
@@ -514,7 +514,7 @@ async function runTest() {
             persistent-hint
           />
 
-          <div v-if="!selectedRow" class="text-body-2 text-medium-emphasis mt-4">
+          <div v-if="!selectedRow" class="text-body-medium text-medium-emphasis mt-4">
             {{ namespaceRows.length === 0 ? 'No namespaces configured yet.' : 'Select a namespace above to edit it.' }}
           </div>
           <template v-else>
@@ -543,7 +543,7 @@ async function runTest() {
               <v-btn-toggle v-model="selectedRow.mode" mandatory density="compact" color="primary" variant="outlined" class="mt-2">
                 <v-btn v-for="option in modeOptions" :key="option.value" :value="option.value">{{ option.title }}</v-btn>
               </v-btn-toggle>
-              <div class="text-caption text-medium-emphasis mt-1">
+              <div class="text-body-small text-medium-emphasis mt-1">
                 Only the mode selected above is used for this namespace — the other mode's fields below are ignored, even if
                 still filled in.
               </div>
@@ -564,7 +564,7 @@ async function runTest() {
               </template>
               <template v-else>
                 <div class="d-flex align-center justify-space-between mt-2">
-                  <span class="text-body-2 text-medium-emphasis">Template script (JavaScript)</span>
+                  <span class="text-body-medium text-medium-emphasis">Template script (JavaScript)</span>
                   <v-btn size="small" variant="tonal" color="primary" prepend-icon="mdi-play" @click="openTestDialog">Test</v-btn>
                 </div>
                 <v-textarea
@@ -639,7 +639,7 @@ async function runTest() {
             hide-details
           />
         </div>
-        <div class="text-caption text-medium-emphasis mt-1">
+        <div class="text-body-small text-medium-emphasis mt-1">
           Repository: {{ effectiveRepositoryUrl || '(none configured)' }} — this namespace can only ever be reached via a
           stage in the <strong>{{ testPipeline || '(unknown)' }}</strong> pipeline, so the stage (and, once picked, the
           workload) options above are narrowed down to exactly that.

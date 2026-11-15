@@ -140,7 +140,7 @@ useChangeReload('dev.juergenreiss.cdrm.config.', loadUserIdStorage)
 
   <v-alert v-if="error" type="error" :text="error" class="mb-4" />
 
-  <p class="text-body-2 text-medium-emphasis mb-4">
+  <p class="text-body-medium text-medium-emphasis mb-4">
     Choose which menu entries each role sees in the navigation drawer. cdrm-devops always sees Configuration itself.
   </p>
 
@@ -166,10 +166,10 @@ useChangeReload('dev.juergenreiss.cdrm.config.', loadUserIdStorage)
   </div>
 
   <v-card class="mt-8" variant="outlined">
-    <v-card-title class="text-subtitle-1">User ID Storage</v-card-title>
+    <v-card-title class="text-title-medium">User ID Storage</v-card-title>
     <v-card-text>
       <v-alert v-if="userIdStorageError" type="error" :text="userIdStorageError" class="mb-4" />
-      <p class="text-body-2 text-medium-emphasis mb-4">
+      <p class="text-body-medium text-medium-emphasis mb-4">
         Controls whether cdrm records who created or last modified each entity (clusters, stages, products,
         workloads, releases, and configuration entries). "User UUID" is the existing behavior. "None" stores no
         identifier at all — for a company that doesn't want to keep even a pseudonymous one; existing history is
@@ -179,7 +179,7 @@ useChangeReload('dev.juergenreiss.cdrm.config.', loadUserIdStorage)
         <v-radio label="User UUID" value="USER_UUID" />
         <v-radio label="None" value="NONE" />
       </v-radio-group>
-      <p v-if="userIdStorageMode === 'USER_UUID'" class="text-body-2 text-medium-emphasis mb-2">
+      <p v-if="userIdStorageMode === 'USER_UUID'" class="text-body-medium text-medium-emphasis mb-2">
         How a user id is displayed in "By" columns throughout the app. Any format other than UUID requires
         capturing each user's first name, last name, and email — captured only from users who act while this
         setting is active, not retroactively.

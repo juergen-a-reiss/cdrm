@@ -326,7 +326,7 @@ onUnmounted(unsubscribeChanges)
 </script>
 
 <template>
-  <h1 class="text-h5 mb-4">Release History Dashboard</h1>
+  <h1 class="text-headline-small mb-4">Release History Dashboard</h1>
 
   <div class="d-flex flex-wrap ga-2 align-center mb-4">
     <PipelineFilterBar />
@@ -349,7 +349,7 @@ onUnmounted(unsubscribeChanges)
   </div>
 
   <v-card class="mb-6" variant="outlined">
-    <v-card-title class="text-subtitle-1 d-flex align-center flex-wrap ga-4">
+    <v-card-title class="text-title-medium d-flex align-center flex-wrap ga-4">
       <span>Release History Graph</span>
       <v-spacer />
       <v-select
@@ -374,7 +374,7 @@ onUnmounted(unsubscribeChanges)
   </v-card>
 
   <v-card variant="outlined">
-    <v-card-title class="text-subtitle-1 d-flex align-center flex-wrap ga-4">
+    <v-card-title class="text-title-medium d-flex align-center flex-wrap ga-4">
       <span>Release History Details</span>
       <v-spacer />
       <v-text-field

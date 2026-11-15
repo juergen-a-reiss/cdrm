@@ -59,7 +59,7 @@ watch(
   <template v-else-if="result">
     <span v-if="result.state === 'NOT_APPLICABLE'">—</span>
     <v-chip v-else-if="result.state === 'NOT_FOUND'" color="grey" size="small" variant="flat">Not deployed</v-chip>
-    <div v-else-if="result.state === 'OK'" class="text-caption">
+    <div v-else-if="result.state === 'OK'" class="text-body-small">
       <div>{{ result.image ?? '—' }}</div>
       <div>
         <span :class="{ 'text-error': result.readyReplicas !== result.desiredReplicas }">

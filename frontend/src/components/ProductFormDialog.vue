@@ -121,8 +121,8 @@ async function save() {
           class="mb-4"
         />
         <template v-if="!isGroup && scheduledStages.length > 0">
-          <p class="text-subtitle-2 mb-2">Deployment times</p>
-          <p class="text-caption mb-2">
+          <p class="text-title-medium mb-2">Deployment times</p>
+          <p class="text-body-small mb-2">
             Cron expression per stage — only stages using the "At configured time" policy. Leave blank to leave
             that stage unconfigured (releases can't be promoted into it until a time is set).
           </p>
