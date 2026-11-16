@@ -35,8 +35,8 @@ never exercised.
   first time something is pushed to it.
 - **`setup-argocd.sh`** — installs ArgoCD into minikube and applies the generated
   Applications.
-- **`portforward.sh`** — exposes the ArgoCD UI on **https://localhost:1961** (mirrors how
-  `minikube dashboard --port=1964` is used elsewhere in this dev setup).
+- The UI is exposed via Ingress at **https://argocd.&lt;domain&gt;** — see
+  `../ingress/setup-ingress.sh` and the development README's Ingress section.
 
 ## Setup
 
@@ -48,6 +48,7 @@ argocd/setup-gitops-repo.sh
 # 2. Start minikube if it isn't already, then install ArgoCD:
 minikube start
 argocd/setup-argocd.sh
+ingress/setup-ingress.sh   # prints the ArgoCD URL
 
 # 3. Seed as usual — bootstrap_kubernetes_objects() now pushes the GitOps-managed
 #    namespaces' manifests to Gitea instead of kubectl-applying them; ArgoCD picks them
@@ -55,7 +56,7 @@ argocd/setup-argocd.sh
 ./seed.py --token <a cdrm-devops token>
 
 # 4. Watch it sync:
-argocd/portforward.sh   # https://localhost:1961, user "admin", password:
+# open https://argocd.<domain>, user "admin", password:
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
 ```
 

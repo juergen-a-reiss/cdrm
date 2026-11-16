@@ -44,7 +44,9 @@ clusters:
   - name: minikube
     description: "Local Minicube"
     cluster_type: "K8S"
-    url: "http://127.0.0.1:1964/api/v1"
+    # minikube's API server (see `kubectl config view --minify`) — informational only,
+    # cdrm itself connects via the kubeconfig context. Re-check after a `minikube delete`.
+    url: "https://192.168.49.2:8443"
     gitops:
       use_git_ops: true
       git_repo: "http://localhost:3000/cdrm/gitops-demo.git"

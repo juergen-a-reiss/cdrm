@@ -69,5 +69,5 @@ for name in ${EXISTING_NAMES}; do
 done
 
 echo "Done."
-echo "UI: run development/argocd/portforward.sh, then open https://localhost:1961"
+echo "UI: run development/ingress/setup-ingress.sh (if not done yet), then open https://argocd.<domain> (it prints the URL)"
 echo "Login: user 'admin', password: kubectl -n ${ARGOCD_NAMESPACE} get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d"

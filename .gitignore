@@ -45,3 +45,7 @@ out/
 ### Python ###
 __pycache__/
 *.pyc
+
+### Local dev ###
+development/local.env
+development/ingress/certs/

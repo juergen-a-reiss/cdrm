@@ -201,14 +201,37 @@ at the local Keycloak realm — already present for this dev setup.
 
 cdrm's local dev setup deploys into a `minikube` cluster (the default context name `minikube start` configures). All
 four cdrm stages (development/qa/staging/production) share that one cluster, so each stage's `namespace_prefix` (see
-`seed/data.yaml`) keeps them from colliding on namespace. To get a graphical view use `minikube dashboard --port=1964`.
+`seed/data.yaml`) keeps them from colliding on namespace.
+
+### Ingress (ArgoCD UI, Kubernetes Dashboard)
+
+Everything in minikube with a UI is reached through the minikube `ingress` addon — no port-forwards.
+`ingress/setup-ingress.sh` (called by `start.sh`, safe to re-run) sets it up:
+
+| URL | What |
+|---|---|
+| `https://argocd.<domain>` | ArgoCD UI |
+| `https://dashboard.<domain>` | Kubernetes Dashboard |
+
+`<domain>` defaults to `<minikube ip>.nip.io` (e.g. `argocd.192.168.49.2.nip.io`) — public wildcard DNS that resolves
+to the embedded IP, nothing to configure. To get your own names, copy `local.env.example` to `local.env` (git-ignored),
+set `DEV_DOMAIN` (e.g. `juergenareiss.dev`), re-run the script, and add the `/etc/hosts` line it prints:
+
+```
+192.168.49.2 argocd.juergenareiss.dev dashboard.juergenareiss.dev
+```
+
+TLS is terminated at the ingress with a wildcard certificate signed by a local dev CA the script creates once in
+`ingress/certs/` (git-ignored). Import `ingress/certs/dev-ca.crt` into your browser as a certificate authority once.
+For a `.dev` domain that's required: the whole `.dev` TLD is on the browsers' HSTS preload list, so they won't load it
+over HTTP or let you click past an untrusted certificate.
 
 ### ArgoCD / GitOps demo
 
 The paris pipeline's namespaces (`p-*`) are GitOps-managed instead of cdrm's direct Kubernetes patch — see
 `argocd/README.md` for the full setup (installs ArgoCD into minikube, plus a local Gitea instance for the demo repo).
 
-UI: `argocd/portforward.sh`, then https://localhost:1961 — user `admin`, password:
+UI: `https://argocd.<domain>` (see Ingress above) — user `admin`, password:
 
 ```bash
 kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
