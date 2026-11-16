@@ -110,6 +110,24 @@ class GitCommitClientTest {
     }
 
     @Test
+    fun `commits with the configured author and committer, not the host's git identity`() {
+        val result = client.commit(target(edit(value = "new:2.0")), "test commit")
+
+        assertEquals(GitCommitResult.Success, result)
+        val identity = git(tempDir.resolve("bare.git").toFile(), "log", "-1", "--format=%an <%ae> / %cn <%ce>", "main").trim()
+        assertEquals("cdrm <cdrm@localhost> / cdrm <cdrm@localhost>", identity)
+    }
+
+    @Test
+    fun `a given author becomes the commit's author while cdrm stays the committer`() {
+        val result = client.commit(target(edit(value = "new:2.0")), "test commit", GitCommitAuthor("Jane Doe", "jane@example.com"))
+
+        assertEquals(GitCommitResult.Success, result)
+        val identity = git(tempDir.resolve("bare.git").toFile(), "log", "-1", "--format=%an <%ae> / %cn <%ce>", "main").trim()
+        assertEquals("Jane Doe <jane@example.com> / cdrm <cdrm@localhost>", identity)
+    }
+
+    @Test
     fun `still commits and pushes when the matching repository entry uses BASIC auth`() {
         // A bare file:// repo doesn't enforce or even see any auth header — this exercises
         // that adding one (GitCommitClient's auth=BASIC branch) doesn't break a normal

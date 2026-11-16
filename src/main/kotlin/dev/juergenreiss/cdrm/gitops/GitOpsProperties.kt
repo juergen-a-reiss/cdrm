@@ -49,8 +49,17 @@ class GitOpsRepositoryConfig {
 class GitOpsProperties {
     var repositories: MutableList<GitOpsRepositoryConfig> = mutableListOf()
 
+    // Author/committer identity for every GitOps commit cdrm makes. Always passed to git
+    // explicitly (see GitCommitClient.git()) rather than relying on a user.name/user.email
+    // git config, which a container or CI runner doesn't have — git then refuses to commit
+    // ("Author identity unknown").
+    var commitAuthorName: String = "cdrm"
+    var commitAuthorEmail: String = "cdrm@localhost"
+
     @PostConstruct
     fun validate() {
+        require(commitAuthorName.isNotBlank()) { "cdrm.gitops.commit-author-name must not be blank" }
+        require(commitAuthorEmail.isNotBlank()) { "cdrm.gitops.commit-author-email must not be blank" }
         val seenUrls = mutableSetOf<String>()
         for (repo in repositories) {
             require(repo.url.isNotBlank()) { "cdrm.gitops.repositories: every entry needs a url" }

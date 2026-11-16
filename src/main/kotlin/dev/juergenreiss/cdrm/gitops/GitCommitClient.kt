@@ -79,11 +79,14 @@ class GitCommitClient(
     // (without spending retry budget) for the scheduler. Postgres releases the row lock
     // automatically if the holding transaction/connection dies, so a crash mid-git-
     // operation can't wedge every future deploy behind it.
-    fun commit(target: GitOpsTarget, commitMessage: String): GitCommitResult {
+    //
+    // author: the commit's author (see GitCommitAuthorResolver); null uses cdrm's own
+    // configured identity, which is always the committer either way.
+    fun commit(target: GitOpsTarget, commitMessage: String, author: GitCommitAuthor? = null): GitCommitResult {
         return try {
             lockTransaction.execute {
                 jdbcTemplate.queryForObject("select id from git_lock where id = 1 for update nowait", Int::class.java)
-                doCommit(target, commitMessage)
+                doCommit(target, commitMessage, author)
             } ?: GitCommitResult.Failed("git lock transaction returned no result")
         } catch (e: CannotAcquireLockException) {
             log.info("GitOps lock busy — another git operation is in progress, will retry ({})", target.repositoryUrl)
@@ -91,7 +94,7 @@ class GitCommitClient(
         }
     }
 
-    private fun doCommit(target: GitOpsTarget, commitMessage: String): GitCommitResult {
+    private fun doCommit(target: GitOpsTarget, commitMessage: String, author: GitCommitAuthor?): GitCommitResult {
         val repoConfig = properties.find(target.repositoryUrl)
         return try {
             val dir = ensureClone(target.repositoryUrl, repoConfig)
@@ -119,7 +122,7 @@ class GitCommitClient(
                     file.writeText(yaml.dump(root))
                 }
                 git(dir, repoConfig, "add", "-A")
-                val commit = git(dir, repoConfig, "commit", "-m", commitMessage, allowFailure = true)
+                val commit = git(dir, repoConfig, "commit", "-m", commitMessage, allowFailure = true, author = author)
                 if (commit.exitCode != 0) {
                     if ("nothing to commit" in commit.output) continue
                     return GitCommitResult.Failed("git commit failed: ${commit.output.trim()}")
@@ -217,7 +220,13 @@ class GitCommitClient(
 
     private data class GitResult(val exitCode: Int, val output: String)
 
-    private fun git(workingDir: File, repoConfig: GitOpsRepositoryConfig?, vararg args: String, allowFailure: Boolean = false): GitResult {
+    private fun git(
+        workingDir: File,
+        repoConfig: GitOpsRepositoryConfig?,
+        vararg args: String,
+        allowFailure: Boolean = false,
+        author: GitCommitAuthor? = null,
+    ): GitResult {
         val command = mutableListOf("git")
         // Never prompt interactively: if the repo genuinely needs credentials we didn't
         // supply (or supplied wrong), this should fail with a clear, captured error —
@@ -234,6 +243,14 @@ class GitCommitClient(
             .directory(workingDir)
             .redirectErrorStream(true)
             .apply {
+                // Explicit identity, so commits work without any user.name/user.email git
+                // config (a container or CI runner has none) and never pick up whatever
+                // identity the host user happens to have configured. The committer is
+                // always cdrm; the author is the acting user when one was resolved.
+                environment()["GIT_AUTHOR_NAME"] = author?.name ?: properties.commitAuthorName
+                environment()["GIT_AUTHOR_EMAIL"] = author?.email ?: properties.commitAuthorEmail
+                environment()["GIT_COMMITTER_NAME"] = properties.commitAuthorName
+                environment()["GIT_COMMITTER_EMAIL"] = properties.commitAuthorEmail
                 environment()["GIT_TERMINAL_PROMPT"] = "0"
                 environment().remove("GIT_ASKPASS")
                 environment().remove("SSH_ASKPASS")

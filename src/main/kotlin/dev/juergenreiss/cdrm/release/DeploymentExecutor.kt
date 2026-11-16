@@ -3,6 +3,7 @@
 
 package dev.juergenreiss.cdrm.release
 
+import dev.juergenreiss.cdrm.gitops.GitCommitAuthorResolver
 import dev.juergenreiss.cdrm.gitops.GitCommitClient
 import dev.juergenreiss.cdrm.gitops.GitCommitResult
 import dev.juergenreiss.cdrm.gitops.GitOpsResolution
@@ -37,6 +38,7 @@ class DeploymentExecutor(
     private val kubernetesDeploymentClient: KubernetesDeploymentClient,
     private val gitOpsResolver: GitOpsResolver,
     private val gitCommitClient: GitCommitClient,
+    private val gitCommitAuthorResolver: GitCommitAuthorResolver,
     private val meterRegistry: MeterRegistry,
 ) {
 
@@ -53,7 +55,7 @@ class DeploymentExecutor(
             }
             is GitOpsResolution.Resolved -> {
                 val commitMessage = "cdrm: deploy $image for workload '${workload.name}' at stage '${stage.name}'"
-                return when (val result = gitCommitClient.commit(resolution.target, commitMessage)) {
+                return when (val result = gitCommitClient.commit(resolution.target, commitMessage, gitCommitAuthorResolver.currentUser())) {
                     is GitCommitResult.Success -> DeployAttemptResult.Success
                     is GitCommitResult.Failed -> {
                         log.error("Failed to commit GitOps deploy for workload {} at stage {}: {}", workload.id, stage.id, result.reason)

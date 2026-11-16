@@ -460,6 +460,22 @@ never deletes what was already captured — only future lookups stop needing it.
 Switching either setting is entirely forward-looking: existing `created_by`/`modified_by` values
 and captured names/emails are left exactly as they are — only future actions are affected.
 
+### GitOps commit author
+
+The same settings decide who a GitOps deployment's git commit is authored by. The committer is always cdrm itself
+(`GITOPS_COMMIT_AUTHOR_NAME`/`GITOPS_COMMIT_AUTHOR_EMAIL`, default `cdrm <cdrm@localhost>`); the author is:
+
+| User ID Storage | Display format                  | Commit author                                              |
+|-----------------|---------------------------------|------------------------------------------------------------|
+| None            | (any)                           | cdrm                                                       |
+| User UUID       | UUID                            | cdrm                                                       |
+| User UUID       | any format with name/email      | the acting user, from their JWT's `given_name`/`family_name`/`email` |
+
+The author is also cdrm when there is no acting user — deployments run by the scheduler ("At configured time" stages
+and retries of failed deployments) — or when the user's token has no `email` claim. A person's name and email only go
+into a git history when the company already opted into storing them, since a git history can't realistically be
+rewritten later (e.g. for a deletion request) once it's been cloned.
+
 ## Change Notifications
 
 Every release-history-recording moment, and every create/update/delete of a Cluster, Stage, Product,

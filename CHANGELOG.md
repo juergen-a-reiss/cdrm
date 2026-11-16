@@ -19,7 +19,8 @@ First public release, under the Apache License 2.0.
   user-friendly result when a cluster is unreachable. Live workload status (image, ready replicas) in the UI.
 - **GitOps deployments**: per-namespace option to commit the new image to a Git repository (e.g. for ArgoCD) instead
   of patching the cluster — either a simple file/YAML-path expression or a sandboxed JavaScript template for complex
-  repository layouts, with a test dialog to try it out.
+  repository layouts, with a test dialog to try it out. Commits are authored by the acting user when the User ID
+  Storage settings allow storing names and emails, otherwise by cdrm.
 - **Products and workloads**: product hierarchy (product groups), product and workload detail views, and an
   "out of pipeline" status for releases deployed outside the regular flow.
 - **Release History Dashboard**: graph and server-side sorted/filtered/paged history table; the release history is

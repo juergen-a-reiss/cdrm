@@ -1,5 +1,7 @@
 package dev.juergenreiss.cdrm.release
 
+import dev.juergenreiss.cdrm.gitops.GitCommitAuthor
+import dev.juergenreiss.cdrm.gitops.GitCommitAuthorResolver
 import dev.juergenreiss.cdrm.gitops.GitCommitClient
 import dev.juergenreiss.cdrm.gitops.GitCommitResult
 import dev.juergenreiss.cdrm.gitops.GitOpsEdit
@@ -40,13 +42,16 @@ class DeploymentExecutorTest {
     @Mock
     private lateinit var gitCommitClient: GitCommitClient
 
+    @Mock
+    private lateinit var gitCommitAuthorResolver: GitCommitAuthorResolver
+
     private val meterRegistry = SimpleMeterRegistry()
 
     private lateinit var executor: DeploymentExecutor
 
     @BeforeEach
     fun setUp() {
-        executor = DeploymentExecutor(kubernetesDeploymentClient, gitOpsResolver, gitCommitClient, meterRegistry)
+        executor = DeploymentExecutor(kubernetesDeploymentClient, gitOpsResolver, gitCommitClient, gitCommitAuthorResolver, meterRegistry)
     }
 
     private fun stage(kubernetesContext: String? = "my-context", namespacePrefix: String? = null) = Stage(
@@ -185,6 +190,33 @@ class DeploymentExecutorTest {
 
         assertEquals(DeployAttemptResult.Success, result)
         verifyNoInteractions(kubernetesDeploymentClient)
+    }
+
+    @Test
+    fun `passes the resolved acting user to the commit as its author`() {
+        val stage = stage(kubernetesContext = "my-context")
+        val workload = workload(kubernetes = true)
+        val product = product()
+        val target = GitOpsTarget(
+            repositoryUrl = "http://localhost:3000/cdrm/gitops-demo.git",
+            edits = listOf(
+                GitOpsEdit(
+                    branch = "main",
+                    filePath = "environments/platform/workload.yaml",
+                    yamlKeyPath = "spec.template.spec.containers[0].image",
+                    value = "image:1.0",
+                )
+            ),
+        )
+        val author = GitCommitAuthor("Jane Doe", "jane@example.com")
+        given(gitOpsResolver.resolve(workload, stage, product, "image:1.0")).willReturn(GitOpsResolution.Resolved(target))
+        given(gitCommitAuthorResolver.currentUser()).willReturn(author)
+        given(gitCommitClient.commit(target, "cdrm: deploy image:1.0 for workload 'workload' at stage 'Prod'", author))
+            .willReturn(GitCommitResult.Success)
+
+        val result = executor.attemptDeploy(workload, stage, product, "image:1.0")
+
+        assertEquals(DeployAttemptResult.Success, result)
     }
 
     @Test

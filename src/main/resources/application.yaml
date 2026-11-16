@@ -69,6 +69,9 @@ cdrm:
     # repositories[0]'s fields, _1_* onto repositories[1], and so on.
     # application-dev.yaml lists the two local Gitea demo repos directly instead.
     repositories: []
+    # Author/committer of every GitOps commit cdrm makes.
+    commit-author-name: ${GITOPS_COMMIT_AUTHOR_NAME:cdrm}
+    commit-author-email: ${GITOPS_COMMIT_AUTHOR_EMAIL:cdrm@localhost}
     # Local working directory for GitOps repo clones — the default (OS temp dir) is
     # fine even in production since GitCommitClient re-clones/fetches on every use.
     work-dir: ${GITOPS_WORKDIR:${java.io.tmpdir}/cdrm-gitops}

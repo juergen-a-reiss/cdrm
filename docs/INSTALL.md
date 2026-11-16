@@ -12,7 +12,8 @@ The backend and frontend ship as two separate images.
   an `eclipse-temurin:26-jre` runtime image — the ~145 third-party dependency jars (~175 MB, about 65 MB of it the
   GraalVM JavaScript engine for GitOps templates) end up in one layer that stays byte-identical across code-only
   rebuilds, separate from our own compiled classes (about 2 MB). Needs
-  `OIDC_ISSUER_URI` and the Postgres datasource settings at runtime (see `application.yaml`); listens on `8080`.
+  `OIDC_ISSUER_URI` and the Postgres datasource settings at runtime (see `application.yaml`); listens on `8080`. The
+  runtime image includes `git` and `openssh-client`, which GitOps deployments use to commit and push.
 - `frontend/Dockerfile` — builds the Vue app with `node`, then serves the static `dist/` output with
   `nginx:alpine` (`frontend/nginx.conf`). npm dependencies live in their own cached layer during the build stage
   (installed before the source is copied in), but the runtime image doesn't ship any of them at all — only the built
@@ -81,19 +82,35 @@ applies in production, where only `application.yaml`'s defaults (or lack thereof
 | `DB_SSL_MODE`         | no       | `disable`             | Postgres connection encryption: `disable`/`allow`/`prefer`/`require`/`verify-ca`/`verify-full` (pgjdbc's own `sslmode` values) |
 | `OIDC_CLIENT_ID`      | no       | `cdrm`                | OIDC client ID cdrm validates tokens against                                |
 | `KUBECONFIG`          | no       | `~/.kube/config`      | Kubeconfig file for direct Kubernetes deploys (see Kubernetes Clusters)     |
-| `GITOPS_GIT_USERNAME` | no       | *(unset — anonymous)* | Git username to push GitOps commits with (see Kubernetes Clusters)         |
-| `GITOPS_GIT_PASSWORD` | no       | *(unset — anonymous)* | Git password/token for `GITOPS_GIT_USERNAME`                               |
+| `CDRM_GITOPS_REPOSITORIES_<n>_*` | no | *(none)*     | GitOps repositories and their credentials, see below                       |
 | `GITOPS_WORKDIR`      | no       | OS temp directory     | Local working directory for GitOps repo clones                             |
+| `GITOPS_COMMIT_AUTHOR_NAME`  | no | `cdrm`           | Committer name of cdrm's GitOps commits, and their author unless the acting user is used (see the README's "GitOps commit author") |
+| `GITOPS_COMMIT_AUTHOR_EMAIL` | no | `cdrm@localhost` | Committer email of cdrm's GitOps commits (same rule as above)               |
 
-`KUBECONFIG` and the `GITOPS_*` credentials are read straight from the environment and never persisted to Postgres —
+`KUBECONFIG` and the GitOps repository credentials are read straight from the environment and never persisted to Postgres —
 same principle for both: the deployment target's credentials are the runtime environment's problem, not the
 database's. Whoever manages that environment (a mounted Kubernetes Secret, a file on the host, ...) owns provisioning
 and rotating them; cdrm itself never stores them anywhere.
 
-`GITOPS_GIT_USERNAME`/`GITOPS_GIT_PASSWORD` are only needed if any GitOps-managed namespace's repository requires
-authenticated pushes (a repo that accepts anonymous pushes, or a deployment with no GitOps-managed namespaces at all,
-needs neither). They're sent as an HTTP Basic `Authorization` header per git operation, so this currently only
-supports git remotes over `http://`/`https://` — not SSH.
+### GitOps repositories
+
+The git repositories cdrm may push GitOps commits to are configured per repository, numbered from `0`. They also make
+up the repository dropdown when editing a cluster. A repository that accepts anonymous pushes needs no entry, and
+neither does a deployment without GitOps-managed namespaces.
+
+| Variable                                         | Purpose                                                                     |
+|--------------------------------------------------|-----------------------------------------------------------------------------|
+| `CDRM_GITOPS_REPOSITORIES_0_URL`                 | Repository URL, exactly as configured on clusters/namespaces                |
+| `CDRM_GITOPS_REPOSITORIES_0_AUTH`                | `NONE` (default), `BASIC` or `SSH_KEY`                                      |
+| `CDRM_GITOPS_REPOSITORIES_0_USERNAME`            | `BASIC`: user name (required)                                               |
+| `CDRM_GITOPS_REPOSITORIES_0_PASSWORD`            | `BASIC`: password or access token                                           |
+| `CDRM_GITOPS_REPOSITORIES_0_SSH_PRIVATE_KEY_PATH`| `SSH_KEY`: path to a mounted private key file (required)                    |
+| `CDRM_GITOPS_REPOSITORIES_0_SSH_KNOWN_HOSTS_PATH`| `SSH_KEY`: path to a `known_hosts` file (optional, default ssh's own)       |
+
+A second repository uses `CDRM_GITOPS_REPOSITORIES_1_*`, and so on. `BASIC` credentials are sent as an HTTP Basic
+`Authorization` header per git operation (for `http://`/`https://` remotes); `SSH_KEY` passes the key to `ssh` per
+git operation (for `ssh://`/`git@host:` remotes). Neither is ever written to the clone's `.git/config`. A repository
+URL without a matching entry is pushed to anonymously.
 
 `DB_SSL_MODE` is a plain pgjdbc connection property (`spring.datasource.hikari.data-source-properties.sslmode`), not
 something cdrm interprets itself — both an unencrypted and an encrypted connection are supported by leaving it at its

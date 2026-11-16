@@ -30,6 +30,12 @@ RUN java -Djarmode=tools -jar app.jar extract --layers --launcher --destination 
 FROM eclipse-temurin:26-jre AS runtime
 WORKDIR /app
 
+# GitOps deploys shell out to the git CLI (GitCommitClient); openssh-client is needed for
+# repositories configured with auth=SSH_KEY.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system cdrm && useradd --system --gid cdrm --no-create-home --shell /usr/sbin/nologin cdrm
 
 COPY --from=extract /app/extracted/dependencies/ ./
