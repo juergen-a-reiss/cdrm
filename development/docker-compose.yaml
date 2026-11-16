@@ -15,7 +15,7 @@ services:
   # server process runs as, without having to know or hardcode what that uid is.
   postgres-tls-init:
     profiles: [postgres]
-    image: postgres:18.3
+    image: postgres:18.7
     pull_policy: missing
     container_name: postgres-tls-init
     entrypoint: ["/bin/sh", "-c"]
@@ -40,7 +40,7 @@ services:
   # docker exec -it postgres psql -U dockers -d dockers
   postgres:
     profiles: [postgres]
-    image: postgres:18.3
+    image: postgres:18.7
     pull_policy: missing
     container_name: postgres
     restart: always
@@ -82,7 +82,7 @@ services:
   #  2. Create a realm "tests", a user, and set token TTL to 1000 min in realm settings
   keycloak:
     profiles: [keycloak]
-    image: quay.io/keycloak/keycloak:26.6.1
+    image: quay.io/keycloak/keycloak:26.8.2
     container_name: keycloak
     command: start-dev
     depends_on:
@@ -112,7 +112,7 @@ services:
   # (admin / admin, see development/argocd/setup-gitops-repo.sh).
   gitea:
     profiles: [gitea]
-    image: gitea/gitea:1.24
+    image: gitea/gitea:1.27
     container_name: gitea
     restart: always
     environment:
@@ -136,7 +136,7 @@ services:
   #  - kafka:9092       (from other containers on shared_net)
   kafka:
     profiles: [kafka]
-    image: apache/kafka:4.0.0
+    image: apache/kafka:4.4.0
     container_name: kafka
     environment:
       KAFKA_NODE_ID: 1
@@ -172,7 +172,7 @@ services:
   # other in this setup.
   kafka-ui:
     profiles: [kafka]
-    image: obsidiandynamics/kafdrop:4.1.0
+    image: obsidiandynamics/kafdrop:4.3.1
     container_name: kafka-ui
     depends_on:
       - kafka

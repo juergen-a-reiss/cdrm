@@ -1,5 +1,5 @@
-// Required Notice: Copyright Dr. Juergen A. Reiss
-// Licensed under the terms in the LICENSE file at the repository root.
+// Copyright 2026 Dr. Juergen A. Reiss
+// SPDX-License-Identifier: Apache-2.0
 
 // Elapsed time from `since` to now, as a compact string ("3d 4h", "45m") — used for a
 // live workload's uptime. Coarsest-first, two units at most, since anything more

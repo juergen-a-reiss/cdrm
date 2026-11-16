@@ -1,5 +1,5 @@
-// Required Notice: Copyright Dr. Juergen A. Reiss
-// Licensed under the terms in the LICENSE file at the repository root.
+// Copyright 2026 Dr. Juergen A. Reiss
+// SPDX-License-Identifier: Apache-2.0
 
 package dev.juergenreiss.cdrm.config
 
@@ -50,7 +50,9 @@ class WebSocketConfig(private val jwtDecoder: JwtDecoder) : WebSocketMessageBrok
                     val token = accessor.getFirstNativeHeader("Authorization")?.removePrefix("Bearer ")?.trim()
                     val jwt = token?.takeIf { it.isNotEmpty() }?.let { runCatching { jwtDecoder.decode(it) }.getOrNull() }
                         ?: throw org.springframework.messaging.MessagingException("Missing or invalid token")
-                    accessor.user = UsernamePasswordAuthenticationToken.authenticated(jwt.subject, null, emptyList())
+                    val subject = jwt.subject
+                        ?: throw org.springframework.messaging.MessagingException("Token has no subject")
+                    accessor.user = UsernamePasswordAuthenticationToken.authenticated(subject, null, emptyList())
                 }
                 return message
             }

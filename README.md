@@ -578,3 +578,7 @@ If an attribute is not set, then ReBAC does not apply for this user for this att
 ## Going to production
 
 Read everything about production setup in [INSTALL.md](./docs/INSTALL.md)
+
+## License
+
+Licensed under the [Apache License 2.0](./LICENSE). See [NOTICE](./NOTICE) for attribution.

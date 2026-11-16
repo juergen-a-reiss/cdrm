@@ -1,5 +1,5 @@
-// Required Notice: Copyright Dr. Juergen A. Reiss
-// Licensed under the terms in the LICENSE file at the repository root.
+// Copyright 2026 Dr. Juergen A. Reiss
+// SPDX-License-Identifier: Apache-2.0
 
 import { http, toQueryString } from './http'
 
