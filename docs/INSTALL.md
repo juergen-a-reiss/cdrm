@@ -9,8 +9,9 @@ The backend and frontend ship as two separate images.
 - `Dockerfile` (repo root) — multi-stage build. Compiles the backend with `eclipse-temurin:26-jdk`
   (dependency resolution and compilation are separate cached layers, so an ordinary source change doesn't re-download
   anything), then extracts the boot jar into Spring Boot's layered-jar structure and copies each layer separately into
-  an `eclipse-temurin:26-jre` runtime image — the ~150 third-party dependency jars (~90 MB) end up in one layer that
-  stays byte-identical across code-only rebuilds, separate from our own compiled classes (under 1 MB). Needs
+  an `eclipse-temurin:26-jre` runtime image — the ~145 third-party dependency jars (~175 MB, about 65 MB of it the
+  GraalVM JavaScript engine for GitOps templates) end up in one layer that stays byte-identical across code-only
+  rebuilds, separate from our own compiled classes (about 2 MB). Needs
   `OIDC_ISSUER_URI` and the Postgres datasource settings at runtime (see `application.yaml`); listens on `8080`.
 - `frontend/Dockerfile` — builds the Vue app with `node`, then serves the static `dist/` output with
   `nginx:alpine` (`frontend/nginx.conf`). npm dependencies live in their own cached layer during the build stage
@@ -26,9 +27,43 @@ docker build -t cdrm-backend .
 docker build -t cdrm-frontend -f frontend/Dockerfile frontend
 ```
 
-`.github/workflows/docker.yml` builds both images on every push and pull request against `master`, and additionally
-pushes them to `ghcr.io/<owner>/cdrm-backend` and `ghcr.io/<owner>/cdrm-frontend` on pushes to `master` and on `vX.Y.Z`
-tags (pull requests only build, to validate the Dockerfiles without needing registry credentials).
+### Published images
+
+Pre-built images for `linux/amd64` and `linux/arm64` are published to the GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/juergen-a-reiss/cdrm-backend:0.1.0
+docker pull ghcr.io/juergen-a-reiss/cdrm-frontend:0.1.0
+```
+
+| Tag             | Meaning                                                                 |
+|-----------------|-------------------------------------------------------------------------|
+| `X.Y.Z`         | A release (see `CHANGELOG.md`) — use this in production                 |
+| `X.Y`           | Newest patch release of that minor version                              |
+| `latest`        | Newest release                                                          |
+| `master`        | Newest unreleased build of the `master` branch                          |
+| `sha-<commit>`  | One specific commit                                                     |
+
+`.github/workflows/ci.yml` runs the backend tests and the frontend type-check/build on every push and pull request
+against `master`, then builds both images. Pull requests only build them (amd64 only, no registry credentials needed);
+pushes to `master` and `vX.Y.Z` tags also publish them.
+
+## Releasing
+
+cdrm has exactly one version number: `version` in `gradle.properties`. The frontend has none of its own.
+
+1. Set `version` in `gradle.properties` to the new version, and in `CHANGELOG.md` move the `[Unreleased]` entries into
+   a new `## [X.Y.Z] - <date>` section (and update the compare links at the bottom).
+2. Commit, merge to `master`, then tag and push:
+   ```bash
+   git tag -a vX.Y.Z -m "cdrm X.Y.Z"
+   git push origin vX.Y.Z
+   ```
+3. The CI workflow checks that the tag matches `gradle.properties`, runs the tests, publishes the images, and creates
+   the GitHub Release with that version's `CHANGELOG.md` section as release notes.
+
+After the first release, Liquibase changesets that have shipped must never be edited again — every schema change needs a
+new changeset, or existing installations can't upgrade.
 
 ## Production Setup
 

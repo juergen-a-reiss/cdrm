@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1
 
-FROM eclipse-temurin:26-jdk AS build
+# Build and extract run natively on the CI runner ($BUILDPLATFORM) even for a multi-arch
+# build — the jar is platform-independent, so only the runtime stage below needs the
+# target architecture. Avoids compiling Kotlin under slow QEMU emulation for arm64.
+FROM --platform=$BUILDPLATFORM eclipse-temurin:26-jdk AS build
 WORKDIR /app
 
 # Wrapper and build scripts first so dependency resolution is cached in its own layer,
@@ -9,17 +12,17 @@ COPY gradlew ./
 COPY gradle ./gradle
 RUN ./gradlew --version
 
-COPY build.gradle.kts settings.gradle.kts ./
+COPY build.gradle.kts settings.gradle.kts gradle.properties ./
 RUN --mount=type=cache,target=/root/.gradle ./gradlew dependencies --no-daemon
 
 COPY src ./src
 RUN --mount=type=cache,target=/root/.gradle ./gradlew bootJar --no-daemon
 
-# Splits the boot jar into layers: the ~150 third-party dependency jars (which rarely
+# Splits the boot jar into layers: the ~145 third-party dependency jars (which rarely
 # change) land in their own filesystem layer, separate from our own compiled classes
 # (which change on every build) — see the "dependencies"/"application" COPYs below, this
 # is what actually answers "are the libraries in a dedicated layer".
-FROM eclipse-temurin:26-jdk AS extract
+FROM --platform=$BUILDPLATFORM eclipse-temurin:26-jdk AS extract
 WORKDIR /app
 COPY --from=build /app/build/libs/*.jar app.jar
 RUN java -Djarmode=tools -jar app.jar extract --layers --launcher --destination extracted

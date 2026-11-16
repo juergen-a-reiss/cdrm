@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*.*.*"]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  # Tests gate everything below — no image is pushed and no release is created from a
+  # commit whose backend tests or frontend type-check/build fail.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # gradle.properties holds cdrm's single version; a release tag must match it so the
+      # images, the GitHub Release and the jar all carry the same number.
+      - name: Check tag matches version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version="$(sed -n 's/^version=//p' gradle.properties)"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match gradle.properties version=${version} (expected v${version})"
+            exit 1
+          fi
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "26"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      # Includes the Testcontainers-based tests — the hosted runner provides Docker.
+      - name: Backend build and tests
+        run: ./gradlew build --no-daemon
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend type-check and build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+  images:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: backend
+            context: .
+            dockerfile: Dockerfile
+          - name: frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # arm64 only needs emulation for the small runtime stages — both Dockerfiles compile
+      # on the runner's native platform ($BUILDPLATFORM) and just copy the result.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # PRs only build/validate the image — nothing is pushed until it lands on master
+      # (or a version tag), so a fork PR never needs registry credentials.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Tags: "master" + "sha-<short>" for every master push; for a vX.Y.Z tag additionally
+      # "X.Y.Z", "X.Y" and "latest" — so "latest" always means the newest release, never
+      # an unreleased master build.
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/cdrm-${{ matrix.name }}
+          flavor: |
+            latest=false
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          # PRs only validate the build, amd64 is enough for that.
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  # Creates the GitHub Release for a vX.Y.Z tag once its images are published, with the
+  # matching CHANGELOG.md section as release notes.
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # The section between "## [X.Y.Z]" and the next "## [" heading (or the link
+          # definitions at the bottom of the file).
+          awk -v ver="${version}" '
+            $0 ~ "^## \\[" ver "\\]" { found = 1; next }
+            found && (/^## \[/ || /^\[[^]]+\]: /) { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::No '## [${version}]' section in CHANGELOG.md"
+            exit 1
+          fi
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          {
+            echo
+            echo "## Docker images"
+            echo
+            echo '```'
+            echo "ghcr.io/${owner}/cdrm-backend:${version}"
+            echo "ghcr.io/${owner}/cdrm-frontend:${version}"
+            echo '```'
+          } >> notes.md
+          gh release create "${GITHUB_REF_NAME}" --verify-tag --title "cdrm ${version}" --notes-file notes.md

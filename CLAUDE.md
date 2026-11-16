@@ -21,7 +21,6 @@ Key dependencies already wired in `build.gradle.kts`:
 - **Spring Data JPA + PostgreSQL** — persistence layer
 - **Spring Security** — authentication/authorization
 - **Quartz Scheduler** — background jobs
-- **Spring AI MCP Server WebMVC** — Model Context Protocol server integration
 - **SpringDoc OpenAPI** — Swagger UI at `/swagger-ui.html`
 - **Actuator + Micrometer/Prometheus** — metrics at `/actuator/prometheus`
 
