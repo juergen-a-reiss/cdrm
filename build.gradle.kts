@@ -72,6 +72,8 @@ allOpen {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // Plain-text logs in test output; application.yaml defaults to JSON (ECS).
+    systemProperty("logging.structured.format.console", "")
 }
 
 tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootRun") {

@@ -16,6 +16,11 @@ may still change between minor versions.
 - The frontend image reads its login settings at container start (`OIDC_AUTHORITY`, `OIDC_CLIENT_ID`) instead of
   having them compiled in, so one image works with any Keycloak.
 
+### Changed
+
+- The backend logs JSON lines (Elastic Common Schema) by default, for log collectors.
+  `LOGGING_STRUCTURED_FORMAT_CONSOLE=` (empty) restores plain text; local development and tests keep plain text.
+
 ### Fixed
 
 - The 0.1.0 frontend image could not log in: it was built without an OIDC issuer and client ID.

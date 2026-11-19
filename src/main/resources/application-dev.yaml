@@ -17,6 +17,12 @@ spring:
         jwt:
           issuer-uri: http://localhost:2305/realms/cdrm
 
+logging:
+  structured:
+    format:
+      # Plain-text logs for humans locally; application.yaml defaults to JSON (ECS).
+      console: ""
+
 cdrm:
   gitops:
     # Matches development/argocd/setup-gitops-repo.sh, which creates both of these

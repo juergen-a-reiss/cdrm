@@ -92,6 +92,17 @@ cdrm:
     # context the event occurred in (see ReleaseHistoryCloudEvent).
     source: ${CDRM_NOTIFICATIONS_SOURCE:urn:cdrm:release-service}
 
+logging:
+  structured:
+    format:
+      # JSON log lines on stdout (Elastic Common Schema; service.name/version come from
+      # spring.application.name and the jar's Implementation-Version) — what log
+      # collectors such as Loki/Alloy, Fluent Bit or Filebeat expect. Override with
+      # LOGGING_STRUCTURED_FORMAT_CONSOLE: "logstash" or "gelf" for another JSON shape,
+      # an empty value for Spring's plain-text format. application-dev.yaml and the test
+      # task switch back to plain text.
+      console: ecs
+
 management:
   endpoints:
     web:

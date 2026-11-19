@@ -96,6 +96,7 @@ applies in production, where only `application.yaml`'s defaults (or lack thereof
 | `GITOPS_WORKDIR`      | no       | OS temp directory     | Local working directory for GitOps repo clones                             |
 | `GITOPS_COMMIT_AUTHOR_NAME`  | no | `cdrm`           | Committer name of cdrm's GitOps commits, and their author unless the acting user is used (see the README's "GitOps commit author") |
 | `GITOPS_COMMIT_AUTHOR_EMAIL` | no | `cdrm@localhost` | Committer email of cdrm's GitOps commits (same rule as above)               |
+| `LOGGING_STRUCTURED_FORMAT_CONSOLE` | no | `ecs`      | Log format on stdout: JSON as `ecs`, `logstash` or `gelf`; empty for plain text (see Logging) |
 
 `KUBECONFIG` and the GitOps repository credentials are read straight from the environment and never persisted to Postgres —
 same principle for both: the deployment target's credentials are the runtime environment's problem, not the
@@ -129,6 +130,21 @@ doesn't check the server's identity; `verify-ca`/`verify-full` additionally vali
 the JVM's default trust store, which needs no further configuration for a certificate signed by a real (publicly
 trusted, or already-installed-in-the-JVM) CA — e.g. most managed Postgres offerings. See `development/README.md`'s
 "Encrypted connections (TLS)" section for exercising this locally against a self-signed certificate.
+
+### Logging
+
+The backend logs to stdout as one JSON object per line in the [Elastic Common Schema](https://www.elastic.co/guide/en/ecs/current/index.html)
+(ECS), ready for a log collector such as Grafana Alloy/Loki, Fluent Bit or Filebeat — no parsing rules needed. Each
+line carries `@timestamp`, `log.level`, `log.logger`, `message`, the thread, and `service.name`/`service.version`
+(`cdrm` and the release version); exceptions add `error.type`, `error.message` and `error.stack_trace`.
+
+```json
+{"@timestamp":"2026-11-19T12:00:27.999Z","log":{"level":"INFO","logger":"dev.juergenreiss.cdrm.CdrmApplicationKt"},"service":{"name":"cdrm","version":"0.1.1"},"message":"Started CdrmApplicationKt in 6.1 seconds","ecs":{"version":"8.11"}}
+```
+
+`LOGGING_STRUCTURED_FORMAT_CONSOLE=logstash` or `gelf` switches to another JSON shape; an empty value
+(`LOGGING_STRUCTURED_FORMAT_CONSOLE=`) to Spring's plain-text format, e.g. for reading logs by eye. Local development
+(`./gradlew bootRun`, the `dev` profile) and the tests log plain text.
 
 ## Frontend Customization
 
