@@ -30,6 +30,14 @@ This tool will make your life easier by:
 * Get an overview which product was deployed how often to production. Or rolled back.
 * Deployment metrics and stats ;).
 
+## Try it
+
+```bash
+cd quickstart && docker compose up -d
+```
+
+Then open http://localhost:8081 and log in as `devops` / `cdrm`. See [quickstart/README.md](./quickstart/README.md).
+
 ## What it does
 
 ### Stages

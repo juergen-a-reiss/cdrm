@@ -3,13 +3,13 @@
 
 import { computed } from 'vue'
 import { accessTokenClaims } from './accessTokenClaims'
+import { oidcClientId } from '../config/runtimeConfig'
 
 // Every cdrm client role the caller holds — exported for UserProfileMenu, which shows
 // the raw list; everything else here just derives a yes/no permission from it.
 export const currentRoles = computed<string[]>(() => {
-  const clientId = import.meta.env.VITE_OIDC_CLIENT_ID
   const resourceAccess = accessTokenClaims.value.resource_access as Record<string, { roles?: string[] }> | undefined
-  return resourceAccess?.[clientId]?.roles ?? []
+  return resourceAccess?.[oidcClientId]?.roles ?? []
 })
 
 function hasAnyRole(...roles: string[]): boolean {

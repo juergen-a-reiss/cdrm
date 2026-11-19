@@ -7,6 +7,21 @@ may still change between minor versions.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-16
+
+### Added
+
+- **Quickstart**: `quickstart/docker-compose.yaml` runs cdrm with the published images, Postgres and a pre-configured
+  Keycloak with demo users — see `quickstart/README.md`.
+- The frontend image reads its login settings at container start (`OIDC_AUTHORITY`, `OIDC_CLIENT_ID`) instead of
+  having them compiled in, so one image works with any Keycloak.
+
+### Fixed
+
+- The 0.1.0 frontend image could not log in: it was built without an OIDC issuer and client ID.
+- The frontend image's proxy sent every `/api` request to the backend's root path, and dropped the path and query
+  of `/ws` WebSocket requests.
+
 ## [0.1.0] - 2026-11-16
 
 First public release, under the Apache License 2.0.
@@ -34,5 +49,6 @@ First public release, under the Apache License 2.0.
 - **Operations**: Prometheus metrics, OpenAPI/Swagger UI, encrypted Postgres connections, and
   Docker images for backend and frontend published to `ghcr.io`.
 
-[Unreleased]: https://github.com/juergen-a-reiss/cdrm/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/juergen-a-reiss/cdrm/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/juergen-a-reiss/cdrm/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/juergen-a-reiss/cdrm/releases/tag/v0.1.0

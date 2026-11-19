@@ -18,8 +18,16 @@ The backend and frontend ship as two separate images.
   `nginx:alpine` (`frontend/nginx.conf`). npm dependencies live in their own cached layer during the build stage
   (installed before the source is copied in), but the runtime image doesn't ship any of them at all — only the built
   `dist/` assets, since the browser just needs the bundled JS. Proxies
-  `/api/` to a `backend` host on port `8080` — resolved lazily per-request via nginx's `resolver`, so the container
-  stays up even if that host isn't reachable yet. Listens on `80`.
+  `/api/` and `/ws` to a `backend` host on port `8080` — resolved lazily per-request via nginx's `resolver`, so the
+  container stays up even if that host isn't reachable yet. Listens on `80`. Configured at container start (nothing
+  installation-specific is compiled into the image):
+
+  | Variable          | Required | Default | Purpose                                                                     |
+  |-------------------|----------|---------|-----------------------------------------------------------------------------|
+  | `OIDC_AUTHORITY`  | yes      | —       | OIDC issuer URL as the *browser* reaches it, e.g. `https://sso.example.com/realms/cdrm` |
+  | `OIDC_CLIENT_ID`  | no       | `cdrm`  | Public OIDC client of the frontend; must match the backend's `OIDC_CLIENT_ID` |
+
+  `quickstart/docker-compose.yaml` is a complete, runnable example of both images together.
 
 Build locally from the repo root:
 
@@ -33,8 +41,8 @@ docker build -t cdrm-frontend -f frontend/Dockerfile frontend
 Pre-built images for `linux/amd64` and `linux/arm64` are published to the GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/juergen-a-reiss/cdrm-backend:0.1.0
-docker pull ghcr.io/juergen-a-reiss/cdrm-frontend:0.1.0
+docker pull ghcr.io/juergen-a-reiss/cdrm-backend:0.1.1
+docker pull ghcr.io/juergen-a-reiss/cdrm-frontend:0.1.1
 ```
 
 | Tag             | Meaning                                                                 |
@@ -54,7 +62,9 @@ pushes to `master` and `vX.Y.Z` tags also publish them.
 cdrm has exactly one version number: `version` in `gradle.properties`. The frontend has none of its own.
 
 1. Set `version` in `gradle.properties` to the new version, and in `CHANGELOG.md` move the `[Unreleased]` entries into
-   a new `## [X.Y.Z] - <date>` section (and update the compare links at the bottom).
+   a new `## [X.Y.Z] - <date>` section (and update the compare links at the bottom). Also update the default
+   `CDRM_VERSION` in `quickstart/docker-compose.yaml` (and its mention in `quickstart/README.md`) and the example
+   `docker pull` commands above.
 2. Commit, merge to `master`, then tag and push:
    ```bash
    git tag -a vX.Y.Z -m "cdrm X.Y.Z"

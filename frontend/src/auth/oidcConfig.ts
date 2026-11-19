@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { WebStorageStateStore, type UserManagerSettings } from 'oidc-client-ts'
+import { oidcAuthority, oidcClientId } from '../config/runtimeConfig'
 
 export const oidcConfig: UserManagerSettings = {
-  authority: import.meta.env.VITE_OIDC_AUTHORITY,
-  client_id: import.meta.env.VITE_OIDC_CLIENT_ID,
+  authority: oidcAuthority,
+  client_id: oidcClientId,
   redirect_uri: `${window.location.origin}/auth/callback`,
   silent_redirect_uri: `${window.location.origin}/auth/silent-renew`,
   post_logout_redirect_uri: window.location.origin,

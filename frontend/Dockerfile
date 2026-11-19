@@ -12,4 +12,6 @@ RUN npm run build
 FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Generates /config.js from OIDC_AUTHORITY/OIDC_CLIENT_ID at container start.
+COPY --chmod=755 docker-entrypoint.d/40-cdrm-config.sh /docker-entrypoint.d/
 EXPOSE 80

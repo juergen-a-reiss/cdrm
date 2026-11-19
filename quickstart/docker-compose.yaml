@@ -1,0 +1,67 @@
+# cdrm quickstart — try cdrm locally with the published images. NOT a production setup:
+# demo passwords, Keycloak in dev mode, plain HTTP. See quickstart/README.md and
+# docs/INSTALL.md for a real installation.
+#
+#   docker compose up -d
+#   open http://localhost:8081  (users: devops / productowner / developer / manager, password "cdrm")
+
+name: cdrm-quickstart
+
+services:
+  postgres:
+    image: postgres:18.7
+    environment:
+      POSTGRES_DB: cdrm
+      POSTGRES_USER: cdrm
+      POSTGRES_PASSWORD: cdrm
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cdrm -d cdrm"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Dev mode with its own embedded database; imports the "cdrm" realm (client, roles,
+  # demo users) from ./keycloak on first start.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.2
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
+    ports:
+      - "8180:8080"
+
+  backend:
+    image: ghcr.io/juergen-a-reiss/cdrm-backend:${CDRM_VERSION:-0.1.1}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/cdrm
+      DB_USERNAME: cdrm
+      DB_PASSWORD: cdrm
+      # The browser talks to Keycloak as localhost:8180, so that's the issuer in every
+      # token. The backend container can't reach Keycloak under that name, so it fetches
+      # the signing keys via the container name instead (and still checks the issuer).
+      OIDC_ISSUER_URI: http://localhost:8180/realms/cdrm
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/cdrm/protocol/openid-connect/certs
+      # Kafka change notifications are optional; live UI updates still work with a
+      # single backend instance.
+      CDRM_NOTIFICATIONS_KAFKA_ENABLED: "false"
+      CDRM_NOTIFICATIONS_KAFKA_TOPIC: cdrm
+
+  # Serves the UI and proxies /api and /ws to the "backend" service.
+  frontend:
+    image: ghcr.io/juergen-a-reiss/cdrm-frontend:${CDRM_VERSION:-0.1.1}
+    environment:
+      OIDC_AUTHORITY: http://localhost:8180/realms/cdrm
+      OIDC_CLIENT_ID: cdrm
+    ports:
+      - "8081:80"
+
+volumes:
+  postgres-data:

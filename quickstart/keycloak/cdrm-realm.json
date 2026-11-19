@@ -1,0 +1,76 @@
+{
+  "realm": "cdrm",
+  "displayName": "cdrm quickstart",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "roles": {
+    "client": {
+      "cdrm": [
+        { "name": "cdrm-devops", "description": "Full access, including Configuration" },
+        { "name": "cdrm-productowner", "description": "Manages products, promotes and rolls back releases" },
+        { "name": "cdrm-developer", "description": "Manages workloads and releases" },
+        { "name": "cdrm-manager", "description": "Read-only overview" }
+      ]
+    }
+  },
+  "clients": [
+    {
+      "clientId": "cdrm",
+      "name": "cdrm",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://localhost:8081/*"],
+      "webOrigins": ["http://localhost:8081"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:8081"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "devops",
+      "firstName": "Dana",
+      "lastName": "Devops",
+      "email": "devops@cdrm.example",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "cdrm", "temporary": false }],
+      "clientRoles": { "cdrm": ["cdrm-devops"] }
+    },
+    {
+      "username": "productowner",
+      "firstName": "Pat",
+      "lastName": "Owner",
+      "email": "productowner@cdrm.example",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "cdrm", "temporary": false }],
+      "clientRoles": { "cdrm": ["cdrm-productowner"] }
+    },
+    {
+      "username": "developer",
+      "firstName": "Dev",
+      "lastName": "Eloper",
+      "email": "developer@cdrm.example",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "cdrm", "temporary": false }],
+      "clientRoles": { "cdrm": ["cdrm-developer"] }
+    },
+    {
+      "username": "manager",
+      "firstName": "Max",
+      "lastName": "Manager",
+      "email": "manager@cdrm.example",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "cdrm", "temporary": false }],
+      "clientRoles": { "cdrm": ["cdrm-manager"] }
+    }
+  ]
+}
